@@ -21,3 +21,4 @@ test-results/
 *.db-shm
 .DS_Store
 tests/evals/reports/
+docs/plans/overhaul/
