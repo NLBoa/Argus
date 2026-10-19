@@ -214,15 +214,18 @@ def discover(
             return (await Fetcher(client).get(url)).body
 
     try:
-        courses = dv.feed_courses(asyncio.run(fetch(secrets.canvas_ical_url.get_secret_value())))
+        listed = dv.feed_courses(asyncio.run(fetch(secrets.canvas_ical_url.get_secret_value())))
     except (AuthError, FetchError, ValueError) as e:
         note(f"discover: couldn't read the ELMS feed: {e}")
         raise typer.Exit(1) from e
-    if not courses:
+    if not listed:
         note("discover: the ELMS feed lists no courses yet (nothing due in the next year?)")
         raise typer.Exit(1)
+    courses, finished = dv.current_term(listed)
     codes = list(courses)
     note(f"ELMS feed: {', '.join(codes)}")
+    if finished:
+        note(f"Left out (earlier terms): {', '.join(finished)}")
 
     gs_ids: dict[str, str] = {}
     if secrets.gradescope_email and secrets.gradescope_password:
@@ -232,7 +235,7 @@ def discover(
             gs_ids, extra = dv.pick(codes, gs.courses())
             note(
                 f"Gradescope: {', '.join(gs_ids) or 'none of these'}"
-                + (f" (also listed: {', '.join(extra)})" if extra else "")
+                + (f" (not followed: {', '.join(extra)})" if extra else "")
             )
         except Exception as e:  # the unofficial library can fail in many ways; discovery goes on
             note(f"Gradescope: skipped ({type(e).__name__}: {e})")
@@ -244,14 +247,14 @@ def discover(
             pz_ids, extra = dv.pick(codes, pz.classes())
             note(
                 f"Piazza: {', '.join(pz_ids) or 'none of these'}"
-                + (f" (also listed: {', '.join(extra)})" if extra else "")
+                + (f" (not followed: {', '.join(extra)})" if extra else "")
             )
         except Exception as e:  # as above
             note(f"Piazza: skipped ({type(e).__name__}: {e})")
 
     found = [
         dv.Found(code, section, canvas_id, gs_ids.get(code), pz_ids.get(code))
-        for code, (section, canvas_id) in courses.items()
+        for code, (section, canvas_id, _) in courses.items()
     ]
     block = dv.render_courses(found)
     if full:

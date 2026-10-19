@@ -15,7 +15,8 @@ from dataclasses import dataclass
 
 from icalendar import Calendar
 
-_TAG = re.compile(r"\[([A-Z]{4})\s?(\d{3}[A-Z]?)(?:-(\d{4}))?")
+_TAG = re.compile(r"\[([A-Z]{4})\s?(\d{3}[A-Z]?)(?:-(\d{4}))?([^\]]*)")
+_TERM = re.compile(r"(winter|spring|summer|fall)\s?(20\d\d)", re.IGNORECASE)
 _COURSE_ID = re.compile(r"(?:include_contexts=course_|/courses/)(\d+)")
 _CODE = re.compile(r"\b([A-Za-z]{4})\s?-?(\d{3}[A-Za-z]?)\b")
 ACCENTS = ("indigo", "teal", "plum", "ochre", "rose", "sky", "olive", "slate")
@@ -30,10 +31,14 @@ class Found:
     piazza_network_id: str | None
 
 
-def feed_courses(body: bytes) -> dict[str, tuple[str | None, int | None]]:
-    """code -> (section, canvas id), by the most common value seen across the feed."""
+FeedCourse = tuple[str | None, int | None, str | None]
+
+
+def feed_courses(body: bytes) -> dict[str, FeedCourse]:
+    """code -> (section, canvas id, term like "Fall 2026"), by the most common value seen."""
     sections: dict[str, Counter[str]] = {}
     ids: dict[str, Counter[int]] = {}
+    terms: dict[str, Counter[str]] = {}
     for ev in Calendar.from_ical(body).walk("VEVENT"):
         tag = _TAG.search(str(ev.get("SUMMARY", "")))
         if tag is None:
@@ -41,6 +46,9 @@ def feed_courses(body: bytes) -> dict[str, tuple[str | None, int | None]]:
         code = (tag.group(1) + tag.group(2)).upper()
         sections.setdefault(code, Counter())
         ids.setdefault(code, Counter())
+        terms.setdefault(code, Counter())
+        if (t := _TERM.search(tag.group(4))) is not None:
+            terms[code][f"{t.group(1).capitalize()} {t.group(2)}"] += 1
         if tag.group(3):
             sections[code][tag.group(3)] += 1
         if (m := _COURSE_ID.search(str(ev.get("URL", "")))) is not None:
@@ -49,9 +57,23 @@ def feed_courses(body: bytes) -> dict[str, tuple[str | None, int | None]]:
         code: (
             sections[code].most_common(1)[0][0] if sections[code] else None,
             ids[code].most_common(1)[0][0] if ids[code] else None,
+            terms[code].most_common(1)[0][0] if terms[code] else None,
         )
         for code in sorted(sections)
     }
+
+
+def current_term(
+    courses: dict[str, FeedCourse],
+) -> tuple[dict[str, FeedCourse], list[str]]:
+    """Only the latest term's courses: the feed still carries finished ones. Returns those
+    and the ones left out ("MATH140 (Spring 2026)"). A course whose tag has no term stays."""
+    ranks = [term_rank(t) for _, _, t in courses.values() if t]
+    if not ranks:
+        return courses, []
+    latest = max(ranks)
+    kept = {c: v for c, v in courses.items() if v[2] is None or term_rank(v[2]) == latest}
+    return kept, [f"{c} ({v[2]})" for c, v in courses.items() if c not in kept]
 
 
 def match_code(name: str) -> str | None:

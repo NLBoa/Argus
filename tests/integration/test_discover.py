@@ -69,12 +69,14 @@ def test_discover_builds_a_working_config(config_path: Path, tmp_path: Path) -> 
     result = runner.invoke(cli.app, ["discover", "-c", str(config_path), "--config"])
     assert result.exit_code == 0, result.output
     assert "ELMS feed: CMSC216, CMSC250, ENGL101" in result.stderr
-    assert "Gradescope: CMSC216 (also listed: MATH141)" in result.stderr
+    assert "Left out (earlier terms): MATH140 (Spring 2026)" in result.stderr
+    assert "Gradescope: CMSC216 (not followed: MATH141)" in result.stderr
     assert "Piazza: CMSC216, CMSC250" in result.stderr
     out = tmp_path / "new.yaml"
     out.write_text(result.stdout)
     cfg = load_config(out)  # what it prints is a valid config
     by_code = {c.code: c for c in cfg.courses}
+    assert set(by_code) == {"CMSC216", "CMSC250", "ENGL101"}  # not last term's MATH140
     assert (
         by_code["CMSC216"].gradescope_id == "901"
         and by_code["CMSC216"].piazza_network_id == "pz216"

@@ -1,6 +1,13 @@
 """Course discovery: codes, sections, and ids from the feed and the student's own class lists."""
 
-from argus.discover import Found, feed_courses, match_code, render_courses, replace_courses
+from argus.discover import (
+    Found,
+    current_term,
+    feed_courses,
+    match_code,
+    render_courses,
+    replace_courses,
+)
 
 FEED = b"""BEGIN:VCALENDAR
 VERSION:2.0
@@ -28,6 +35,12 @@ DTSTART:20261023T035900Z
 SUMMARY:Essay [ENGL 101 Fall 2026]
 URL;VALUE=URI:https://umd.instructure.com/courses/3333333/assignments/4
 END:VEVENT
+BEGIN:VEVENT
+UID:event-assignment-5
+DTSTART:20260512T035900Z
+SUMMARY:Final project [MATH140-0301-Spring2026]
+URL;VALUE=URI:https://umd.instructure.com/courses/4444444/assignments/5
+END:VEVENT
 END:VCALENDAR
 """
 
@@ -35,11 +48,22 @@ END:VCALENDAR
 def test_feed_courses_finds_code_section_and_canvas_id() -> None:
     found = feed_courses(FEED)
     assert found == {
-        "CMSC216": ("0101", 1111111),
-        "CMSC250": ("0201", 2222222),
-        "ENGL101": (None, 3333333),
+        "CMSC216": ("0101", 1111111, "Fall 2026"),
+        "CMSC250": ("0201", 2222222, "Fall 2026"),
+        "ENGL101": (None, 3333333, "Fall 2026"),
+        "MATH140": ("0301", 4444444, "Spring 2026"),
     }
     assert feed_courses(b"BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR\n") == {}
+
+
+def test_current_term_leaves_out_finished_courses() -> None:
+    kept, left_out = current_term(feed_courses(FEED))
+    assert list(kept) == ["CMSC216", "CMSC250", "ENGL101"]
+    assert left_out == ["MATH140 (Spring 2026)"]
+    # A tag without a term can't be judged, so it stays (a missed deadline costs more).
+    courses = {"CMSC216": ("0101", 1, "Fall 2026"), "HONR100": (None, 2, None)}
+    assert current_term(courses) == (courses, [])
+    assert current_term({}) == ({}, [])
 
 
 def test_match_code_reads_names_people_use() -> None:

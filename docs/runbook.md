@@ -38,7 +38,9 @@ and credentials). For example: `sudo argus-admin check-config`.
    Re-running it is safe: it never overwrites your config or credentials.
 4. **Find your courses (Pi).** Add the credentials first (below). Then run `sudo argus-admin discover`.
    It reads your ELMS feed and your Gradescope and Piazza class lists, and prints a `courses:` block with codes,
-   sections, and ids. `sudo argus-admin discover --config > /tmp/argus-config.yaml` prints the whole config with
+   sections, and ids. Only the latest term's courses are kept: finished ones are named on a "Left out" line, and
+   classes from other terms on Gradescope or Piazza on a "not followed" line. Argus follows only the courses in
+   the config. `sudo argus-admin discover --config > /tmp/argus-config.yaml` prints the whole config with
    that block in place; review it, then install it with `sudo install -o root -g argus -m 640 /tmp/argus-config.yaml
    /etc/argus/config.yaml`.
 5. **Configure (Pi).** Edit `/etc/argus/config.yaml`: courses (code, section, `canvas_id`, `gradescope_id`, `piazza_network_id`),
