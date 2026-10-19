@@ -1,0 +1,47 @@
+# Argus configuration. Copy to config.yaml and edit. Contains NO secrets:
+# credentials go in environment variables (see .env.example) or systemd credentials.
+
+courses:
+  # code: UMD course code; section: 4-digit section (umd.io looks up meetings by these).
+  # canvas_id: numeric id from the ELMS course URL (umd.instructure.com/courses/<id>).
+  # gradescope_id: id from the Gradescope course URL (gradescope.com/courses/<id>).
+  # piazza_network_id: id from the Piazza URL (piazza.com/class/<id>); omit if unused.
+  - code: CMSC351
+    section: "0101"
+    canvas_id: 1234567
+    gradescope_id: "765432"
+    piazza_network_id: "abc123xyz"
+    accent: indigo
+    difficulty_note: "Proof-heavy problem sets; budget extra time for writing up."
+  - code: MATH240
+    section: "0201"
+    canvas_id: 1234568
+
+schedule:
+  # All times are local (America/New_York). Windows ending before they start wrap midnight.
+  waking_window: { start: "08:00", end: "23:00" }
+  quiet_hours: { start: "23:00", end: "08:00" }
+  walking_buffer_minutes: 15
+  morning_brief: "07:30"
+  max_session_minutes: 120
+  commitments:
+    - { title: "Dining hall shift", days: [Tue, Thu], start: "17:00", end: "20:00" }
+
+notifications:
+  daily_text_cap: 6          # at-risk and 3-hour warnings are not counted
+  ntfy_server: "https://ntfy.sh"
+
+ai:
+  models:
+    fast: claude-haiku-5-5     # extraction
+    standard: claude-sonnet-5-5  # estimates, study-note generation
+    strong: claude-opus-5-5    # verification
+  monthly_budget_usd: 10.0
+
+canvas:
+  base_url: "https://umd.instructure.com"
+
+paths:
+  data_dir: var              # SQLite DB, caches
+  vault_dir: var/vault       # git clone of the Obsidian vault
+  backup_dir: var/backups

@@ -1,0 +1,13 @@
+# gitleaks config: default rules plus Argus-specific ones.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "canvas-ical-feed"
+description = "Canvas calendar feed URL (the URL itself is a credential)"
+regex = '''instructure\.com/feeds/calendars/user_[A-Za-z0-9]{20,}'''
+
+[[rules]]
+id = "twilio-auth-token-assignment"
+description = "Twilio auth token in an env-style assignment"
+regex = '''ARGUS_TWILIO_AUTH_TOKEN=[0-9a-f]{32}'''
