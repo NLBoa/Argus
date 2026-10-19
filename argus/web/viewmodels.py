@@ -73,6 +73,11 @@ class EstimateView:
     is_override: bool = False
 
 
+# "Did you submit?" asks for this long after the deadline; after that the item is only
+# labelled "Not marked done" where it is still listed (the course page). D056.
+UNCONFIRMED_ASK_FOR = timedelta(days=7)
+
+
 @dataclass(frozen=True, slots=True)
 class ItemView:
     id: int
@@ -91,6 +96,7 @@ class ItemView:
     conflict: tuple[str, ...]  # "Canvas: Thu 11:59 pm"
     estimate: EstimateView | None = None
     running: bool = False
+    risk_label: str | None = None  # overrides risk.label ("Not marked done", D056)
 
     @property
     def done(self) -> bool:
@@ -98,7 +104,12 @@ class ItemView:
 
     @property
     def actionable(self) -> bool:
-        return self.status.is_open and self.kind.takes_submission
+        """Work can still be started on it (not done, not past a deadline it can't confirm)."""
+        return (
+            self.status.is_open
+            and self.kind.takes_submission
+            and self.risk is not RiskLevel.UNCONFIRMED
+        )
 
 
 def _sources(item: Item) -> tuple[SourceLabel, ...]:
@@ -123,7 +134,14 @@ def item_view(
         f"{SOURCE_LABELS.get(src, src.value)}: {due_text(when, now)}"
         for src, when in item.date_conflict
     )
+    level = risk if risk is not None else assess(item, now)
+    stale = (
+        level is RiskLevel.UNCONFIRMED
+        and item.due_at is not None
+        and now - item.due_at > UNCONFIRMED_ASK_FOR
+    )
     return ItemView(
+        risk_label="Not marked done" if stale else None,
         id=item.id,
         title=item.title,
         course=course_view(courses, item.course_code),
@@ -131,7 +149,7 @@ def item_view(
         kind_label=KIND_LABELS[item.kind],
         status=item.status,
         status_label=STATUS_LABELS[item.status],
-        risk=risk if risk is not None else assess(item, now),
+        risk=level,
         due_at=item.due_at,
         due_text=due_text(item.due_at, now) if item.due_at else None,
         due_relative=relative(item.due_at, now) if item.due_at else None,

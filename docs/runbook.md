@@ -217,6 +217,18 @@ The kiosk page shifts its content slowly to protect the screen from burn-in.
 
 Run `make deploy PI_HOST=argus-pi` from an up-to-date clone. Migrations run automatically.
 
+### Deploy checklist (every overhaul phase)
+
+1. On the Pi, take a snapshot first: `sudo argus-admin backup`.
+2. Check the config the new code will read: `sudo argus-admin check-config`. Fix anything it reports
+   before deploying (an invalid `config.yaml` stops the services).
+3. Read the phase's own notes in `docs/plans/overhaul.md` (for example, Phase 2 needs
+   `schedule.work_windows` in `/etc/argus/config.yaml` before deploying).
+4. From the laptop: `make deploy PI_HOST=argus-pi`. The services migrate on start.
+5. `make logs PI_HOST=argus-pi` for a few minutes, then the phase's hand checks.
+
+If something is wrong, `sudo argus-admin restore <snapshot> --yes` puts the database back (see Backups and restore).
+
 ## Logs and common failures
 
 `make logs PI_HOST=argus-pi` tails every unit. Or on the Pi: `journalctl -u argus-worker -f`. Logs are JSON and redact

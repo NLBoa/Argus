@@ -150,6 +150,7 @@ Snippets use control-character sentinels, are HTML-escaped, and only then get `<
 The command palette, which also lists items and courses, stays on ⌘K/Ctrl+K.
 
 ## D025 — Tier 2 is hidden, not empty, without a token (2026-10-18)
+*Extended app-wide by D054 and D055.*
 **Decision.** Without `ARGUS_CANVAS_TOKEN`, the Course view omits the grade and modules sections entirely, and nothing
 mentions them. Health lists "ELMS (API)" and "ELMS modules" as not set up, with the one-line fix. Search still
 covers items (iCal descriptions) and posts. Both configurations are tested (`test_web_course.py`).
@@ -359,3 +360,53 @@ All 16 findings in [review.md](review.md) are fixed and tested. Where the fix is
   - R14: the webhook reads only URL-encoded bodies of 16 KB or less, before parsing.
   - R15: browsers without HTMX get an error page with the same status code.
 - **Also.** An unexpected error inside an SMS command is answered and recorded, so Twilio's retry never reruns it.
+
+## D054 — One capabilities object (2026-10-19)
+**Context.** "Is this source set up?" was answered in scattered places (`data.tier2`, `ai_on`, per-template copy),
+and only the course page hid anything.
+**Decision.** `argus/capabilities.py` derives a frozen `Capabilities` from `config.yaml` and the secrets, using each
+collector's own `enabled()`, so it cannot drift from what the sync runner does. Features are named by what the
+student sees. The matrix (pinned by `tests/unit/test_capabilities.py`):
+
+| Feature | Needs any one of |
+|---|---|
+| calendar | canvas_ical |
+| schedule | umdio |
+| modules, grade, syllabus | canvas_modules (and, per course, a `canvas_id`) |
+| canvas_announcements | canvas_api |
+| gradescope | gradescope |
+| piazza | piazza, piazza_email |
+| staff_posts (the Announcements page) | canvas_api, piazza, piazza_email |
+| submission_tracking | canvas_api, gradescope |
+| ai | an Anthropic key (or an injected transport in tests and the demo) |
+| study_generation | canvas_modules and ai |
+
+Per-course flags add the course's own id, so a token does nothing for a course without a `canvas_id`. The AI budget
+is applied at request time (`with_budget`) and hides only buttons that make new calls (Re-run AI estimate), never
+content already produced. One object is built per process (web app, webhook, worker) and passed to the web views,
+templates (`caps`), the vault builder, the reminder engine, and the SMS inbox. The demo has two profiles
+(`argus serve --demo [--no-canvas-token]`); every page is tested in both.
+
+## D055 — Hidden, not empty, app-wide (2026-10-19)
+**Decision.** A feature whose source is not set up is left out everywhere: no section, no empty box, no nav entry, no
+palette command, no copy that names the source. Capability-dependent markup carries `data-requires="<feature>"`;
+`tests/integration/test_capabilities_web.py` checks every page in four setups (full, no token, token removed after a
+sync, no staff-post source) for markers of features that setup lacks. Stored data from a source that is no longer set
+up is not shown either (a token removed after a sync leaves modules, a grade, and ELMS announcements in the database);
+the vault stops updating module notes but never deletes them. The only mention is on Health ("not set up" with the
+one-line fix), including a note on reminder rules that cannot fire (the announcement rule needs staff posts and AI).
+Without staff posts, `/announcements` redirects to Today and SMS HELP leaves out OK/NO. Without study notes, the vault
+writes no flashcards note, concept map, or inbox README, and the exam note's study regions stay empty (the markers
+remain, so they fill in if study notes arrive later).
+
+## D056 — No MISSED without a submission source (2026-10-19)
+**Context.** The calendar feed never says whether work was submitted. Without the ELMS API or Gradescope, every
+iCal-only assignment became MISSED at its deadline, was shown as Overdue, and its 3-hour warning said "Not submitted
+yet" even when it had been.
+**Decision.** An item is *tracked* if a present source record comes from an enabled source that reports submissions
+(`SUBMISSION_SOURCES`: canvas_api, gradescope). `refresh_statuses` takes that set as a parameter, so the store stays
+config-free; the sync runner computes it from the collectors it actually runs. An untracked item past its (late-aware)
+deadline stays open: `RiskLevel.UNCONFIRMED`, "Did you submit?" on Today with Mark done (no Start) for 7 days, then
+"Not marked done" where it is still listed (the course page). It is never OVERDUE. The 24-hour and 3-hour warnings keep
+their timing, keys, and guards; only the 3-hour body changes for untracked items ("Reply DONE 1 once submitted"). The
+deadline golden (`tests/integration/test_deadline_golden.py`) proves the timing did not move.

@@ -4,7 +4,7 @@
 {% set v = data.view %}
 <div class="page-head" data-accent="{{ v.course.accent }}">
   <h1 class="page-title">{{ v.title }}</h1>
-  <p class="page-sub flex flex-wrap items-center gap-2">{{ course_chip(v.course, "/courses/" ~ v.course.code) }} {{ v.kind_label }}{% if v.due_text %}, due {{ v.due_text }} ({{ v.due_relative }}){% endif %}{% if v.risk.slug != "ok" and not v.done %} {{ risk_badge(v.risk) }}{% endif %}</p>
+  <p class="page-sub flex flex-wrap items-center gap-2">{{ course_chip(v.course, "/courses/" ~ v.course.code) }} {{ v.kind_label }}{% if v.due_text %}, due {{ v.due_text }} ({{ v.due_relative }}){% endif %}{% if v.risk.slug != "ok" and not v.done %} {{ risk_badge(v.risk, v.risk_label) }}{% endif %}</p>
 </div>
 
 <div class="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
@@ -45,10 +45,12 @@
           </label>
           <button class="btn btn-primary" type="submit">Use my estimate</button>
         </form>
+        {% if caps.ai_calls_left or (data.estimate and data.estimate.overridden) %}
         <div class="flex flex-wrap gap-2">
           {% if caps.ai_calls_left %}<form method="post" action="/items/{{ v.id }}/estimate/rerun" data-requires="ai"><button class="btn" type="submit">{{ icon("refresh-cw", "icon-sm") }}Re-run AI estimate</button></form>{% endif %}
           {% if data.estimate and data.estimate.overridden %}<form method="post" action="/items/{{ v.id }}/estimate/clear"><button class="btn btn-quiet" type="submit">Remove my estimate</button></form>{% endif %}
         </div>
+        {% endif %}
       </div>
     </section>
 

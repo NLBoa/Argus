@@ -125,6 +125,13 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             courses,
         ),
         item_view(it(8, "Course survey", "ENGL393", None), now, courses),
+        # D056: no source reports submissions for it, so Argus asks instead of saying "overdue".
+        item_view(
+            it(9, "Peer review", "ENGL393", timedelta(hours=-5)),
+            now,
+            courses,
+            risk=RiskLevel.UNCONFIRMED,
+        ),
     ]
     lecture = MeetingRecord(
         "CMSC351", "lecture", tuple(Weekday), time(9, 30), time(10, 45), "IRB", "1101"

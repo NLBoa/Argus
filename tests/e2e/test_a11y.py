@@ -1,10 +1,12 @@
 """WCAG 2.2 AA: zero axe violations on every page, both themes, every viewport it ships at."""
 
+from collections.abc import Callable
+
 import pytest
 from axe_playwright_python.sync_playwright import Axe
 from playwright.sync_api import Page
 
-from tests.e2e.pages import PAGES, VIEWPORTS
+from tests.e2e.pages import VIEWPORTS, case_id, cases
 
 pytestmark = [pytest.mark.e2e, pytest.mark.a11y]
 
@@ -14,21 +16,29 @@ AXE_OPTIONS = {
         "values": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"],
     }
 }
-CASES = [(name, path, vp) for name, path, vps in PAGES for vp in vps]
+CASES = cases()
 
 
-@pytest.mark.parametrize(("name", "path", "viewport"), CASES, ids=[f"{n}-{v}" for n, _, v in CASES])
+@pytest.mark.parametrize(
+    ("name", "path", "viewport", "profile"), CASES, ids=[case_id(n, v, p) for n, _, v, p in CASES]
+)
 def test_no_axe_violations(
-    page: Page, base_url: str, theme: str, name: str, path: str, viewport: str
+    page: Page,
+    server_url: Callable[[str], str],
+    theme: str,
+    name: str,
+    path: str,
+    viewport: str,
+    profile: str,
 ) -> None:
     w, h = VIEWPORTS[viewport]
     page.set_viewport_size({"width": w, "height": h})
     page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
-    page.goto(base_url + path)
+    page.goto(server_url(profile) + path)
     page.wait_for_load_state("load" if name == "kiosk" else "networkidle")
     results = Axe().run(page, options=AXE_OPTIONS)
     assert results.violations_count == 0, (
-        f"{name} ({theme}, {viewport}):\n{results.generate_report()}"
+        f"{name} ({theme}, {viewport}, {profile}):\n{results.generate_report()}"
     )
 
 

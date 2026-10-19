@@ -24,6 +24,7 @@ from argus.vault.service import item_note_path
 from argus.web.format import clock_time, day_label, due_text, hours, long_date, relative
 from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
+    UNCONFIRMED_ASK_FOR,
     CourseView,
     DayGroup,
     EstimateView,
@@ -44,7 +45,6 @@ from argus.web.viewmodels import (
 )
 
 PAST_DUE_WINDOW = timedelta(days=3)
-CONFIRM_WINDOW = timedelta(days=7)  # "Did you submit?" stays on Today this long (D056)
 
 
 def source_statuses(
@@ -137,7 +137,9 @@ def load_today(
     unconfirmed = [
         v
         for v in views
-        if v.risk is RiskLevel.UNCONFIRMED and v.due_at and now - CONFIRM_WINDOW <= v.due_at < now
+        if v.risk is RiskLevel.UNCONFIRMED
+        and v.due_at
+        and now - UNCONFIRMED_ASK_FOR <= v.due_at < now
     ]
     overdue = [
         v

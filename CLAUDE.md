@@ -20,7 +20,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 |---|---|
 | First-time setup (deps, Chromium, Tailwind CLI, hooks) | `make setup` (needs `uv`, `gitleaks`) |
 | Run dashboard locally with reload | `make dev` → http://127.0.0.1:8000 |
-| Preview with synthetic data (no credentials) | `uv run argus serve --demo` |
+| Preview with synthetic data (no credentials) | `uv run argus serve --demo` (add `--no-canvas-token` for the setup without a token) |
 | Always-on loop (sync + reminders) / test a push | `uv run argus worker` / `uv run argus notify-test` |
 | Build CSS (minified) / watch | `make css` / `make css-watch` |
 | Lint + format check / auto-fix | `make lint` / `make fmt` |
@@ -38,6 +38,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 ## Architecture map
 - `argus/clock.py`: the only wall-clock reader. `Clock`, `SystemClock`, `FakeClock`, local-time helpers.
 - `argus/config.py`: `AppConfig` (YAML, no secrets) and `Secrets` (env / `$CREDENTIALS_DIRECTORY`).
+- `argus/capabilities.py`: which features exist for the configured sources (D054), from each collector's `enabled()`.
+  One object per process, passed to views (`caps` in templates), the vault, reminders, and SMS.
 - `argus/logging.py`: JSON logs and the redactor. Call `configure_logging(secrets=…)` at every entry point.
 - `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
@@ -89,6 +91,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 
 ## Source quirks
 - Canvas iCal times are UTC.
+- The Canvas iCal feed never says whether work was submitted. Without the ELMS API or Gradescope, Argus cannot tell
+  submitted from missed, so such items are never MISSED (D056).
 - Canvas API pagination uses `Link` headers (`rel="next"`). Follow them; do not compute pages.
 - Canvas omits module `items` for large modules and gives `items_url`, which is also Link-paginated. Announcements
   need `context_codes[]` per course. Only staff can post them.
@@ -134,10 +138,15 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   with a manual toggle.
 - Components are Jinja macros in `argus/web/components/`. Each appears in every state on `/styleguide`.
 - Every view handles **loading, empty, error, stale** ("Gradescope last synced 3h ago") and **offline**.
+- **Hidden, not empty** (D055): a feature whose source isn't set up renders nothing (no section, nav entry, or copy
+  naming the source); only Health says "not set up". Gate on `caps.has(...)` / `caps.course(code)` and mark the
+  element `data-requires="<feature>"` so `test_capabilities_web.py` can check it. Stored data from a source that is no
+  longer set up is not shown either.
 - WCAG 2.2 AA: zero axe violations in both themes, visible focus rings, a full keyboard path, a reduced-motion
   variant for every animation, and targets of at least 24×24px. Nothing loads from a CDN (the Pi may be offline).
 - Budgets: under 150 KB gzipped JS+CSS per page, median server time under 150 ms, no layout shift on HTMX swaps.
-- Add every new page to `tests/e2e/pages.py`, so it gets axe and visual coverage automatically.
+- Add every new page to `tests/e2e/pages.py`, so it gets axe and visual coverage automatically, in both demo profiles
+  (`cases()`: full and `notoken`; no-token baselines end in `-notoken`).
 - Every state-changing route works with and without JS: HTMX gets a fragment plus an `HX-Trigger` toast; a plain
   form gets a 303 back. Cross-origin POSTs are refused (D016). Design reference: `docs/design.md`.
 
@@ -154,8 +163,11 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - Evals: `tests/evals/` (datasets plus a pure scorer, which is unit-tested in CI). `make evals` needs `ARGUS_ANTHROPIC_API_KEY`
   and writes JSON reports to `tests/evals/reports/` (git-ignored).
 - Write domain logic tests first: merge, planner, reminders, vault edit rules, finding application.
+- **Deadline golden** (`tests/integration/test_deadline_golden.py`): the simulated week's 24-hour and 3-hour sends
+  must match `tests/fixtures/sim/deadline_alerts.json` exactly. Re-record (`ARGUS_UPDATE_GOLDEN=1`) only for a
+  deliberate, reviewed change to deadline rules.
 - **Coverage floors** (`scripts/coverage_floors.py`): 95% line+branch per file in `domain/`,
-  `planner/`, `reminders/`, `vault/ownership.py`, `vault/regions.py`; 85% overall.
+  `planner/`, `reminders/`, `capabilities.py`, `vault/ownership.py`, `vault/regions.py`; 85% overall.
 
 ## Definition of done
 1. Tests written first for domain logic. New behavior has tests at the right layer.
