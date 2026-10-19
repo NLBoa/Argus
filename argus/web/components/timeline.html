@@ -12,7 +12,7 @@
       {% for b in tl.blocks %}
       <div class="rail-block rail-block--{{ b.kind }}" {% if b.accent %}data-accent="{{ b.accent }}"{% endif %} style="top: {{ b.top_pct }}%; height: {{ b.height_pct }}%">
         <span class="rail-block__title">{{ b.title }}</span>
-        <span class="rail-block__sub tnum">{{ b.start_text }} to {{ b.end_text }}{% if b.subtitle %}, {{ b.subtitle }}{% endif %}</span>
+        {% if not b.short %}<span class="rail-block__sub tnum">{{ b.start_text }} to {{ b.end_text }}{% if b.subtitle %}, {{ b.subtitle }}{% endif %}</span>{% endif %}
       </div>
       {% endfor %}
       {% for m in tl.due_marks %}

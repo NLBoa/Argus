@@ -9,11 +9,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
+from argus import announcements, estimates
+from argus.domain.models import Item
+from argus.planning import replan
 from argus.reminders.rules import Rule
 from argus.store import repo
 from argus.store.db import connect, transaction
+from argus.web.data import finding_view
 from argus.web.deps import AppState, Runner, get_conn, get_state
-from argus.web.routes.common import back, is_htmx, log, templates, toast
+from argus.web.routes.common import ai_client, back, is_htmx, log, templates, toast
 from argus.web.viewmodels import course_views, item_view
 
 router = APIRouter()
@@ -155,3 +159,94 @@ async def sync_now(request: Request, state: State) -> Response:
     if not is_htmx(request):
         return back(request, "/health")
     return toast(Response(status_code=202), "Sync started. Health updates when it finishes.")
+
+
+# ---------------------------------------------------------------- findings
+
+
+def _finding_card(
+    request: Request, state: AppState, conn: sqlite3.Connection, finding_id: int
+) -> HTMLResponse:
+    f = repo.get_finding(conn, finding_id)
+    if f is None:
+        raise HTTPException(404, "No such finding")
+    view = finding_view(conn, f, course_views(state.config), state.clock.now())
+    macro = templates(request).env.get_template("components/findings.html").module.finding_card  # type: ignore[attr-defined]
+    return HTMLResponse(str(macro(view)))
+
+
+@router.post("/findings/{finding_id}/{decision}")
+def decide_finding(
+    request: Request, state: State, conn: Conn, finding_id: int, decision: str
+) -> Response:
+    if decision not in ("confirm", "dismiss"):
+        raise HTTPException(404, "Unknown decision")
+    try:
+        if decision == "confirm":
+            message = announcements.confirm(conn, finding_id, state.clock.now())
+        else:
+            message = announcements.dismiss(conn, finding_id, state.clock.now())
+    except LookupError as e:
+        if not is_htmx(request):
+            raise HTTPException(409, str(e)) from e
+        return toast(_finding_card(request, state, conn, finding_id), str(e), "error")
+    if not is_htmx(request):
+        return back(request, "/announcements")
+    return toast(_finding_card(request, state, conn, finding_id), message)
+
+
+# ---------------------------------------------------------------- estimates & time
+
+
+def _item_or_404(conn: sqlite3.Connection, item_id: int) -> Item:
+    item = repo.get_item(conn, item_id)
+    if item is None:
+        raise HTTPException(404, "No such item")
+    return item
+
+
+@router.post("/items/{item_id}/estimate")
+def override_estimate(
+    request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[float, Form()]
+) -> Response:
+    item = _item_or_404(conn, item_id)
+    try:
+        estimates.set_override(conn, item, hours, state.clock.now())
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    replan(conn, state.config, state.clock, force=True)
+    return back(request, f"/items/{item_id}")
+
+
+@router.post("/items/{item_id}/estimate/clear")
+def clear_estimate(request: Request, state: State, conn: Conn, item_id: int) -> Response:
+    _item_or_404(conn, item_id)
+    estimates.clear_override(conn, item_id, state.clock.now())
+    replan(conn, state.config, state.clock, force=True)
+    return back(request, f"/items/{item_id}")
+
+
+@router.post("/items/{item_id}/estimate/rerun")
+async def rerun_estimate(request: Request, state: State, conn: Conn, item_id: int) -> Response:
+    item = _item_or_404(conn, item_id)
+    await estimates.estimate_item(
+        conn, ai_client(state, conn), state.config, state.clock, item, force_ai=True
+    )
+    replan(conn, state.config, state.clock, force=True)
+    return back(request, f"/items/{item_id}")
+
+
+@router.post("/items/{item_id}/log")
+def log_hours(
+    request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[float, Form()]
+) -> Response:
+    _item_or_404(conn, item_id)
+    now = state.clock.now()
+    try:
+        with transaction(conn):
+            repo.log_time(conn, item_id, hours, now)
+            repo.refresh_statuses(conn, now)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    replan(conn, state.config, state.clock, force=True)
+    return back(request, f"/items/{item_id}")

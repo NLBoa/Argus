@@ -10,6 +10,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from argus.ai.client import AIClient, build_transport
 from argus.logging import get_logger
 from argus.web.data import configured_sources, notices
 from argus.web.deps import THEME_COOKIE, AppState
@@ -79,3 +80,10 @@ def back(request: Request, fallback: str = "/today") -> RedirectResponse:
         if parts.netloc == request.headers.get("host") and parts.path.startswith("/"):
             target = parts.path + (f"?{parts.query}" if parts.query else "")
     return RedirectResponse(target, status_code=303)
+
+
+def ai_client(state: AppState, conn: sqlite3.Connection) -> AIClient:
+    transport = state.ai_transport
+    if transport is None and state.secrets.anthropic_api_key is not None:
+        transport = build_transport(state.secrets.anthropic_api_key.get_secret_value())
+    return AIClient(conn, state.config.ai, state.clock, transport)

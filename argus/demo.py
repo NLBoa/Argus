@@ -267,8 +267,15 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
                 conn, nid, ok=True, channel="ntfy", error=None, now=now - timedelta(hours=hours_ago)
             )
         _seed_tier2(conn, ids, now)
+        _seed_findings(conn, ids, now)
+        repo.apply_merge(conn, ids, now)
         repo.refresh_statuses(conn, now)
+        _seed_estimates(conn, now)
         repo.rebuild_search_index(conn)
+    from argus.clock import FakeClock
+    from argus.planning import replan
+
+    replan(conn, DEMO_CONFIG, FakeClock(now), force=True)
 
 
 def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
@@ -372,3 +379,192 @@ def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
         ),
     ]
     repo.upsert_posts(conn, posts, ids, now)
+
+
+def _seed_estimates(conn: sqlite3.Connection, now: datetime) -> None:
+    from argus.estimates import input_hash
+
+    items = {i.title: i for i in repo.list_items(conn)}
+    rows = {
+        "Homework 3": (
+            "ai",
+            3.5,
+            5.0,
+            [
+                ("Review lecture 9 notes", 0.5),
+                ("Write up the three proofs", 2.5),
+                ("Check and typeset", 0.5),
+            ],
+            ["Each proof is similar in length to the homework 2 proofs"],
+            "Three proofs at about 50 minutes each, plus review and typesetting.",
+        ),
+        "Problem Set 6": (
+            "default",
+            3.0,
+            4.5,
+            [],
+            [],
+            "Typical for an assignment; no history yet. (AI estimate unavailable: unavailable.)",
+        ),
+        "Quiz 2": (
+            "ai",
+            1.0,
+            1.5,
+            [("Review the week's slides", 0.5), ("Take the quiz", 0.5)],
+            ["Timed quiz of about 30 minutes"],
+            "A short online quiz plus a quick review.",
+        ),
+        "Homework 4": (
+            "ai",
+            4.0,
+            6.0,
+            [
+                ("Read the dynamic programming notes", 1.0),
+                ("Solve and write up four problems", 3.0),
+            ],
+            ["Four problems of medium difficulty"],
+            "Four problems; dynamic programming tends to take longer the first time.",
+        ),
+        "Problem Set 7": (
+            "ai",
+            2.5,
+            3.5,
+            [("Work the problems", 2.0), ("Check answers", 0.5)],
+            ["About ten short computational problems"],
+            "Short computational problems.",
+        ),
+        "Essay draft: technical description": (
+            "ai",
+            2.5,
+            4.0,
+            [("Outline", 0.5), ("Draft", 1.5), ("Revise", 0.5)],
+            ["About 1,000 words"],
+            "A short draft with one revision pass.",
+        ),
+        "Homework 2": (
+            "ai",
+            2.5,
+            3.5,
+            [("Proofs", 2.5)],
+            ["Similar to homework 1"],
+            "Earlier estimate.",
+        ),
+    }
+    for title, (source, p50, p80, breakdown, assumptions, reasoning) in rows.items():
+        item = items.get(title)
+        if item is None:
+            continue
+        repo.insert_estimate(
+            conn,
+            item_id=item.id,
+            source=source,
+            p50=p50,
+            p80=p80,
+            input_hash=input_hash(item),
+            now=now - timedelta(days=3),
+            confidence="medium" if source == "ai" else "low",
+            breakdown=breakdown,
+            assumptions=assumptions,
+            reasoning=reasoning,
+            model="claude-sonnet-5-5" if source == "ai" else None,
+            prompt_version="estimate.v1" if source == "ai" else None,
+        )
+    essay = items.get("Essay draft: technical description")
+    if essay is not None:
+        repo.insert_estimate(
+            conn,
+            item_id=essay.id,
+            source="user",
+            p50=3.0,
+            p80=3.0,
+            input_hash=input_hash(essay),
+            now=now - timedelta(days=1),
+            reasoning="Set by you.",
+        )
+
+
+def _seed_findings(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
+    posts = [
+        PostRecord(
+            "piazza",
+            "demo:50",
+            Source.PIAZZA,
+            "CMSC351",
+            "Midterm 1 moved",
+            "Because of the career fair, Midterm 1 moves to Thursday, Oct 29, same time and room.",
+            now - timedelta(hours=5),
+            "demo-p50",
+            AuthorRole.INSTRUCTOR,
+            kind="note",
+            url="https://piazza.com/class/demo/post/50",
+            pinned=True,
+        ),
+        PostRecord(
+            "piazza",
+            "demo:51",
+            Source.PIAZZA,
+            "MATH240",
+            "Quiz 4 next Friday",
+            "Quiz 4 will be next Friday in lab, covering eigenvalues.",
+            now - timedelta(days=1),
+            "demo-p51",
+            AuthorRole.INSTRUCTOR,
+            kind="note",
+            url="https://piazza.com/class/demo/post/51",
+        ),
+    ]
+    repo.upsert_posts(conn, posts, ids, now)
+    post_ids = {
+        r["external_id"]: r["id"] for r in conn.execute("SELECT id, external_id FROM posts")
+    }
+    for pid in post_ids.values():
+        repo.mark_scanned(conn, pid)
+    # Leave one staff post unanalyzed to show the no-AI fallback.
+    conn.execute("UPDATE posts SET scanned_hash = NULL WHERE external_id = 'announcement:2'")
+    midterm = next(
+        i for i in repo.list_items(conn) if i.title == "Midterm 1" and i.course_code == "CMSC351"
+    )
+    repo.insert_finding(
+        conn,
+        post_id=post_ids["demo:50"],
+        course_id=ids["CMSC351"],
+        kind="date_change",
+        title="Midterm 1",
+        date=_at(now, 10, 23, 59),
+        date_only=True,
+        scope=None,
+        quote="Midterm 1 moves to Thursday, Oct 29",
+        confidence=0.97,
+        item_id=midterm.id,
+        status="conflict",
+        reason="Disagrees with the official date",
+        now=now - timedelta(hours=5),
+    )
+    fid = repo.insert_finding(
+        conn,
+        post_id=post_ids["demo:51"],
+        course_id=ids["MATH240"],
+        kind="new_assessment",
+        title="Quiz 4",
+        date=_at(now, 11, 23, 59),
+        date_only=True,
+        scope="Eigenvalues",
+        quote="Quiz 4 will be next Friday in lab",
+        confidence=0.95,
+        item_id=None,
+        status="applied",
+        reason="Announced by staff",
+        now=now - timedelta(days=1),
+    )
+    repo.add_finding_source(
+        conn,
+        finding_id=fid,
+        course_id=ids["MATH240"],
+        title="Quiz 4",
+        kind=ItemKind.QUIZ,
+        due_at=_at(now, 11, 23, 59),
+        date_only=True,
+        url="https://piazza.com/class/demo/post/51",
+        item_id=None,
+        now=now - timedelta(days=1),
+    )

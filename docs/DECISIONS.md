@@ -152,3 +152,58 @@ The command palette, which also lists items and courses, stays on ⌘K/Ctrl+K.
 **Decision.** Without `ARGUS_CANVAS_TOKEN`, the Course view omits the grade and modules sections entirely, and nothing
 mentions them. Health lists "ELMS (API)" and "ELMS modules" as not set up, with the one-line fix. Search still
 covers items (iCal descriptions) and posts. Both configurations are tested (`test_web_course.py`).
+
+## D026 — AI calls: our own JSON-schema validation, one retry, then the fallback (2026-10-18)
+**Decision.** `ai/client.py` sends `output_config.format` with a strict JSON schema generated from the
+Pydantic model, with constraints stripped and enforced by Pydantic afterwards. It validates, retries once, and then returns
+`None`. Every caller has a non-AI path: extraction leaves posts "Not analyzed yet" (still shown),
+estimates fall back to the median of actuals or a per-kind default, and the plan note falls back to the plain first fact.
+Refusals and API errors go straight to the fallback. The SDK already retries transient errors.
+For `claude-sonnet-5-5` and `claude-opus-5-5`, requests opt into server-side refusal fallbacks
+(`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). Haiku has none.
+**Rejected.** `messages.parse`, because its error behavior on validation failure is less explicit for our retry rule.
+
+## D027 — Models and effort (2026-10-18)
+Extraction uses `claude-haiku-5-5` at effort `medium` (date resolution needs some care). Estimates use
+`claude-sonnet-5-5` at `medium`. The plan note uses Haiku at `low`. The verifier (Phase 5) uses `claude-opus-5-5`. All are
+configurable in `config.yaml`. Prices for cost accounting live in `ai/budget.py`. Unknown models are charged
+at a conservative rate so spend is never under-counted.
+
+## D028 — Confirming a date change sets a student override (2026-10-18)
+**Context.** The non-negotiable is "official sources beat dates extracted from posts", and dates that change an official date are held.
+**Decision.** The code never applies a post's date over an official one. When the student explicitly confirms
+("Use announced date", or `OK n` in Phase 6), that is the student's decision, stored in `item_overrides`, and it wins.
+A date-only confirmation keeps the official time of day. Dismissing keeps the official date. If Canvas later lists the
+new date, the override and Canvas agree. If the sources' disagreement changes, the conflict reappears.
+
+## D029 — Guards on AI findings (2026-10-18)
+A finding is dropped unless its quote appears in the post (normalized). A date is kept only if the post contains
+a date expression and the date falls in [posted − 7 days, posted + 200 days]. A date-only finding is stored as 23:59 local and
+compared by local day. These guards make "never invent a date" a code property, not just a prompt request.
+
+## D030 — Passed sessions count as progress unless the student logs time (2026-10-18)
+**Context.** The simulated week showed that with progress = time logged only, a student who never logs time got the
+same work re-planned (and re-nudged) every hour, forever.
+**Decision.** If an item has any time logs, they are the truth. Otherwise planned sessions that have already passed
+count as done. The student corrects with `LOG n h` or `EST n h`. Calibration still uses logged actuals only.
+
+## D031 — Plan quality rules (2026-10-18)
+Sessions are 30 to 120 minutes on a 15-minute grid, followed by a 15-minute break. They are trimmed so no remainder under 30 minutes is left over.
+The plan is earliest deadline first, with no daily cap yet. It replans when inputs change or hourly, and blocks that have started are never moved. Items that fit
+alone but are squeezed out by earlier deadlines are shown as Watch. "At risk" stays exactly the spec rule.
+
+## D032 — Reminder titles use local calendar days (2026-10-18)
+The simulated week caught "Due tomorrow" on a reminder deferred past quiet hours for something due that evening.
+Titles now compare local dates, not hours remaining.
+
+## D033 — Eval gates are checked twice (2026-10-18)
+`tests/evals/scoring.py` is pure and unit-tested in CI. Perfect answers pass every gate, and invented dates,
+misses, auto-applied date changes, and wrong days each fail the right gate. So `make evals` (real API, a key needed)
+measures the model, not a buggy scorer. The dataset holds 44 synthetic posts across announcements, relative dates (including ambiguous ones),
+reschedules, cancellations, scope, logistics, multi-finding posts, noise, and student hearsay.
+
+## D034 — Phase 4 eval gate pending an API key (2026-10-18)
+The planner property tests and the simulated-week pipeline test pass in `make check`. The extraction eval gates
+(`make evals`) need `ARGUS_ANTHROPIC_API_KEY`, which has not been provided yet. The harness, datasets, and scorer are
+in place, and CI checks the scorer. Run `make evals` once a key exists and record the numbers in `docs/handoff.md`.
+Prompt tuning (a new prompt version) follows from whatever the first run shows.

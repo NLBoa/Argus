@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from argus.clock import to_local
 from argus.domain.models import Item
 from argus.reminders.text import fit, short, when
 from argus.store.db import iso
@@ -76,6 +77,13 @@ class SourceAlertState:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionRef:
+    item_id: int
+    start: datetime
+    end: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     now: datetime
     items: Sequence[Item]
@@ -83,6 +91,9 @@ class Snapshot:
     sources: Mapping[str, SourceAlertState] | None = None
     # Items created before this belong to the first import and never count as "new".
     bootstrap_until: datetime | None = None
+    at_risk: frozenset[int] = frozenset()  # item ids the planner says are at risk
+    sessions: Sequence[SessionRef] = ()
+    ai_budget_month: str | None = None  # "2026-10" when the AI budget was hit this month
 
 
 def item_key(item: Item, rule: Rule) -> str:
@@ -92,6 +103,11 @@ def item_key(item: Item, rule: Rule) -> str:
 
 def _deadline_candidates(items: Iterable[Item]) -> list[Item]:
     return [i for i in items if i.status.is_open and i.due_at and i.kind.takes_submission]
+
+
+def _day_title(due: datetime, now: datetime) -> str:
+    """By local calendar day, not hours left: a reminder deferred past quiet hours is "Due today"."""
+    return "Due today" if to_local(due).date() == to_local(now).date() else "Due tomorrow"
 
 
 def due_soon(snap: Snapshot) -> list[Reminder]:
@@ -104,7 +120,7 @@ def due_soon(snap: Snapshot) -> list[Reminder]:
                 Reminder(
                     rule=Rule.DUE_24H,
                     keys=(item_key(it, Rule.DUE_24H),),
-                    title="Due tomorrow" if left > timedelta(hours=12) else "Due today",
+                    title=_day_title(it.due_at, snap.now),
                     body=f"[1] {it.course_code} {short(it.title, 70)}, {when(it.due_at)}. "
                     "Reply DONE 1 when submitted.",
                     item_ids=(it.id,),
@@ -206,7 +222,83 @@ def system_alerts(snap: Snapshot) -> list[Reminder]:
     return out
 
 
+NUDGE_WINDOW = timedelta(minutes=10)
+
+
+def at_risk(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for it in _deadline_candidates(snap.items):
+        assert it.due_at is not None
+        key = item_key(it, Rule.AT_RISK)
+        if it.id not in snap.at_risk or key in snap.sent_keys or it.due_at <= snap.now:
+            continue
+        out.append(
+            Reminder(
+                rule=Rule.AT_RISK,
+                keys=(key,),
+                title="At risk",
+                body=f"[1] {it.course_code} {short(it.title, 60)} needs more time than you have free before "
+                f"{when(it.due_at)}. Reply EST 1 h to correct the estimate.",
+                item_ids=(it.id,),
+                priority=4,
+                counts_toward_cap=False,
+                expires_at=it.due_at,
+            )
+        )
+    return out
+
+
+def start_nudges(snap: Snapshot) -> list[Reminder]:
+    items = {i.id: i for i in _deadline_candidates(snap.items)}
+    out = []
+    for s in snap.sessions:
+        it = items.get(s.item_id)
+        if it is None or not s.start <= snap.now < s.start + NUDGE_WINDOW:
+            continue
+        key = f"{it.id}:{Rule.START_NUDGE.value}:{iso(s.start)}"
+        if key in snap.sent_keys:
+            continue
+        out.append(
+            Reminder(
+                rule=Rule.START_NUDGE,
+                keys=(key,),
+                title="Time to start",
+                body=f"[1] {it.course_code} {short(it.title, 60)} until {when(s.end).split(' ', 1)[1]}. "
+                "Reply DONE 1 when submitted.",
+                item_ids=(it.id,),
+                priority=3,
+                expires_at=s.start + NUDGE_WINDOW,
+            )
+        )
+    return out
+
+
+def ai_budget_alert(snap: Snapshot) -> list[Reminder]:
+    if snap.ai_budget_month is None:
+        return []
+    key = f"system:ai_budget:{snap.ai_budget_month}"
+    if key in snap.sent_keys:
+        return []
+    return [
+        Reminder(
+            rule=Rule.SYSTEM_ALERT,
+            keys=(key,),
+            title="AI budget reached",
+            body="Argus is using its non-AI fallbacks until next month. Deadlines and reminders are unaffected.",
+            priority=3,
+        )
+    ]
+
+
 def candidates(snap: Snapshot) -> list[Reminder]:
     """Everything that could be sent now, most urgent first."""
-    found = due_now(snap) + due_soon(snap) + new_items(snap) + system_alerts(snap)
+    found = (
+        due_now(snap)
+        + due_soon(snap)
+        + at_risk(snap)
+        + start_nudges(snap)
+        + new_items(snap)
+        + system_alerts(snap)
+        + ai_budget_alert(snap)
+    )
     return sorted(found, key=lambda r: (-r.priority, r.keys))

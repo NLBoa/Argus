@@ -8,6 +8,7 @@ from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.reminders.rules import (
     Reminder,
     Rule,
+    SessionRef,
     Snapshot,
     SourceAlertState,
     candidates,
@@ -80,7 +81,9 @@ def test_three_hour_warning_bypasses_quiet_and_cap() -> None:
 
 def test_24h_titles_and_expiry() -> None:
     [tomorrow] = due_soon(snap(item(1, timedelta(hours=20))))
-    assert tomorrow.title == "Due tomorrow"
+    assert tomorrow.title == "Due tomorrow"  # Tue 5am local
+    [late_today] = due_soon(snap(item(1, timedelta(hours=14, minutes=59))))
+    assert late_today.title == "Due today"  # Mon 11:59 pm local: same day though 15h away
     assert tomorrow.expires_at == NOW + timedelta(hours=17)
     assert not tomorrow.bypass_quiet
     [today] = due_soon(snap(item(1, timedelta(hours=8))))
@@ -208,3 +211,36 @@ def test_simulated_week_never_duplicates(due_minutes: list[int], step: int) -> N
     for it in items:
         if it.due_at and it.due_at > NOW:
             assert item_key(it, Rule.DUE_3H) in sent
+
+
+# ---------------------------------------------------------------- at risk, start nudges, AI budget
+
+
+def test_at_risk_is_immediate_and_uncapped() -> None:
+    it = item(1, timedelta(days=2))
+    [r] = candidates(snap(it, at_risk=frozenset({1})))
+    assert r.rule == Rule.AT_RISK
+    assert not r.counts_toward_cap and not r.bypass_quiet
+    assert "EST 1" in r.body and len(r.sms) <= SEGMENT
+    assert candidates(snap(it, at_risk=frozenset({1}), sent=set(r.keys))) == []
+    assert candidates(snap(item(1, timedelta(hours=-1)), at_risk=frozenset({1}))) == []
+
+
+def test_start_nudge_fires_in_window_once() -> None:
+    it = item(1, timedelta(days=2))
+    s = SessionRef(1, NOW - timedelta(minutes=3), NOW + timedelta(minutes=87))
+    [r] = candidates(snap(it, sessions=[s]))
+    assert r.rule == Rule.START_NUDGE and r.title == "Time to start"
+    assert "until 10:27am" in r.body
+    assert r.expires_at == s.start + timedelta(minutes=10)
+    assert candidates(snap(it, sessions=[s], sent=set(r.keys))) == []
+    late = SessionRef(1, NOW - timedelta(minutes=11), NOW + timedelta(minutes=60))
+    assert candidates(snap(it, sessions=[late])) == []
+    done = item(1, timedelta(days=2), status=ItemStatus.SUBMITTED)
+    assert candidates(snap(done, sessions=[s])) == []
+
+
+def test_ai_budget_alert_once_per_month() -> None:
+    [r] = candidates(snap(ai_budget_month="2026-10"))
+    assert r.rule == Rule.SYSTEM_ALERT and r.keys == ("system:ai_budget:2026-10",)
+    assert candidates(snap(ai_budget_month="2026-10", sent=set(r.keys))) == []

@@ -12,14 +12,17 @@ import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+from argus.ai.budget import budget_hit_this_month, month_key
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.logging import get_logger
 from argus.notify.channels import OutboundMessage
 from argus.notify.router import Router
 from argus.planner.freetime import meetings_on
+from argus.planner.risk import RiskLevel
+from argus.planning import blocks_between, risk_map
 from argus.reminders.guards import GuardContext, Verdict, check
-from argus.reminders.rules import Reminder, Rule, Snapshot, SourceAlertState, candidates
+from argus.reminders.rules import Reminder, Rule, SessionRef, Snapshot, SourceAlertState, candidates
 from argus.store import repo
 from argus.store.db import transaction
 
@@ -35,6 +38,8 @@ SOURCES = (
     "umdio",
 )
 _TAGS = {
+    Rule.AT_RISK: ("warning",),
+    Rule.START_NUDGE: ("hourglass_flowing_sand",),
     Rule.DUE_3H: ("rotating_light",),
     Rule.DUE_24H: ("alarm_clock",),
     Rule.NEW_ITEM: ("inbox_tray",),
@@ -61,7 +66,18 @@ class ReminderEngine:
     def snapshot(self, now: datetime) -> Snapshot:
         health = repo.source_health(self.conn, SOURCES)
         first = repo.first_success_at(self.conn)
+        risk = risk_map(self.conn, self.config, now)
+        sessions = [
+            SessionRef(b.item_id, b.start, b.end)
+            for b in blocks_between(
+                self.conn, now - timedelta(minutes=15), now + timedelta(minutes=1)
+            )
+            if b.kind == "work" and b.item_id is not None
+        ]
         return Snapshot(
+            at_risk=frozenset(i for i, r in risk.items() if r.level is RiskLevel.AT_RISK),
+            sessions=sessions,
+            ai_budget_month=month_key(now) if budget_hit_this_month(self.conn, now) else None,
             now=now,
             items=repo.list_items(self.conn),
             sent_keys=frozenset(repo.notification_keys(self.conn)),

@@ -47,9 +47,7 @@
 <li class="item-row" id="item-{{ v.id }}" data-accent="{{ v.course.accent }}" data-done="{{ 'true' if v.done else 'false' }}" data-running="{{ 'true' if v.running else 'false' }}" data-nav-item>
   <div class="min-w-0">
     <p class="item-row__title">
-      {%- set primary = (v.sources | selectattr("url") | first) -%}
-      {%- if primary %}<a href="{{ primary.url }}" rel="noopener" target="_blank" data-nav-target>{{ v.title }}<span class="visually-hidden">, {{ v.course.code }}, opens in {{ primary.name }}</span></a>
-      {%- else %}<span tabindex="-1" data-nav-target>{{ v.title }}</span>{% endif %}
+      <a href="/items/{{ v.id }}" data-nav-target>{{ v.title }}<span class="visually-hidden">, {{ v.course.code }}</span></a>
     </p>
     <div class="item-row__meta">
       {{ course_chip(v.course, "/courses/" ~ v.course.code) }}

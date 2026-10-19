@@ -11,7 +11,7 @@
 <section aria-label="Summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
   <div class="panel panel-pad stat"><span class="stat__value">{{ data.texts_today }}<span class="text-muted text-lg"> / {{ data.text_cap }}</span></span><span class="stat__label">Texts sent today</span></div>
   <div class="panel panel-pad stat"><span class="stat__value">{{ data.channel or "None" }}</span><span class="stat__label">{{ "Reminder channel" if data.channel else "No reminder channel set up" }}</span></div>
-  <div class="panel panel-pad stat"><span class="stat__value">{{ data.ai_spend }}</span><span class="stat__label">AI spend this month</span></div>
+  <div class="panel panel-pad stat"><span class="stat__value">{{ data.ai_spend }}</span><span class="stat__label">AI spend this month{% if not ai_on %} (AI not set up){% endif %}</span></div>
   <div class="panel panel-pad stat"><span class="stat__value">{{ data.last_sync or "Never" }}</span><span class="stat__label">Last successful sync</span></div>
 </section>
 

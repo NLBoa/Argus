@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from argus.clock import to_local
 from argus.domain.models import ResolvedItem, Source, SourceItem, SourceKey
 from argus.domain.titles import normalize_title
 
@@ -170,6 +171,14 @@ def _tri_state(values: Iterable[bool | None]) -> bool | None:
     return False if vals else None
 
 
+def _differs(r: SourceItem, due_at: datetime) -> bool:
+    """A date-only record (e.g. "the quiz is Friday") agrees with any time on that local day."""
+    assert r.due_at is not None
+    if r.all_day and not r.source.is_official:
+        return to_local(r.due_at).date() != to_local(due_at).date()
+    return abs(r.due_at - due_at) > CONFLICT_TOLERANCE
+
+
 def resolve_item(records: Sequence[SourceItem]) -> ResolvedItem:
     """Derive an item's fields from its source records.
 
@@ -195,7 +204,7 @@ def resolve_item(records: Sequence[SourceItem]) -> ResolvedItem:
 
     conflict: tuple[tuple[Source, datetime], ...] = ()
     if due_at is not None:
-        disagree = [r for r in dated if r.due_at and abs(r.due_at - due_at) > CONFLICT_TOLERANCE]
+        disagree = [r for r in dated if r.due_at and _differs(r, due_at)]
         if disagree:
             conflict = tuple(
                 sorted({(r.source, r.due_at) for r in dated if r.due_at}, key=lambda p: p[1])

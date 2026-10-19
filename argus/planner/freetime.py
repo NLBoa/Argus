@@ -1,16 +1,15 @@
-"""Busy time on a given local day: class meetings and fixed commitments, as UTC intervals.
-
-Phase 4 extends this with walking buffers and free-time computation.
+"""Busy and free time. Busy: class meetings and fixed commitments on a local day.
+Free: waking hours minus quiet hours, busy time, and walking buffers around classes.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from argus.clock import local_datetime
-from argus.config import Commitment
+from argus.clock import local_datetime, to_local
+from argus.config import Commitment, TimeWindow
 from argus.domain.models import MeetingRecord
 
 _DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -61,3 +60,92 @@ def busy_on(
                 )
             )
     return sorted(out, key=lambda b: (b.start, b.title))
+
+
+# ---------------------------------------------------------------- free time
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class Interval:
+    start: datetime
+    end: datetime
+
+    @property
+    def hours(self) -> float:
+        return (self.end - self.start).total_seconds() / 3600
+
+
+def merge(intervals: Iterable[Interval]) -> list[Interval]:
+    out: list[Interval] = []
+    for iv in sorted(i for i in intervals if i.end > i.start):
+        if out and iv.start <= out[-1].end:
+            out[-1] = Interval(out[-1].start, max(out[-1].end, iv.end))
+        else:
+            out.append(iv)
+    return out
+
+
+def subtract(base: Iterable[Interval], holes: Iterable[Interval]) -> list[Interval]:
+    result = merge(base)
+    for hole in merge(holes):
+        nxt: list[Interval] = []
+        for iv in result:
+            if hole.end <= iv.start or hole.start >= iv.end:
+                nxt.append(iv)
+                continue
+            if iv.start < hole.start:
+                nxt.append(Interval(iv.start, hole.start))
+            if hole.end < iv.end:
+                nxt.append(Interval(hole.end, iv.end))
+        result = nxt
+    return result
+
+
+def _window(day: date, window: TimeWindow) -> Interval:
+    start = local_datetime(day, window.start.hour, window.start.minute)
+    end_day = day + timedelta(days=1) if window.wraps_midnight else day
+    return Interval(start, local_datetime(end_day, window.end.hour, window.end.minute))
+
+
+def free_intervals(
+    start: datetime,
+    end: datetime,
+    *,
+    waking: TimeWindow,
+    quiet: TimeWindow,
+    buffer_minutes: int,
+    meetings: Iterable[MeetingRecord],
+    commitments: Iterable[Commitment],
+) -> list[Interval]:
+    """Free time in [start, end): waking hours minus quiet hours, classes (with a walking
+    buffer on both sides), and fixed commitments. Wall-clock rules are applied per local day,
+    so DST changes shift the UTC instants but never the local times."""
+    meetings, commitments = list(meetings), list(commitments)
+    first = to_local(start).date() - timedelta(days=1)
+    last = to_local(end).date()
+    pad = timedelta(minutes=buffer_minutes)
+    awake: list[Interval] = []
+    busy: list[Interval] = []
+    day = first
+    while day <= last:
+        awake.append(_window(day, waking))
+        busy.append(_window(day, quiet))
+        for b in busy_on(day, meetings, commitments):
+            extra = pad if b.kind == "class" else timedelta(0)
+            busy.append(Interval(b.start - extra, b.end + extra))
+        day += timedelta(days=1)
+    clipped = subtract(awake, busy)
+    return [
+        Interval(max(i.start, start), min(i.end, end))
+        for i in clipped
+        if i.end > start and i.start < end
+    ]
+
+
+def free_hours_between(free: Iterable[Interval], start: datetime, end: datetime) -> float:
+    total = 0.0
+    for iv in free:
+        lo, hi = max(iv.start, start), min(iv.end, end)
+        if hi > lo:
+            total += (hi - lo).total_seconds() / 3600
+    return total

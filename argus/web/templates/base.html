@@ -1,4 +1,5 @@
 {% from "components/ui.html" import icon, logo, stale_banner, offline_banner %}
+{% set NAV = [("/today", "Today", "Today", "house"), ("/upcoming", "Upcoming", "Upcoming", "calendar-days"), ("/announcements", "Announcements", "Posts", "megaphone"), ("/workload", "Workload", "Workload", "chart-column"), ("/health", "Health", "Health", "activity")] %}
 <!doctype html>
 <html lang="en"{% if theme in ("light", "dark") %} data-theme="{{ theme }}"{% endif %}>
 <head>
@@ -25,7 +26,7 @@
     <div class="app-header__inner">
       <a class="brand" href="/today" aria-label="Argus, go to Today">{{ logo() }}<span>Argus</span></a>
       <nav class="nav" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
-        {% for href, label, ico in [("/today", "Today", "house"), ("/upcoming", "Upcoming", "calendar-days"), ("/health", "Health", "activity")] %}
+        {% for href, label, short, ico in NAV %}
         <a class="nav-link" href="{{ href }}" {% if active == href %}aria-current="page"{% endif %}>{{ icon(ico, "icon-sm") }}{{ label }}</a>
         {% endfor %}
       </nav>
@@ -50,6 +51,11 @@
     <div class="grid gap-2 mb-4 empty:hidden" id="banners">{{ offline_banner() }}{{ stale_banner(stale, link=active != '/health') }}</div>
     {% block content %}{% endblock %}
   </main>
+  <nav class="tabbar" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+    {% for href, label, short, ico in NAV %}
+    <a class="tabbar__link" href="{{ href }}" {% if active == href %}aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ short }}</span></a>
+    {% endfor %}
+  </nav>
   <div class="toast-region" aria-live="polite" aria-atomic="false" x-data>
     <template x-for="t in $store.toasts.items" :key="t.id">
       <div class="toast toast-enter" :data-kind="t.kind">

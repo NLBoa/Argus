@@ -45,7 +45,9 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: Obsidian layout, argus regions, ownership decisions, proposals, git sync.
 - `argus/notify/`: Twilio SMS, ntfy, and the router that picks a channel and records the result.
-- `argus/worker.py`: the every-minute loop (sync, then reminders). `argus/demo.py`: the synthetic seed (demo and e2e).
+- `argus/worker.py`: the every-minute loop: sync → announcements → estimates → plan → reminders, each isolated.
+- `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
+  overrides), `argus/planning.py` (replan, risk, workload), and `argus/demo.py` (the synthetic seed for demo and e2e).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
   routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
 - `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, and repository functions (including search).
@@ -95,6 +97,12 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - The Piazza notification email format is unverified until real mail arrives (`collectors/piazza_email.py`).
 - The newest Playwright Python Docker image is v1.63.0, so Playwright is pinned `==1.63.0` to match.
 
+## AI rules
+- The AI judges and code decides. Every call goes through `AIClient.structured()` (schema-validated, one retry, then `None` → the caller's
+  fallback). Prompts are versioned files in `ai/prompts/`; change wording by adding `name.vN+1.md`.
+- Every prompt states: "Argus never drafts answers or solutions to graded work." A test enforces this.
+- Spend is recorded in `ai_calls`. At the monthly cap, no calls are made, there is one alert, and fallbacks run.
+
 ## Vault rules
 - Argus writes only between `%% argus:begin <id> %%` and `%% argus:end <id> %%`. The `core`
   region holds generated note content. "Explain it yourself" and "My notes" sit after the
@@ -129,8 +137,10 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   These run in their own pytest process (the `make` targets do this). Plain `pytest` runs unit and integration only.
   Tests that mutate data use `fresh_server()`. Shared servers stay read-only (D022).
 - **Evals** (`tests/evals`, marker `evals`): the real API. Run only with `make evals`.
-- **LLM calls are mocked** at the `argus.ai.client` boundary with recorded responses from
-  `tests/fixtures/ai/`. No test outside evals touches the network.
+- **LLM calls are mocked** at the `Transport` boundary (`tests/ai_fakes.py`: `FakeTransport`, `ok()`, `recorded()`),
+  replaying recorded responses from `tests/fixtures/ai/`. No test outside evals touches the network.
+- Evals: `tests/evals/` (datasets plus a pure scorer, which is unit-tested in CI). `make evals` needs `ARGUS_ANTHROPIC_API_KEY`
+  and writes JSON reports to `tests/evals/reports/` (git-ignored).
 - Write domain logic tests first: merge, planner, reminders, vault edit rules, finding application.
 - **Coverage floors** (`scripts/coverage_floors.py`): 95% line+branch per file in `domain/`,
   `planner/`, `reminders/`, `vault/ownership.py`, `vault/regions.py`; 85% overall.

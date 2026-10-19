@@ -1,0 +1,153 @@
+"""Estimate detail, workload, and announcements views and their actions."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from argus.clock import FakeClock
+from argus.demo import DEMO_CONFIG, DEMO_SECRETS, seed_demo
+from argus.store import repo
+from argus.store.db import open_db
+from argus.web.app import create_app
+from argus.web.deps import OfflineRunner
+from tests.ai_fakes import FakeTransport, ok, recorded
+
+ORIGIN = {"Origin": "http://testserver"}
+HX = {**ORIGIN, "HX-Request": "true"}
+HW3, PS6, MIDTERM_FINDING = 2, 6, 1
+
+
+@pytest.fixture
+def transport() -> FakeTransport:
+    return FakeTransport(
+        responder=lambda req: ok(recorded("estimate_hw3"), model="claude-sonnet-5-5")
+    )
+
+
+@pytest.fixture
+def client(tmp_path: Path, clock: FakeClock, transport: FakeTransport) -> Iterator[TestClient]:
+    db = tmp_path / "w.db"
+    conn = open_db(db, clock)
+    seed_demo(conn, clock.now())
+    conn.close()
+    app = create_app(
+        DEMO_CONFIG,
+        DEMO_SECRETS,
+        clock,
+        db_path=db,
+        runner_factory=lambda c, f: OfflineRunner(),
+        ai_transport=transport,
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+def conn_of(client: TestClient) -> sqlite3.Connection:
+    c = sqlite3.connect(client.app.state.argus.db_path)  # type: ignore[attr-defined]
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def test_item_detail(client: TestClient) -> None:
+    html = client.get(f"/items/{HW3}").text
+    assert "Write up the three proofs" in html
+    assert "Each proof is similar in length" in html
+    assert "took 1.40x their estimates (1 finished). Argus applies 1.10x" in html
+    assert "AI estimate before calibration" in html
+    assert "claude-sonnet-5-5, prompt estimate.v1" in html
+    assert client.get("/items/9999").status_code == 404
+
+
+def test_item_rows_show_estimates_and_link_to_detail(client: TestClient) -> None:
+    html = client.get("/today").text
+    assert f'href="/items/{HW3}"' in html
+    assert "estimated 3.5 h" in html  # raw next to calibrated
+    assert "typical" in html  # Problem Set 6 uses the default
+
+
+def test_override_clear_and_replan(client: TestClient) -> None:
+    r = client.post(
+        f"/items/{HW3}/estimate",
+        data={"hours": "8"},
+        headers={**ORIGIN, "Referer": f"http://testserver/items/{HW3}"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"] == f"/items/{HW3}"
+    html = client.get(f"/items/{HW3}").text
+    assert "You set this estimate." in html
+    planned = (
+        conn_of(client)
+        .execute(
+            "SELECT SUM((julianday(end_at) - julianday(start_at)) * 24) FROM plan_blocks WHERE item_id = ?",
+            (HW3,),
+        )
+        .fetchone()[0]
+    )
+    assert planned == pytest.approx(8.0, abs=0.01)  # the plan uses the override
+    client.post(f"/items/{HW3}/estimate/clear", headers=ORIGIN)
+    assert "You set this estimate." not in client.get(f"/items/{HW3}").text
+    assert (
+        client.post(f"/items/{HW3}/estimate", data={"hours": "0"}, headers=ORIGIN).status_code
+        == 422
+    )
+    assert (
+        client.post("/items/9999/estimate", data={"hours": "2"}, headers=ORIGIN).status_code == 404
+    )
+
+
+def test_rerun_uses_ai_without_cache(client: TestClient, transport: FakeTransport) -> None:
+    client.post(f"/items/{PS6}/estimate/rerun", headers=ORIGIN)
+    client.post(f"/items/{PS6}/estimate/rerun", headers=ORIGIN)
+    assert len(transport.calls) == 2
+    sources = [e.source for e in repo.estimates_for(conn_of(client), PS6)]
+    assert sources == ["default", "ai", "ai"]
+
+
+def test_log_time(client: TestClient) -> None:
+    client.post(f"/items/{HW3}/log", data={"hours": "1.5"}, headers=ORIGIN)
+    html = client.get(f"/items/{HW3}").text
+    assert 'Time spent <span class="section-count">1.5 h</span>' in html
+    assert "Logged here" in html
+    assert client.post(f"/items/{HW3}/log", data={"hours": "30"}, headers=ORIGIN).status_code == 422
+
+
+def test_workload(client: TestClient) -> None:
+    html = client.get("/workload").text
+    assert "Hours needed against free hours" in html
+    assert "Problem Set 6" in html  # squeezed by Homework 3: needs attention
+    assert "needs" in html and "more hours than there is free time" in html
+
+
+def test_announcements_and_decisions(client: TestClient) -> None:
+    html = client.get("/announcements").text
+    assert "1 needs your decision." in html
+    assert "Use announced date" in html
+    assert "Lab 3 room change" in html  # not analyzed yet: the no-AI fallback
+    r = client.post(f"/findings/{MIDTERM_FINDING}/confirm", headers=HX)
+    assert (
+        json.loads(r.headers["HX-Trigger"])["toast"]["message"]
+        == "Using the announced date for Midterm 1"
+    )
+    assert "Use announced date" not in r.text
+    again = client.post(f"/findings/{MIDTERM_FINDING}/confirm", headers=HX)
+    assert json.loads(again.headers["HX-Trigger"])["toast"]["kind"] == "error"
+    assert client.post(f"/findings/{MIDTERM_FINDING}/confirm", headers=ORIGIN).status_code == 409
+    assert client.post(f"/findings/{MIDTERM_FINDING}/bogus", headers=HX).status_code == 404
+    assert client.post("/findings/999/dismiss", headers=HX).status_code == 404
+
+
+def test_dismiss_plain_form(client: TestClient) -> None:
+    r = client.post(f"/findings/{MIDTERM_FINDING}/dismiss", headers=ORIGIN, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/announcements"
+
+
+def test_health_shows_ai_spend(client: TestClient) -> None:
+    html = client.get("/health").text
+    assert "$0.00 of $10.00" in html
+    assert "(AI not set up)" not in html  # a transport is configured

@@ -9,11 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from argus.web.data import (
+    load_announcements,
     load_course,
     load_health,
+    load_item,
     load_search,
     load_today,
     load_upcoming,
+    load_workload,
     palette_items,
 )
 from argus.web.deps import AppState, get_conn, get_state
@@ -119,7 +122,11 @@ def health(request: Request, state: State, conn: Conn) -> HTMLResponse:
         state,
         conn,
         "pages/health.html",
-        {"data": data, "error": None},
+        {
+            "data": data,
+            "error": None,
+            "ai_on": state.secrets.anthropic_api_key is not None or state.ai_transport is not None,
+        },
         active="/health",
         title="Health",
     )
@@ -213,4 +220,76 @@ def search_view(
         ctx,
         active="/search",
         title=f"Search: {q}" if q else "Search",
+    )
+
+
+@router.get("/items/{item_id}", response_class=HTMLResponse)
+def item_detail(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
+    data = load_item(conn, state.config, state.clock.now(), item_id)
+    if data is None:
+        raise HTTPException(404, "No such item")
+    return render(
+        request,
+        state,
+        conn,
+        "pages/item.html",
+        {"data": data},
+        active="/items",
+        title=data.item.title,
+    )
+
+
+@router.get("/workload", response_class=HTMLResponse)
+def workload_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    try:
+        data = load_workload(conn, state.config, state.clock.now())
+    except sqlite3.Error:
+        log.exception("workload failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/workload.html",
+            {"error": LOAD_ERROR},
+            active="/workload",
+            title="Workload",
+            status_code=503,
+        )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/workload.html",
+        {"data": data, "error": None},
+        active="/workload",
+        title="Workload",
+    )
+
+
+@router.get("/announcements", response_class=HTMLResponse)
+def announcements_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    try:
+        courses = load_announcements(conn, state.config, state.clock.now())
+    except sqlite3.Error:
+        log.exception("announcements failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/announcements.html",
+            {"error": LOAD_ERROR},
+            active="/announcements",
+            title="Announcements",
+            status_code=503,
+        )
+    waiting = sum(len(c.waiting) for c in courses)
+    ctx = {"courses": courses, "waiting_total": waiting, "error": None}
+    return render(
+        request,
+        state,
+        conn,
+        "pages/announcements.html",
+        ctx,
+        active="/announcements",
+        title="Announcements",
     )

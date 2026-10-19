@@ -158,8 +158,8 @@ def test_course_page_from_chip_and_modules(page: Page, base_url: str) -> None:
 
 
 def test_search_filter_and_no_results(page: Page, base_url: str) -> None:
-    page.goto(base_url + "/search?q=room")
-    expect(page.get_by_text("Lab 3 room change")).to_be_visible()
+    page.goto(base_url + "/search?q=instead")
+    expect(page.get_by_role("link", name=re.compile("^Lab 3 room change"))).to_be_visible()
     page.get_by_role("navigation", name="Filter by course").get_by_role(
         "link", name="CMSC351"
     ).click()
@@ -238,3 +238,58 @@ def test_kiosk_has_no_controls_and_updates(page: Page, base_url: str) -> None:
     expect(page.locator("button, a, input, select, textarea")).to_have_count(0)
     expect(page.locator("[data-clock]")).to_have_text("9:00")
     expect(page.get_by_text("MATH240 lecture").first).to_be_visible()
+
+
+def test_confirm_finding_moves_the_date(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
+    s = fresh_server()
+    page.goto(s.url + "/announcements")
+    card = page.locator("article", has_text="Midterm 1")
+    expect(card).to_contain_text("while ELMS says Oct 28, 9:30 am")
+    card.get_by_role("button", name="Use announced date").click()
+    expect(
+        page.locator(".toast", has_text="Using the announced date for Midterm 1")
+    ).to_be_visible()
+    expect(
+        page.locator("article", has_text="Midterm 1").get_by_role(
+            "button", name="Use announced date"
+        )
+    ).to_have_count(0)
+    page.goto(s.url + "/upcoming?course=CMSC351")
+    expect(page.locator("li.item-row", has_text="Midterm 1")).to_contain_text("Oct 29, 9:30 am")
+
+
+def test_override_estimate_and_log_time(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
+    s = fresh_server()
+    page.goto(s.url + "/today")
+    page.locator("li.item-row", has_text="Homework 3").get_by_role(
+        "link", name=re.compile("^Homework 3")
+    ).click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Homework 3")
+    page.get_by_label("Your estimate (hours)").fill("6")
+    page.get_by_role("button", name="Use my estimate").click()
+    expect(page.get_by_text("You set this estimate.")).to_be_visible()
+    page.get_by_label("Log time (hours)").fill("1.25")
+    page.get_by_role("button", name="Log time").click()
+    expect(page.get_by_role("heading", name=re.compile("Time spent"))).to_contain_text("1.2 h")
+    page.get_by_role("button", name="Remove my estimate").click()
+    expect(page.get_by_text("You set this estimate.")).to_have_count(0)
+
+
+def test_workload_lists_items_needing_attention(page: Page, base_url: str) -> None:
+    page.goto(base_url + "/workload")
+    expect(page.get_by_role("img", name="Hours needed against free hours")).to_be_visible()
+    expect(page.get_by_role("heading", name=re.compile("^Needs attention"))).to_be_visible()
+
+
+def test_mobile_tab_bar(page: Page, base_url: str) -> None:
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(base_url + "/today")
+    tabs = page.get_by_role("navigation", name="Main")
+    expect(tabs.get_by_role("link")).to_have_count(5)
+    tabs.get_by_role("link", name="Posts").click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Announcements")
+    expect(tabs.get_by_role("link", name="Posts")).to_have_attribute("aria-current", "page")

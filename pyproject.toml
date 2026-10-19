@@ -18,6 +18,7 @@ dependencies = [
   "gradescopeapi==1.8.1",
   "piazza-api==0.16.0",
   "python-multipart>=0.0.20",
+  "anthropic>=1.15",
 ]
 
 [project.scripts]
@@ -68,9 +69,14 @@ ignore = [
   "PLR0911",  # early returns are the clearest shape for rule functions
   "ARG002",   # protocol implementations must accept the full signature
   "ARG005",   # factory lambdas often ignore their arguments
+  "SIM108",   # if/else blocks often read better than long ternaries
   "S101",     # assert is used in tests
   "PLC0415",  # lazy imports keep CLI startup fast on the Pi
 ]
+
+[tool.ruff.lint.pycodestyle]
+# The formatter wraps code at 100; lint tolerates long SQL strings and docstrings up to 120.
+max-line-length = 120
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.now".msg = "Use argus.clock.Clock.now(); only clock.py may read the wall clock."

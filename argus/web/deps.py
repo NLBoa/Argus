@@ -44,6 +44,7 @@ class AppState:
     db_path: Path
     runner_factory: Callable[[sqlite3.Connection, Fetcher], Runner] | None = None
     kiosk_interval: float = 30.0
+    ai_transport: Any = None  # argus.ai.client.Transport; None = build from the API key
     fetcher: Fetcher | None = None
     sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)

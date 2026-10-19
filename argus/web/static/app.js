@@ -21,6 +21,8 @@
   const COMMANDS = [
     { id: "go-today", label: "Go to Today", hint: "g t", href: "/today" },
     { id: "go-upcoming", label: "Go to Upcoming", hint: "g u", href: "/upcoming" },
+    { id: "go-announcements", label: "Go to Announcements", hint: "g a", href: "/announcements" },
+    { id: "go-workload", label: "Go to Workload", hint: "g w", href: "/workload" },
     { id: "go-health", label: "Go to Health", hint: "g h", href: "/health" },
     { id: "go-search", label: "Search", hint: "/", href: "/search" },
     { id: "go-styleguide", label: "Open the styleguide", hint: "", href: "/styleguide" },
@@ -30,7 +32,7 @@
     { id: "theme-dark", label: "Use dark theme", hint: "", action: "theme:dark" },
     { id: "theme-system", label: "Match system theme", hint: "", action: "theme:system" },
   ];
-  const GO = { t: "/today", u: "/upcoming", h: "/health", s: "/search" };
+  const GO = { t: "/today", u: "/upcoming", h: "/health", s: "/search", a: "/announcements", w: "/workload" };
 
   const navigate = (href) => {
     if (window.htmx && href.startsWith("/") && !href.startsWith("/kiosk")) {
@@ -212,7 +214,7 @@
     document.body.classList.remove("is-loading");
     if (e.detail.boosted || e.detail.target?.id === "main") {
       const path = window.location.pathname;
-      $$(".nav-link").forEach((a) => {
+      $$(".nav-link, .tabbar__link").forEach((a) => {
         if (a.getAttribute("href") === path) a.setAttribute("aria-current", "page");
         else a.removeAttribute("aria-current");
       });

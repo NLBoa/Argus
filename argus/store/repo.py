@@ -9,10 +9,11 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
 from argus.config import AppConfig
+from argus.domain.findings import ItemRef
 from argus.domain.merge import merge_sources, resolve_item
 from argus.domain.models import (
     AuthorRole,
@@ -374,9 +375,18 @@ def apply_merge(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
     by_key = {r.key: r for r in records}
     created: list[int] = []
     live: set[int] = set()
+    student = overrides(conn)
     for group in merge_sources(records, links):
         members = [by_key[k] for k in group.keys]
         resolved = resolve_item(members)
+        override_due, cancelled = (
+            student.get(group.item_id, (None, False)) if group.item_id else (None, False)
+        )
+        if cancelled:
+            continue  # the student confirmed a cancellation: the item stays hidden
+        if override_due is not None:
+            # The student's confirmed date wins; the disagreement stays recorded.
+            resolved = replace(resolved, due_at=override_due, due_source=Source.MANUAL)
         course_id = ids[resolved.course_code]
         fields = (
             course_id,
@@ -1176,3 +1186,478 @@ def search(
         snip = escape(r["snip"] or "").replace(_MARK_OPEN, "<mark>").replace(_MARK_CLOSE, "</mark>")
         hits.append(SearchHit(r["kind"], str(r["ref_id"]), r["course"], r["title"], snip, r["url"]))
     return hits
+
+
+# ---------------------------------------------------------------- findings & overrides
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPost:
+    id: int
+    record: PostRecord
+    scanned_hash: str | None
+
+
+def posts_to_scan(conn: sqlite3.Connection, limit: int = 20) -> list[StoredPost]:
+    rows = conn.execute(
+        """SELECT p.*, c.code FROM posts p JOIN courses c ON c.id = p.course_id
+           WHERE c.active = 1 AND (p.scanned_hash IS NULL OR p.scanned_hash != p.content_hash)
+           ORDER BY p.posted_at DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [StoredPost(r["id"], _row_to_post(r), r["scanned_hash"]) for r in rows]
+
+
+def _row_to_post(r: sqlite3.Row) -> PostRecord:
+    return PostRecord(
+        platform=r["platform"],
+        external_id=r["external_id"],
+        via=Source(r["via"]),
+        course_code=r["code"],
+        title=r["title"],
+        body=r["body"],
+        posted_at=parse_iso(r["posted_at"]),
+        raw_hash=r["content_hash"],
+        author_role=AuthorRole(r["author_role"]),
+        kind=r["kind"],
+        url=r["url"],
+        edited_at=parse_iso_or_none(r["edited_at"]),
+        pinned=bool(r["pinned"]),
+    )
+
+
+def mark_scanned(conn: sqlite3.Connection, post_id: int) -> None:
+    conn.execute("UPDATE posts SET scanned_hash = content_hash WHERE id = ?", (post_id,))
+
+
+def get_post(conn: sqlite3.Connection, post_id: int) -> StoredPost | None:
+    r = conn.execute(
+        "SELECT p.*, c.code FROM posts p JOIN courses c ON c.id = p.course_id WHERE p.id = ?",
+        (post_id,),
+    ).fetchone()
+    return StoredPost(r["id"], _row_to_post(r), r["scanned_hash"]) if r else None
+
+
+def item_refs(conn: sqlite3.Connection, course_code: str | None = None) -> list[ItemRef]:
+    """Live items with whether any official (Canvas/Gradescope) record backs them."""
+    sql = """SELECT i.id, c.code, i.title, i.kind, i.due_at,
+                    EXISTS (SELECT 1 FROM item_sources s WHERE s.item_id = i.id AND s.present = 1
+                              AND s.source IN ('canvas_ical', 'canvas_api', 'gradescope')) AS official
+             FROM items i JOIN courses c ON c.id = i.course_id
+             WHERE i.removed_at IS NULL AND c.active = 1"""
+    params: tuple[object, ...] = ()
+    if course_code:
+        sql += " AND c.code = ?"
+        params = (course_code,)
+    return [
+        ItemRef(
+            r["id"],
+            r["code"],
+            r["title"],
+            ItemKind(r["kind"]),
+            parse_iso_or_none(r["due_at"]),
+            bool(r["official"]),
+        )
+        for r in conn.execute(sql, params)
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class FindingRow:
+    id: int
+    post_id: int
+    course_code: str
+    kind: str
+    title: str
+    date: datetime | None
+    date_only: bool
+    scope: str | None
+    quote: str
+    confidence: float
+    item_id: int | None
+    status: str
+    reason: str
+    created_at: datetime
+
+
+def insert_finding(
+    conn: sqlite3.Connection,
+    *,
+    post_id: int,
+    course_id: int,
+    kind: str,
+    title: str,
+    date: datetime | None,
+    date_only: bool,
+    scope: str | None,
+    quote: str,
+    confidence: float,
+    item_id: int | None,
+    status: str,
+    reason: str,
+    now: datetime,
+) -> int:
+    cur = conn.execute(
+        """INSERT INTO findings (post_id, course_id, kind, title, date, date_only, scope, quote, confidence,
+                                 item_id, status, reason, created_at, resolved_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            post_id,
+            course_id,
+            kind,
+            title,
+            iso_or_none(date),
+            int(date_only),
+            scope,
+            quote,
+            confidence,
+            item_id,
+            status,
+            reason,
+            iso(now),
+            iso(now) if status in ("applied", "linked", "stored") else None,
+        ),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def _row_to_finding(r: sqlite3.Row) -> FindingRow:
+    return FindingRow(
+        id=r["id"],
+        post_id=r["post_id"],
+        course_code=r["code"],
+        kind=r["kind"],
+        title=r["title"],
+        date=parse_iso_or_none(r["date"]),
+        date_only=bool(r["date_only"]),
+        scope=r["scope"],
+        quote=r["quote"],
+        confidence=r["confidence"],
+        item_id=r["item_id"],
+        status=r["status"],
+        reason=r["reason"],
+        created_at=parse_iso(r["created_at"]),
+    )
+
+
+def get_finding(conn: sqlite3.Connection, finding_id: int) -> FindingRow | None:
+    r = conn.execute(
+        "SELECT f.*, c.code FROM findings f JOIN courses c ON c.id = f.course_id WHERE f.id = ?",
+        (finding_id,),
+    ).fetchone()
+    return _row_to_finding(r) if r else None
+
+
+def list_findings(
+    conn: sqlite3.Connection, statuses: Sequence[str] | None = None
+) -> list[FindingRow]:
+    sql = "SELECT f.*, c.code FROM findings f JOIN courses c ON c.id = f.course_id"
+    params: tuple[object, ...] = ()
+    if statuses:
+        sql += f" WHERE f.status IN ({','.join('?' * len(statuses))})"
+        params = tuple(statuses)
+    return [
+        _row_to_finding(r)
+        for r in conn.execute(sql + " ORDER BY f.created_at DESC, f.id DESC", params)
+    ]
+
+
+def set_finding_status(
+    conn: sqlite3.Connection,
+    finding_id: int,
+    status: str,
+    now: datetime,
+    item_id: int | None = None,
+) -> None:
+    conn.execute(
+        "UPDATE findings SET status = ?, resolved_at = ?, item_id = COALESCE(?, item_id) WHERE id = ?",
+        (status, iso(now), item_id, finding_id),
+    )
+
+
+def supersede_open_findings(conn: sqlite3.Connection, post_id: int, now: datetime) -> None:
+    """An edited post replaces its unresolved findings."""
+    conn.execute(
+        "UPDATE findings SET status = 'superseded', resolved_at = ?"
+        " WHERE post_id = ? AND status IN ('pending', 'conflict')",
+        (iso(now), post_id),
+    )
+
+
+def add_finding_source(
+    conn: sqlite3.Connection,
+    *,
+    finding_id: int,
+    course_id: int,
+    title: str,
+    kind: ItemKind,
+    due_at: datetime | None,
+    date_only: bool,
+    url: str | None,
+    item_id: int | None,
+    now: datetime,
+) -> None:
+    """A FINDING source record; with `item_id`, it attaches to that item (and supersedes its older ones)."""
+    ts = iso(now)
+    if item_id is not None:
+        conn.execute(
+            "UPDATE item_sources SET present = 0, changed_at = ? WHERE item_id = ? AND source = 'finding'",
+            (ts, item_id),
+        )
+    conn.execute(
+        """INSERT INTO item_sources (item_id, source, external_id, course_id, title, kind, due_at, all_day, url,
+                                     raw_hash, present, first_seen_at, last_seen_at, changed_at)
+           VALUES (?, 'finding', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+        (
+            item_id,
+            f"finding:{finding_id}",
+            course_id,
+            title,
+            kind.value,
+            iso_or_none(due_at),
+            int(date_only),
+            url,
+            f"finding:{finding_id}",
+            ts,
+            ts,
+            ts,
+        ),
+    )
+
+
+def item_for_source(conn: sqlite3.Connection, source: Source, external_id: str) -> int | None:
+    r = conn.execute(
+        "SELECT item_id FROM item_sources WHERE source = ? AND external_id = ?",
+        (source.value, external_id),
+    ).fetchone()
+    return int(r[0]) if r and r[0] is not None else None
+
+
+def set_item_info(
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    scope: str | None = None,
+    logistics: str | None = None,
+) -> None:
+    if scope is not None:
+        conn.execute("UPDATE items SET scope = ? WHERE id = ?", (scope, item_id))
+    if logistics is not None:
+        conn.execute("UPDATE items SET logistics = ? WHERE id = ?", (logistics, item_id))
+
+
+def set_override(
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    due_at: datetime | None,
+    cancelled: bool,
+    reason: str,
+    now: datetime,
+) -> None:
+    conn.execute(
+        """INSERT INTO item_overrides (item_id, due_at, cancelled, reason, created_at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (item_id) DO UPDATE SET due_at = COALESCE(excluded.due_at, due_at),
+             cancelled = MAX(cancelled, excluded.cancelled), reason = excluded.reason,
+             created_at = excluded.created_at""",
+        (item_id, iso_or_none(due_at), int(cancelled), reason, iso(now)),
+    )
+
+
+def overrides(conn: sqlite3.Connection) -> dict[int, tuple[datetime | None, bool]]:
+    return {
+        r["item_id"]: (parse_iso_or_none(r["due_at"]), bool(r["cancelled"]))
+        for r in conn.execute("SELECT item_id, due_at, cancelled FROM item_overrides")
+    }
+
+
+def unlinked_official_records(conn: sqlite3.Connection) -> list[SourceItem]:
+    rows = conn.execute(
+        """SELECT s.*, c.code FROM item_sources s JOIN courses c ON c.id = s.course_id
+           WHERE s.present = 1 AND s.item_id IS NULL AND s.source IN ('canvas_ical', 'canvas_api', 'gradescope')"""
+    ).fetchall()
+    return [_row_to_source_item(r) for r in rows]
+
+
+def announced_only_items(conn: sqlite3.Connection) -> list[ItemRef]:
+    return [r for r in item_refs(conn) if not r.official and _has_finding_source(conn, r.id)]
+
+
+def _has_finding_source(conn: sqlite3.Connection, item_id: int) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM item_sources WHERE item_id = ? AND source = 'finding' AND present = 1",
+            (item_id,),
+        ).fetchone()
+        is not None
+    )
+
+
+def link_source(conn: sqlite3.Connection, key: SourceKey, item_id: int) -> None:
+    conn.execute(
+        "UPDATE item_sources SET item_id = ? WHERE source = ? AND external_id = ?",
+        (item_id, key.source.value, key.external_id),
+    )
+
+
+# ---------------------------------------------------------------- estimates
+
+
+@dataclass(frozen=True, slots=True)
+class EstimateRow:
+    id: int
+    item_id: int
+    version: int
+    source: str  # ai | default | user
+    p50: float
+    p80: float
+    confidence: str | None
+    breakdown: tuple[tuple[str, float], ...]
+    assumptions: tuple[str, ...]
+    reasoning: str | None
+    input_hash: str
+    model: str | None
+    prompt_version: str | None
+    created_at: datetime
+    retracted_at: datetime | None
+
+
+def _row_to_estimate(r: sqlite3.Row) -> EstimateRow:
+    return EstimateRow(
+        id=r["id"],
+        item_id=r["item_id"],
+        version=r["version"],
+        source=r["source"],
+        p50=r["p50_hours"],
+        p80=r["p80_hours"],
+        confidence=r["confidence"],
+        breakdown=tuple((b["step"], float(b["hours"])) for b in json.loads(r["breakdown"])),
+        assumptions=tuple(json.loads(r["assumptions"])),
+        reasoning=r["reasoning"],
+        input_hash=r["input_hash"],
+        model=r["model"],
+        prompt_version=r["prompt_version"],
+        created_at=parse_iso(r["created_at"]),
+        retracted_at=parse_iso_or_none(r["retracted_at"]),
+    )
+
+
+def insert_estimate(
+    conn: sqlite3.Connection,
+    *,
+    item_id: int,
+    source: str,
+    p50: float,
+    p80: float,
+    input_hash: str,
+    now: datetime,
+    confidence: str | None = None,
+    breakdown: Sequence[tuple[str, float]] = (),
+    assumptions: Sequence[str] = (),
+    reasoning: str | None = None,
+    model: str | None = None,
+    prompt_version: str | None = None,
+) -> int:
+    """Append a new estimate version. Estimates are never overwritten."""
+    version = int(
+        conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM estimates WHERE item_id = ?", (item_id,)
+        ).fetchone()[0]
+    )
+    conn.execute(
+        """INSERT INTO estimates (item_id, version, source, p50_hours, p80_hours, confidence, breakdown, assumptions,
+                                  reasoning, input_hash, model, prompt_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            item_id,
+            version,
+            source,
+            p50,
+            max(p80, p50),
+            confidence,
+            json.dumps([{"step": s, "hours": h} for s, h in breakdown]),
+            json.dumps(list(assumptions)),
+            reasoning,
+            input_hash,
+            model,
+            prompt_version,
+            iso(now),
+        ),
+    )
+    return version
+
+
+def estimates_for(conn: sqlite3.Connection, item_id: int) -> list[EstimateRow]:
+    rows = conn.execute(
+        "SELECT * FROM estimates WHERE item_id = ? ORDER BY version", (item_id,)
+    ).fetchall()
+    return [_row_to_estimate(r) for r in rows]
+
+
+def latest_estimates(
+    conn: sqlite3.Connection,
+) -> dict[int, tuple[EstimateRow | None, EstimateRow | None]]:
+    """item_id -> (latest model/default estimate, active user override)."""
+    out: dict[int, tuple[EstimateRow | None, EstimateRow | None]] = {}
+    for r in conn.execute("SELECT * FROM estimates ORDER BY item_id, version"):
+        e = _row_to_estimate(r)
+        base, user = out.get(e.item_id, (None, None))
+        if e.source == "user":
+            user = None if e.retracted_at else e
+        else:
+            base = e
+        out[e.item_id] = (base, user)
+    return out
+
+
+def retract_user_estimates(conn: sqlite3.Connection, item_id: int, now: datetime) -> None:
+    conn.execute(
+        "UPDATE estimates SET retracted_at = ? WHERE item_id = ? AND source = 'user' AND retracted_at IS NULL",
+        (iso(now), item_id),
+    )
+
+
+def logged_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
+    out: dict[int, float] = {}
+    for r in conn.execute("SELECT item_id, started_at, ended_at FROM time_logs"):
+        end = parse_iso_or_none(r["ended_at"]) or now
+        out[r["item_id"]] = out.get(r["item_id"], 0.0) + max(
+            0.0, (end - parse_iso(r["started_at"])).total_seconds() / 3600
+        )
+    return out
+
+
+@dataclass(frozen=True, slots=True)
+class FinishedRow:
+    item_id: int
+    course_code: str
+    kind: ItemKind
+    title: str
+    p50: float
+    actual: float
+
+
+def finished_history(conn: sqlite3.Connection, now: datetime) -> list[FinishedRow]:
+    """Finished items with logged time: the evidence for calibration and fallbacks."""
+    hours = logged_hours(conn, now)
+    latest = latest_estimates(conn)
+    out = []
+    for r in conn.execute(
+        """SELECT i.id, i.title, i.kind, c.code FROM items i JOIN courses c ON c.id = i.course_id
+           WHERE i.status IN ('submitted', 'graded')"""
+    ):
+        actual = hours.get(r["id"], 0.0)
+        if actual <= 0:
+            continue
+        base, _ = latest.get(r["id"], (None, None))
+        out.append(
+            FinishedRow(
+                r["id"],
+                r["code"],
+                ItemKind(r["kind"]),
+                r["title"],
+                base.p50 if base else 0.0,
+                actual,
+            )
+        )
+    return out

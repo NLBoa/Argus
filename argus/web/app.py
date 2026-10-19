@@ -47,6 +47,7 @@ def create_app(
     db_path: Path | None = None,
     runner_factory: Callable[[sqlite3.Connection, Fetcher], Runner] | None = None,
     kiosk_interval: float = 30.0,
+    ai_transport: Any = None,
 ) -> FastAPI:
     cfg = config or AppConfig()
     state = AppState(
@@ -56,6 +57,7 @@ def create_app(
         db_path=db_path or cfg.paths.db_path,
         runner_factory=runner_factory,
         kiosk_interval=kiosk_interval,
+        ai_transport=ai_transport,
     )
 
     @asynccontextmanager

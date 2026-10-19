@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from argus.announcements import attach_official
 from argus.clock import Clock
 from argus.collectors.base import CollectContext, Collector, CollectResult, RunStatus
 from argus.collectors.canvas_api import CanvasApiCollector
@@ -174,6 +175,7 @@ class SyncRunner:
         for result in results:
             report.new_posts += self._persist(result, ids, started, finished)
         with transaction(self.conn):
+            attach_official(self.conn)  # official records take over announced items
             report.new_items = repo.apply_merge(self.conn, ids, self.clock.now())
             report.status_changes = repo.refresh_statuses(self.conn, self.clock.now())
             repo.rebuild_search_index(self.conn)

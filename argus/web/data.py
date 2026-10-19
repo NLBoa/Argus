@@ -4,27 +4,33 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from argus.clock import Clock, local_datetime, to_local
 from argus.collectors.base import CollectContext
 from argus.collectors.http import Fetcher
 from argus.collectors.runner import default_collectors
 from argus.config import AppConfig, Secrets
-from argus.domain.models import ItemStatus
-from argus.planner.freetime import busy_on
+from argus.domain.models import Item, ItemStatus
+from argus.estimates import effective_estimates, estimate_sources
+from argus.planner.calibration import Effective, Finished, factor
+from argus.planner.freetime import Busy, busy_on
+from argus.planning import blocks_between, explanation, risk_map, workload
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
 from argus.store import repo
-from argus.web.format import clock_time, long_date, relative
+from argus.web.format import clock_time, day_label, due_text, hours, long_date, relative
 from argus.web.viewmodels import (
     CourseView,
     DayGroup,
+    EstimateView,
+    FindingView,
     ItemView,
     SourceStatusView,
     StaleNotice,
     TimelineView,
     TimerView,
+    WorkloadDay,
     course_views,
     group_by_day,
     item_view,
@@ -64,10 +70,33 @@ def _views(
     courses = course_views(config)
     timer = repo.running_timer(conn)
     running = timer.item_id if timer else None
+    estimates = estimate_views(conn, now)
+    risk = risk_map(conn, config, now)
     return [
-        item_view(i, now, courses, running_item_id=running)
+        item_view(
+            i,
+            now,
+            courses,
+            running_item_id=running,
+            estimate=estimates.get(i.id),
+            risk=risk[i.id].level if i.id in risk else None,
+        )
         for i in repo.list_items(conn, **filters)  # type: ignore[arg-type]
     ]
+
+
+def estimate_views(conn: sqlite3.Connection, now: datetime) -> dict[int, EstimateView]:
+    eff = effective_estimates(conn, now)
+    sources = estimate_sources(conn)
+    return {
+        item_id: EstimateView(
+            calibrated_hours=e.p50,
+            raw_hours=e.raw_p50,
+            is_default=sources.get(item_id) == "default",
+            is_override=e.overridden,
+        )
+        for item_id, e in eff.items()
+    }
 
 
 @dataclass(frozen=True)
@@ -143,6 +172,7 @@ def load_today(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> To
     if overdue:
         parts.append(f"{len(overdue)} past due")
     busy = busy_on(today, repo.list_meetings(conn), config.schedule.commitments)
+    busy += _sessions(conn, today)
     by_id = {v.id: v for v in views}
     return TodayData(
         date_text=long_date(today),
@@ -155,6 +185,29 @@ def load_today(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> To
             repo.running_timer(conn), by_id | _running_extra(conn, config, now, by_id), now
         ),
     )
+
+
+def _sessions(conn: sqlite3.Connection, day: date) -> list[Busy]:
+    """Planned work sessions on a local day, as rail blocks."""
+    titles = {i.id: (i.title, i.course_code) for i in repo.list_items(conn)}
+    out = []
+    for b in blocks_between(
+        conn, local_datetime(day, 0), local_datetime(day + timedelta(days=1), 0)
+    ):
+        if b.kind != "work" or b.item_id not in titles:
+            continue
+        title, code = titles[b.item_id]
+        out.append(
+            Busy(
+                start=b.start,
+                end=b.end,
+                kind="session",
+                title=title,
+                course_code=code,
+                where="planned",
+            )
+        )
+    return out
 
 
 def _running_extra(
@@ -232,7 +285,7 @@ def load_health(
         texts_today=sum(1 for n in sent if n.channel == "sms"),
         text_cap=config.notifications.daily_text_cap,
         channel=channels[0] if channels else None,
-        ai_spend="Not set up",
+        ai_spend=ai_spend(conn, config, now),
         last_sync=relative(max(successes), now) if successes else None,
         rules=[RuleRow(r.value, r.label, r.value in muted, r in ACTIVE_RULES) for r in Rule],
         notifications=[
@@ -557,3 +610,282 @@ def load_search(
         if matched:
             groups.append(SearchGroup(label, matched))
     return groups
+
+
+# ---------------------------------------------------------------- estimate detail
+
+
+@dataclass(frozen=True)
+class LogLine:
+    when: str
+    hours: str
+    source: str
+    running: bool
+
+
+@dataclass(frozen=True)
+class PastLine:
+    title: str
+    actual: str
+    estimate: str | None
+    ratio: str | None
+
+
+@dataclass(frozen=True)
+class SessionLine:
+    when: str
+    length: str
+
+
+@dataclass(frozen=True)
+class ItemDetail:
+    view: ItemView
+    item: Item
+    estimate: Effective | None
+    estimate_source: str | None
+    latest: repo.EstimateRow | None
+    history: list[repo.EstimateRow]
+    factor_text: str | None
+    logged: str
+    logs: list[LogLine]
+    past: list[PastLine]
+    sessions: list[SessionLine]
+    remaining: str | None
+    free_before_due: str | None
+    findings: list[repo.FindingRow]
+    scope: str | None
+    logistics: str | None
+
+
+def load_item(
+    conn: sqlite3.Connection, config: AppConfig, now: datetime, item_id: int
+) -> ItemDetail | None:
+    item = repo.get_item(conn, item_id)
+    if item is None:
+        return None
+    views = {v.id: v for v in _views(conn, config, now)}
+    view = views.get(item.id) or item_view(item, now, course_views(config))
+    eff = effective_estimates(conn, now).get(item.id)
+    history = repo.estimates_for(conn, item.id)
+    base = next((e for e in reversed(history) if e.source != "user"), None)
+    finished = repo.finished_history(conn, now)
+    same = [f for f in finished if f.course_code == item.course_code and f.kind == item.kind]
+    factor_text = None
+    if eff is not None and not eff.overridden:
+        f = factor(
+            [Finished(r.course_code, r.kind, r.p50, r.actual) for r in finished],
+            item.course_code,
+            item.kind,
+        )
+        if f.n:
+            factor_text = (
+                f"Your past {item.kind.value}s in {item.course_code} took {f.r_bar:.2f}x their estimates "
+                f"({f.n} finished). Argus applies {f.m:.2f}x and moves closer to your average as history grows."
+            )
+        else:
+            factor_text = "No finished work with logged time yet, so the estimate is used as is."
+    logs = []
+    total = 0.0
+    for log in repo.time_logs_for(conn, item.id):
+        h = log.hours(now)
+        total += h
+        logs.append(
+            LogLine(
+                f"{to_local(log.started_at):%a %b} {to_local(log.started_at).day}, {clock_time(log.started_at)}",
+                hours(h),
+                log.source,
+                log.ended_at is None,
+            )
+        )
+    risk = risk_map(conn, config, now).get(item.id)
+    row = conn.execute("SELECT scope, logistics FROM items WHERE id = ?", (item.id,)).fetchone()
+    return ItemDetail(
+        view=view,
+        item=item,
+        estimate=eff,
+        estimate_source=estimate_sources(conn).get(item.id),
+        latest=base,
+        history=list(reversed(history)),
+        factor_text=factor_text,
+        logged=hours(total) if total else "None yet",
+        logs=list(reversed(logs)),
+        past=[
+            PastLine(
+                f.title,
+                hours(f.actual),
+                hours(f.p50) if f.p50 else None,
+                f"{f.actual / f.p50:.1f}x" if f.p50 else None,
+            )
+            for f in same
+        ][-8:],
+        sessions=[
+            SessionLine(
+                f"{to_local(b.start):%a %b} {to_local(b.start).day}, {clock_time(b.start)}",
+                hours((b.end - b.start).total_seconds() / 3600),
+            )
+            for b in blocks_between(conn, now, now + timedelta(days=30))
+            if b.item_id == item.id and b.kind == "work"
+        ],
+        remaining=hours(risk.remaining_p80) if risk and risk.remaining_p80 is not None else None,
+        free_before_due=hours(risk.free_before_due)
+        if risk and risk.free_before_due is not None
+        else None,
+        findings=[f for f in repo.list_findings(conn) if f.item_id == item.id],
+        scope=row["scope"] if row else None,
+        logistics=row["logistics"] if row else None,
+    )
+
+
+# ---------------------------------------------------------------- workload
+
+
+@dataclass(frozen=True)
+class WorkloadData:
+    days: list[WorkloadDay]
+    explanation: str | None
+    at_risk: list[ItemView]
+    total_need: float
+    total_free: float
+
+
+def load_workload(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> WorkloadData:
+    rows = workload(conn, config, now)
+    today = to_local(now).date()
+    days = [
+        WorkloadDay(
+            day_label(to_local(r.day).date(), today),
+            f"{to_local(r.day):%a}",
+            round(r.need_hours, 2),
+            round(r.free_hours, 2),
+        )
+        for r in rows
+    ]
+    risky = [
+        v
+        for v in _views(conn, config, now, open_only=True)
+        if v.risk.slug in ("at-risk", "watch", "overdue")
+    ]
+    risky.sort(key=lambda v: (-v.risk.severity, v.due_at or now))
+    return WorkloadData(
+        days=days,
+        explanation=explanation(conn),
+        at_risk=risky,
+        total_need=sum(d.need_hours for d in days),
+        total_free=sum(d.free_hours for d in days),
+    )
+
+
+# ---------------------------------------------------------------- announcements
+
+
+@dataclass(frozen=True)
+class CourseAnnouncements:
+    course: CourseView
+    waiting: list[FindingView]
+    recent: list[FindingView]
+    unanalyzed: list[PostView]
+
+
+KIND_TITLES = {
+    "new_assessment": "New assessment",
+    "date_change": "Date change",
+    "cancellation": "Cancellation",
+    "scope": "Scope",
+    "logistics": "Logistics",
+    "other": "Other",
+}
+
+
+def finding_view(
+    conn: sqlite3.Connection, f: repo.FindingRow, courses: dict[str, CourseView], now: datetime
+) -> FindingView:
+    stored = repo.get_post(conn, f.post_id)
+    post = stored.record if stored else None
+    item = repo.get_item(conn, f.item_id) if f.item_id else None
+    official_name = None
+    official_text = None
+    if f.status == "conflict" and item and item.due_at:
+        official_name = (
+            "ELMS" if any(link.source.family == "canvas" for link in item.links) else "Gradescope"
+        )
+        official_text = due_text(item.due_at, now)
+    when = None
+    if f.date:
+        when = (
+            f"{to_local(f.date):%a, %b} {to_local(f.date).day}"
+            if f.date_only
+            else due_text(f.date, now)
+        )
+    source = "Piazza" if post and post.platform == "piazza" else "a Canvas announcement"
+    role = (
+        {"instructor": " by an instructor", "ta": " by a TA", "student": " by a student"}.get(
+            post.author_role.value, ""
+        )
+        if post
+        else ""
+    )
+    confirm_label = {
+        "conflict": "Use announced date",
+        "cancellation": "Mark cancelled",
+    }.get("conflict" if f.status == "conflict" else f.kind, "Confirm")
+    return FindingView(
+        id=f.id,
+        course=courses.get(f.course_code) or CourseView(f.course_code, "slate"),
+        kind_label=KIND_TITLES[f.kind],
+        title=f.title,
+        quote=f.quote,
+        source_name=f"{source}{role}",
+        source_url=(post.url if post and post.url else "#"),
+        posted_text=f"posted {relative(post.posted_at, now)}" if post else "",
+        state=f.status
+        if f.status in ("pending", "conflict", "applied")
+        else "applied"
+        if f.status in ("confirmed", "linked")
+        else f.status,
+        date_text=when,
+        official_name=official_name,
+        official_text=official_text,
+        confirm_label=confirm_label,
+    )
+
+
+def load_announcements(
+    conn: sqlite3.Connection, config: AppConfig, now: datetime
+) -> list[CourseAnnouncements]:
+    from argus.announcements import worth_analyzing
+
+    courses = course_views(config)
+    findings = repo.list_findings(conn)
+    pending_posts = [p for p in repo.posts_to_scan(conn, limit=200) if worth_analyzing(p)]
+    out = []
+    for code, course in courses.items():
+        mine = [f for f in findings if f.course_code == code]
+        waiting = [
+            finding_view(conn, f, courses, now) for f in mine if f.status in ("pending", "conflict")
+        ]
+        recent = [
+            finding_view(conn, f, courses, now)
+            for f in mine
+            if f.status in ("applied", "confirmed", "linked")
+            and now - f.created_at < timedelta(days=21)
+        ][:8]
+        unanalyzed = [
+            PostView(
+                title=p.record.title,
+                body=p.record.body[:400] + ("..." if len(p.record.body) > 400 else ""),
+                kind_label=_POST_KINDS.get(p.record.kind, p.record.kind),
+                when=relative(p.record.posted_at, now),
+                url=p.record.url,
+                staff=p.record.author_role.is_staff,
+            )
+            for p in pending_posts
+            if p.record.course_code == code
+        ][:10]
+        out.append(CourseAnnouncements(course, waiting, recent, unanalyzed))
+    return out
+
+
+def ai_spend(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> str:
+    from argus.ai.budget import spent_this_month
+
+    return f"${spent_this_month(conn, now):.2f} of ${config.ai.monthly_budget_usd:.2f}"

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, course_chip, risk_badge, estimate_pill, source_links, empty_state %}
+{% block content %}
+{% set v = data.view %}
+<div class="page-head" data-accent="{{ v.course.accent }}">
+  <h1 class="page-title">{{ v.title }}</h1>
+  <p class="page-sub flex flex-wrap items-center gap-2">{{ course_chip(v.course, "/courses/" ~ v.course.code) }} {{ v.kind_label }}{% if v.due_text %}, due {{ v.due_text }} ({{ v.due_relative }}){% endif %}{% if v.risk.slug != "ok" and not v.done %} {{ risk_badge(v.risk) }}{% endif %}</p>
+</div>
+
+<div class="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+  <div class="grid gap-8 content-start">
+    <section aria-labelledby="est-heading">
+      <h2 class="section-title" id="est-heading">Estimate</h2>
+      <div class="panel panel-pad grid gap-4">
+        {% if data.estimate %}
+        <div class="flex flex-wrap gap-6">
+          <div class="stat"><span class="stat__value">{{ data.estimate.p50|hours }}</span><span class="stat__label">Typical (p50{% if not data.estimate.overridden %}, calibrated{% endif %})</span></div>
+          <div class="stat"><span class="stat__value">{{ data.estimate.p80|hours }}</span><span class="stat__label">Planned for (p80)</span></div>
+          {% if not data.estimate.overridden %}<div class="stat"><span class="stat__value text-muted">{{ data.estimate.raw_p50|hours }}</span><span class="stat__label">{{ "Typical default" if data.estimate_source == "default" else "AI estimate" }} before calibration</span></div>{% endif %}
+        </div>
+        {% if data.estimate.overridden %}<p class="text-sm"><strong>You set this estimate.</strong> It wins over the AI estimate until you remove it.</p>{% endif %}
+        {% if data.factor_text %}<p class="text-sm text-muted">{{ data.factor_text }}</p>{% endif %}
+        {% else %}
+        <p class="text-muted">No estimate yet. Argus estimates new work within a few minutes.</p>
+        {% endif %}
+        {% if data.latest and data.latest.breakdown %}
+        <table class="data-table">
+          <caption class="visually-hidden">Breakdown of the estimate</caption>
+          <thead><tr><th scope="col">Step</th><th scope="col" class="text-right">Hours</th></tr></thead>
+          <tbody>{% for step, h in data.latest.breakdown %}<tr><td>{{ step }}</td><td class="text-right tnum">{{ h|hours }}</td></tr>{% endfor %}</tbody>
+        </table>
+        {% endif %}
+        {% if data.latest and data.latest.reasoning %}<div><h3 class="font-bold">Reasoning</h3><p class="mt-1">{{ data.latest.reasoning }}</p></div>{% endif %}
+        {% if data.latest and data.latest.assumptions %}<div><h3 class="font-bold">Assumptions</h3><ul class="mt-1 list-disc pl-5">{% for a in data.latest.assumptions %}<li>{{ a }}</li>{% endfor %}</ul></div>{% endif %}
+        {% if data.latest %}<p class="text-xs text-muted">Version {{ data.latest.version }}, {{ data.latest.source }}{% if data.latest.model %}, {{ data.latest.model }}, prompt {{ data.latest.prompt_version }}{% endif %}{% if data.latest.confidence %}, {{ data.latest.confidence }} confidence{% endif %}</p>{% endif %}
+      </div>
+    </section>
+
+    <section aria-labelledby="adjust-heading">
+      <h2 class="section-title" id="adjust-heading">Adjust</h2>
+      <div class="panel panel-pad grid gap-4">
+        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/estimate">
+          <label class="grid gap-1"><span class="text-sm font-bold">Your estimate (hours)</span>
+            <input class="field" name="hours" type="number" inputmode="decimal" min="0.25" max="200" step="0.25" required value="{{ '%g'|format(data.estimate.p50|round(2)) if data.estimate else '' }}">
+          </label>
+          <button class="btn btn-primary" type="submit">Use my estimate</button>
+        </form>
+        <div class="flex flex-wrap gap-2">
+          <form method="post" action="/items/{{ v.id }}/estimate/rerun"><button class="btn" type="submit">{{ icon("refresh-cw", "icon-sm") }}Re-run AI estimate</button></form>
+          {% if data.estimate and data.estimate.overridden %}<form method="post" action="/items/{{ v.id }}/estimate/clear"><button class="btn btn-quiet" type="submit">Remove my estimate</button></form>{% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="time-heading">
+      <h2 class="section-title" id="time-heading">Time spent <span class="section-count">{{ data.logged }}</span></h2>
+      <div class="panel panel-pad grid gap-4">
+        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/log">
+          <label class="grid gap-1"><span class="text-sm font-bold">Log time (hours)</span>
+            <input class="field" name="hours" type="number" inputmode="decimal" min="0.25" max="24" step="0.25" required>
+          </label>
+          <button class="btn" type="submit">Log time</button>
+        </form>
+        {% if data.logs %}
+        <table class="data-table"><caption class="visually-hidden">Time logs</caption>
+          <thead><tr><th scope="col">Started</th><th scope="col">Hours</th><th scope="col">How</th></tr></thead>
+          <tbody>{% for l in data.logs %}<tr><td class="tnum">{{ l.when }}</td><td class="tnum">{{ l.hours }}{% if l.running %} (running){% endif %}</td><td>{{ {"timer": "Timer", "sms": "Text reply", "manual": "Logged here"}[l.source] }}</td></tr>{% endfor %}</tbody>
+        </table>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <aside class="grid gap-6 content-start" aria-label="Plan and context">
+    <section class="panel panel-pad" aria-labelledby="plan-heading">
+      <h2 class="section-title" id="plan-heading">Plan</h2>
+      {% if data.remaining %}<p><strong>{{ data.remaining }}</strong> left to do, with <strong>{{ data.free_before_due or "no" }}</strong> of free time before it's due.</p>{% endif %}
+      {% if data.sessions %}
+      <ul class="mt-3 m-0 p-0 list-none grid gap-1">{% for s in data.sessions %}<li class="tnum">{{ s.when }}, {{ s.length }}</li>{% endfor %}</ul>
+      {% else %}<p class="text-muted mt-2">No sessions planned.</p>{% endif %}
+    </section>
+    {% if data.scope or data.logistics %}
+    <section class="panel panel-pad" aria-labelledby="info-heading">
+      <h2 class="section-title" id="info-heading">From announcements</h2>
+      {% if data.scope %}<p><strong>Covers:</strong> {{ data.scope }}</p>{% endif %}
+      {% if data.logistics %}<p class="mt-1"><strong>Logistics:</strong> {{ data.logistics }}</p>{% endif %}
+    </section>
+    {% endif %}
+    <section class="panel panel-pad" aria-labelledby="src-heading">
+      <h2 class="section-title" id="src-heading">Sources</h2>
+      <p>{{ source_links(v) }}</p>
+    </section>
+    <section class="panel panel-pad" aria-labelledby="past-heading">
+      <h2 class="section-title" id="past-heading">Past {{ v.kind_label|lower }}s in {{ v.course.code }}</h2>
+      {% if data.past %}
+      <table class="data-table"><caption class="visually-hidden">Past actual times</caption>
+        <thead><tr><th scope="col">Item</th><th scope="col">Actual</th><th scope="col">Estimate</th></tr></thead>
+        <tbody>{% for p in data.past %}<tr><td>{{ p.title }}</td><td class="tnum">{{ p.actual }}</td><td class="tnum">{{ p.estimate or "-" }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% else %}<p class="text-muted">Log time on finished work and Argus learns how long things take you.</p>{% endif %}
+    </section>
+  </aside>
+</div>
+{% endblock %}

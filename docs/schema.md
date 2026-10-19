@@ -23,10 +23,18 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `rule_mutes` | 0002 | Muted reminder rules, optionally until a time |
 | `modules` | 0003 | Canvas modules per course: name, position, student `state`, items as JSON `[{title, type, url, indent}]` (links only; files stay in Canvas), and `digest` (AI study digest, Phase 5) |
 | `courses.grade_*` | 0003 | Current grade from Canvas enrollments (`grade_score`, `grade_letter`, `grade_updated_at`) |
+| `ai_calls` | 0004 | Every AI attempt: task, model, prompt version, input hash, status (`ok`, `invalid`, `refused`, `error`, `budget`, `cache_hit`), tokens, cost in USD. Month-to-date spend and the budget cap read from it |
+| `ai_cache` | 0004 | Validated AI answers keyed by sha256(model, prompt version, rendered input, schema) |
+| `findings` | 0004 | Facts extracted from posts: kind, title, `date` (UTC; `date_only` when the post gave a day only), scope, quote, confidence, matched `item_id`, `status` (`applied`, `pending`, `conflict`, `linked`, `stored`, `confirmed`, `dismissed`, `superseded`), and the decision's `reason` |
+| `item_overrides` | 0004 | Student decisions: a confirmed due date that wins over sources, or a confirmed cancellation (item hidden) |
+| `items.scope`, `items.logistics` | 0004 | Text applied from staff findings |
+| `estimates` | 0004 | Versioned, append-only: `source` (`ai`, `default`, `user`), p50/p80 hours, confidence, breakdown and assumptions (JSON), reasoning, input hash, model, prompt version. User overrides can be retracted (`retracted_at`), never rewritten |
+| `plan_blocks` | 0004 | Planned work (and, in Phase 5, review) sessions. Future blocks are replaced on replan; started ones are kept |
+| `plan_state` | 0004 | The inputs hash of the current plan, its one-line explanation, and when it was made |
 | `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 
-Later phases add `findings`, `concepts`, `practice_items`, `practice_attempts`,
-`exams`, `estimates`, `plan_blocks`, `inbound_messages`, `vault_regions`, and `proposals`
+Later phases add `concepts`, `practice_items`, `practice_attempts`,
+`exams`, `inbound_messages`, `vault_regions`, and `proposals`
 (the `modules` table landed in 0003),
 each in its own migration, documented here when it lands.
 

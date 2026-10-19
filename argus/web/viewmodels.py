@@ -70,6 +70,7 @@ class EstimateView:
     calibrated_hours: float
     raw_hours: float | None = None
     is_default: bool = False
+    is_override: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,7 @@ def item_view(
     *,
     running_item_id: int | None = None,
     estimate: EstimateView | None = None,
+    risk: RiskLevel | None = None,
 ) -> ItemView:
     conflict = tuple(
         f"{SOURCE_LABELS.get(src, src.value)}: {due_text(when, now)}"
@@ -129,7 +131,7 @@ def item_view(
         kind_label=KIND_LABELS[item.kind],
         status=item.status,
         status_label=STATUS_LABELS[item.status],
-        risk=assess(item, now),
+        risk=risk if risk is not None else assess(item, now),
         due_at=item.due_at,
         due_text=due_text(item.due_at, now) if item.due_at else None,
         due_relative=relative(item.due_at, now) if item.due_at else None,
@@ -176,6 +178,11 @@ class BlockView:
     end_text: str
     top_pct: float
     height_pct: float
+
+    @property
+    def short(self) -> bool:
+        """Too short for a second line on the rail."""
+        return self.height_pct < 4.5
 
     @property
     def label(self) -> str:
