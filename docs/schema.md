@@ -44,7 +44,8 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `vault_runs` | 0005 | One row per vault cycle: `ok`, `conflict` (kept the student's version), `error`, or `skipped`, plus commit and files written. Three `error` rows in a row raise a system alert |
 | `vault_edit_log` | 0006 | Edits Argus made in notes opened to it with `argus-edit: allow`; the weekly note lists them |
 
-Phase 6 adds `inbound_messages` for SMS replies, documented here when it lands.
+| `inbound_messages` | 0007 | One row per Twilio `MessageSid` (UNIQUE, so a replay is answered once): the text, what Argus understood (`command`, `via` `rules`/`ai`/`none`), `status` (`done`, `unclear`, `failed`), the reply, and `item_ids` (what `[n]` meant in the reply, for TODAY) |
+| `snoozes` | 0007 | Per item: reminders deferred until `until` (`SNOOZE n d`), except the 3-hour warning |
 
 ## items
 | Column | Notes |

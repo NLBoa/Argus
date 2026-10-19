@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 from argus.clock import to_local
@@ -85,6 +85,38 @@ class SessionRef:
 
 
 @dataclass(frozen=True, slots=True)
+class Brief:
+    day: date
+    body: str
+    item_ids: tuple[int, ...]
+    until: datetime  # dropped after this (end of the day)
+
+
+@dataclass(frozen=True, slots=True)
+class Countdown:
+    item: Item
+    days: int  # 7, 3, or 1
+    weakest: tuple[str, ...]  # concept names, weakest first
+    until: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class Announced:
+    """A quiz/exam finding from a staff post: new, moved, rescoped, or waiting for OK/NO."""
+
+    finding_id: int
+    course_code: str
+    kind: str  # new_assessment | date_change | scope | cancellation
+    title: str
+    status: str  # applied | conflict | pending
+    date: datetime | None
+    item_id: int | None
+    official: datetime | None  # the official date when the post disagrees with it
+    scope: str | None
+    until: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     now: datetime
     items: Sequence[Item]
@@ -95,6 +127,9 @@ class Snapshot:
     at_risk: frozenset[int] = frozenset()  # item ids the planner says are at risk
     sessions: Sequence[SessionRef] = ()
     ai_budget_month: str | None = None  # "2026-10" when the AI budget was hit this month
+    brief: Brief | None = None  # today's morning brief, once its time has come
+    countdowns: Sequence[Countdown] = ()
+    announced: Sequence[Announced] = ()
 
 
 def item_key(item: Item, rule: Rule) -> str:
@@ -309,6 +344,91 @@ def ai_budget_alert(snap: Snapshot) -> list[Reminder]:
     ]
 
 
+def morning_brief(snap: Snapshot) -> list[Reminder]:
+    b = snap.brief
+    if b is None or (key := f"brief:{b.day.isoformat()}") in snap.sent_keys:
+        return []
+    return [
+        Reminder(
+            rule=Rule.MORNING_BRIEF,
+            keys=(key,),
+            title="Today",
+            body=b.body,
+            item_ids=b.item_ids,
+            priority=2,
+            expires_at=b.until,
+        )
+    ]
+
+
+def exam_countdowns(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for c in snap.countdowns:
+        key = f"{item_key(c.item, Rule.EXAM_COUNTDOWN)}:{c.days}"
+        if key in snap.sent_keys or c.item.due_at is None:
+            continue
+        span = "tomorrow" if c.days == 1 else f"in {c.days} days"
+        weakest = f" Weakest: {', '.join(c.weakest)}." if c.weakest else ""
+        out.append(
+            Reminder(
+                rule=Rule.EXAM_COUNTDOWN,
+                keys=(key,),
+                title=f"Exam {span}",
+                body=f"[1] {c.item.course_code} {short(c.item.title, 40)}, {when(c.item.due_at)}.{weakest}"
+                " Practice on Exam prep.",
+                item_ids=(c.item.id,),
+                priority=3,
+                expires_at=c.until,
+            )
+        )
+    return out
+
+
+def _announced_body(a: Announced) -> tuple[str, str, int]:
+    """(title, body, priority) for an announced change."""
+    what = f"{a.course_code} {short(a.title, 40)}"
+    if a.status == "conflict" and a.date is not None and a.official is not None:
+        return (
+            "Dates disagree",
+            f"[1] {what}: post says {when(a.date)}, official {when(a.official)}. "
+            "Reply OK 1 to use the post's date, NO 1 to keep the official one.",
+            4,
+        )
+    if a.kind == "cancellation":
+        return (
+            "Cancelled?",
+            f"[1] {what} looks cancelled in a post. Reply OK 1 to hide it, NO 1 to keep it.",
+            4,
+        )
+    if a.kind == "scope":
+        return ("Scope posted", f"[1] {what} covers: {short(a.scope or '', 90)}", 3)
+    if a.kind == "date_change" and a.date is not None:
+        return ("Date moved", f"[1] {what} is now {when(a.date)} (from a post).", 4)
+    due = f", {when(a.date)}" if a.date else ""
+    return ("Announced", f"[1] {what}{due} (from a post; not on ELMS yet).", 3)
+
+
+def announced(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for a in snap.announced:
+        key = f"finding:{a.finding_id}:{a.status}"
+        if key in snap.sent_keys:
+            continue
+        title, body, priority = _announced_body(a)
+        out.append(
+            Reminder(
+                rule=Rule.ANNOUNCED,
+                keys=(key,),
+                title=title,
+                body=body,
+                item_ids=(a.item_id,) if a.item_id is not None else (),
+                priority=priority,
+                expires_at=a.until,
+            )
+        )
+    return out
+
+
 def candidates(snap: Snapshot) -> list[Reminder]:
     """Everything that could be sent now, most urgent first."""
     found = (
@@ -317,6 +437,9 @@ def candidates(snap: Snapshot) -> list[Reminder]:
         + at_risk(snap)
         + start_nudges(snap)
         + new_items(snap)
+        + announced(snap)
+        + exam_countdowns(snap)
+        + morning_brief(snap)
         + system_alerts(snap)
         + ai_budget_alert(snap)
     )

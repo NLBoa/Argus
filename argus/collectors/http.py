@@ -134,8 +134,17 @@ class Fetcher:
             f"{method} {_redacted(url)} failed after {self.max_attempts} attempts: {last_error}"
         )
 
+    @property
+    def client(self) -> httpx.AsyncClient:
+        return self._client
+
     async def post_json(self, url: str, payload: Mapping[str, Any]) -> Response:
         return await self.request("POST", url, json_body=payload)
+
+    async def post_form(
+        self, url: str, data: Mapping[str, str], headers: Mapping[str, str] | None = None
+    ) -> Response:
+        return await self.request("POST", url, data=data, headers=headers)
 
     async def get(self, url: str, **kw: Any) -> Response:
         return await self.request("GET", url, **kw)

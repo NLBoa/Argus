@@ -1,0 +1,15 @@
+[Unit]
+Description=Argus nightly database backup (14 days kept, copied off-device)
+Documentation=file:///opt/argus/docs/runbook.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=argus
+Group=argus
+WorkingDirectory=/var/lib/argus
+ExecStart=/opt/argus/.venv/bin/argus backup -c /etc/argus/config.yaml
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/argus

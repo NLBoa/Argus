@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from datetime import timedelta
 from itertools import groupby
 from pathlib import Path
@@ -183,6 +184,63 @@ def notify_test(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     typer.echo(f"sent via {detail}" if ok else f"not sent: {detail}")
     if not ok:
         raise typer.Exit(1)
+
+
+@app.command("serve-webhook")
+def serve_webhook(
+    config: ConfigOpt = DEFAULT_CONFIG, host: str = "127.0.0.1", port: int = 8001
+) -> None:  # pragma: no cover - runs a server
+    """Run the Twilio webhook (the only public route) on its own port."""
+    import uvicorn
+
+    from argus.web.webhook import create_webhook_app
+
+    cfg, secrets = _setup(config)
+    uvicorn.run(create_webhook_app(cfg, secrets), host=host, port=port)
+
+
+@app.command()
+def backup(config: ConfigOpt = DEFAULT_CONFIG) -> None:
+    """Snapshot the database, keep 14 days, and copy the backups off the Pi."""
+    from argus import backup as bk
+
+    cfg, _ = _setup(config)
+    now = make_clock().now()
+    path = bk.snapshot(cfg.paths.db_path, cfg.paths.backup_dir, now)
+    bk.verify(path)
+    removed = bk.prune(cfg.paths.backup_dir, now)
+    typer.echo(f"backup: {path.name} (removed {len(removed)} older than 14 days)")
+    if cfg.paths.backup_remote:
+        try:
+            bk.copy_off_device(cfg.paths.backup_dir, cfg.paths.backup_remote)
+        except (bk.BackupError, OSError, subprocess.TimeoutExpired) as e:
+            typer.echo(f"backup: off-device copy failed: {e}", err=True)
+            raise typer.Exit(1) from e
+        typer.echo("backup: copied off-device")
+    else:
+        typer.echo("backup: no backup_remote configured; the copy stays on this device", err=True)
+
+
+@app.command()
+def restore(
+    archive: Annotated[Path, typer.Argument(help="A backup file (argus-YYYYMMDD-HHMM.db.gz).")],
+    config: ConfigOpt = DEFAULT_CONFIG,
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation.")] = False,
+) -> None:
+    """Replace the database with a backup. Stop argus-worker and argus-web first."""
+    from argus import backup as bk
+
+    cfg, _ = _setup(config)
+    if not yes:
+        typer.confirm(f"Replace {cfg.paths.db_path} with {archive.name}?", abort=True)
+    try:
+        kept = bk.restore(archive, cfg.paths.db_path, make_clock().now())
+    except bk.BackupError as e:
+        typer.echo(f"restore: {e}", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(
+        f"restored {archive.name}" + (f"; the previous database is at {kept}" if kept else "")
+    )
 
 
 @app.command()

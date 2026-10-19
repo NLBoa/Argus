@@ -180,3 +180,16 @@ class PracticeCheck(_Out):
 class VerificationOut(_Out):
     claims: list[ClaimCheck]
     practice: list[PracticeCheck]
+
+
+# ---------------------------------------------------------------- SMS replies
+
+
+class CommandOut(_Out):
+    """What a free-text reply most likely means, as one command. Code validates and acts."""
+
+    command: Literal["DONE", "LOG", "SNOOZE", "EST", "OK", "NO", "TODAY", "UNCLEAR"]
+    number: int | None = Field(description="The [n] item number the student means, or null")
+    hours: float | None = Field(description="Hours for LOG or EST, or null")
+    minutes: int | None = Field(description="Snooze length in minutes, or null")
+    confidence: float = Field(ge=0, le=1)

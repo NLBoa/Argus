@@ -15,20 +15,37 @@ from datetime import datetime, timedelta
 from argus.ai.budget import budget_hit_this_month, month_key
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
+from argus.domain.models import ItemKind
+from argus.exams import review_concepts
 from argus.logging import get_logger
 from argus.notify.channels import OutboundMessage
 from argus.notify.router import Router
 from argus.planner.freetime import meetings_on
+from argus.planner.review import review_order
 from argus.planner.risk import RiskLevel
 from argus.planning import blocks_between, risk_map
 from argus.reminders.guards import GuardContext, Verdict, check
-from argus.reminders.rules import Reminder, Rule, SessionRef, Snapshot, SourceAlertState, candidates
+from argus.reminders.rules import (
+    Announced,
+    Brief,
+    Countdown,
+    Reminder,
+    Rule,
+    SessionRef,
+    Snapshot,
+    SourceAlertState,
+    candidates,
+)
+from argus.sms import today_text
 from argus.store import repo
-from argus.store.db import transaction
+from argus.store.db import iso, parse_iso, transaction
 from argus.vault.service import health as vault_health
 
 log = get_logger(__name__)
 BOOTSTRAP_GRACE = timedelta(minutes=10)
+COUNTDOWN_DAYS = (7, 3, 1)
+ANNOUNCED_KINDS = ("new_assessment", "date_change", "scope", "cancellation")
+ANNOUNCED_FOR = timedelta(days=2)  # older findings are not texted (the Announcements page has them)
 SOURCES = (
     "canvas_ical",
     "canvas_api",
@@ -93,8 +110,63 @@ class ReminderEngine:
             items=repo.list_items(self.conn),
             sent_keys=frozenset(repo.notification_keys(self.conn)),
             sources=sources,
+            brief=self._brief(now),
+            countdowns=self._countdowns(now),
+            announced=self._announced(now),
             bootstrap_until=first + BOOTSTRAP_GRACE if first else None,
         )
+
+    def _end_of_day(self, now: datetime) -> datetime:
+        return local_datetime(to_local(now).date() + timedelta(days=1), 0)
+
+    def _brief(self, now: datetime) -> Brief | None:
+        local = to_local(now)
+        if local.time() < self.config.schedule.morning_brief:
+            return None
+        body, ids = today_text(self.conn, now)
+        return Brief(local.date(), body, ids, self._end_of_day(now))
+
+    def _countdowns(self, now: datetime) -> list[Countdown]:
+        today = to_local(now).date()
+        out = []
+        for item in repo.list_items(
+            self.conn, due_after=now, due_before=now + timedelta(days=8), open_only=True
+        ):
+            if item.kind is not ItemKind.EXAM or item.due_at is None:
+                continue
+            days = (to_local(item.due_at).date() - today).days
+            if days not in COUNTDOWN_DAYS:
+                continue
+            weakest = tuple(c.name for c in review_order(review_concepts(self.conn, item.id))[:2])
+            out.append(Countdown(item, days, weakest, self._end_of_day(now)))
+        return out
+
+    def _announced(self, now: datetime) -> list[Announced]:
+        items = {i.id: i for i in repo.list_items(self.conn)}
+        out = []
+        for f in repo.list_findings(self.conn, ("applied", "conflict", "pending")):
+            if f.kind not in ANNOUNCED_KINDS or now - f.created_at > ANNOUNCED_FOR:
+                continue
+            item = items.get(f.item_id) if f.item_id is not None else None
+            if f.status == "pending" and f.kind != "cancellation":
+                continue  # held for review (student posts): the Announcements page shows them
+            if item is not None and item.kind is ItemKind.ASSIGNMENT and f.kind != "cancellation":
+                continue  # this rule is for quizzes and exams
+            out.append(
+                Announced(
+                    f.id,
+                    f.course_code,
+                    f.kind,
+                    item.title if item else f.title,
+                    f.status,
+                    f.date,
+                    f.item_id,
+                    item.due_at if item and f.status == "conflict" else None,
+                    f.scope,
+                    f.created_at + ANNOUNCED_FOR,
+                )
+            )
+        return out
 
     def guard_context(self, now: datetime) -> GuardContext:
         today = to_local(now).date()
@@ -107,6 +179,12 @@ class ReminderEngine:
             sent_today_capped=sum(1 for n in sent if n.counts_toward_cap),
             daily_cap=self.config.notifications.daily_text_cap,
             muted=frozenset(repo.muted_rules(self.conn, now)),
+            snoozed={
+                r["item_id"]: parse_iso(r["until"])
+                for r in self.conn.execute(
+                    "SELECT item_id, until FROM snoozes WHERE until > ?", (iso(now),)
+                )
+            },
         )
 
     def _message(

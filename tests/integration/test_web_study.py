@@ -73,12 +73,12 @@ def test_exam_list_and_prep_page(client: TestClient) -> None:
     assert 'href="/exams"' in client.get("/today").text  # in the main nav
     exam = item_id(client, "Midterm 1")
     page = client.get(f"/exams/{exam}").text
-    # Weakest first and interleaved: untested, then shaky, then solid concepts.
+    # Weakest first and interleaved: shaky, then untested, then solid concepts.
     order = [
         page.index(q)
         for q in (
-            "How many distinct calls",
             "Does the master theorem",
+            "How many distinct calls",
             "Is n^2 in O(n log n)?",
             "Solve T(n) = 8T(n/2)",
         )

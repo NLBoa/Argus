@@ -9,13 +9,15 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
 
 import httpx
+from pydantic import SecretStr
 
 from argus.ai.client import AIClient, Transport, build_transport
 from argus.announcements import scan_posts
 from argus.clock import Clock
-from argus.collectors.http import Fetcher
+from argus.collectors.http import AuthError, Fetcher, FetchError
 from argus.collectors.runner import SyncRunner
 from argus.config import AppConfig, Secrets
 from argus.estimates import ensure_estimates
@@ -23,6 +25,7 @@ from argus.exams import sync_exams
 from argus.logging import get_logger
 from argus.notify.ntfy import NtfyChannel
 from argus.notify.router import Router
+from argus.notify.twilio_sms import TwilioChannel
 from argus.planning import explain, replan
 from argus.reminders.engine import ReminderEngine
 from argus.study import ensure_study, targeted_practice
@@ -30,11 +33,24 @@ from argus.vault import service as vault
 
 log = get_logger(__name__)
 TICK_SECONDS = 60.0
+PING_EVERY = timedelta(minutes=5)
 
 
 def build_router(config: AppConfig, secrets: Secrets, fetcher: Fetcher) -> Router:
-    topic = secrets.ntfy_topic.get_secret_value() if secrets.ntfy_topic else None
-    return Router([NtfyChannel(fetcher, config.notifications.ntfy_server, topic)])
+    """SMS first once Twilio is set up; ntfy is the backup (and the only channel until then)."""
+
+    def plain(value: SecretStr | None) -> str | None:
+        return value.get_secret_value() if value else None
+
+    sms = TwilioChannel(
+        fetcher.client,
+        plain(secrets.twilio_account_sid),
+        plain(secrets.twilio_auth_token),
+        plain(secrets.twilio_from_number),
+        plain(secrets.user_phone_number),
+    )
+    ntfy = NtfyChannel(fetcher, config.notifications.ntfy_server, plain(secrets.ntfy_topic))
+    return Router([sms, ntfy])
 
 
 class Worker:
@@ -63,6 +79,11 @@ class Worker:
             else SyncRunner(conn, config, secrets, clock, fetcher)
         )
         self.engine = ReminderEngine(conn, config, clock, build_router(config, secrets, fetcher))
+        self._ping_url = (
+            secrets.healthchecks_url.get_secret_value() if secrets.healthchecks_url else None
+        )
+        self._pinger = Fetcher(client, max_attempts=1)
+        self._last_ping: datetime | None = None
 
     async def tick(self) -> None:
         """One minute of work. Each step is isolated; reminders run even if all else fails."""
@@ -75,11 +96,30 @@ class Worker:
             ("reminders", self.engine.tick),
             ("vault", self._vault),  # last: reminders never wait on git
         ]
+        crashed = []
         for name, step in steps:
             try:
                 await step()
             except Exception:
+                crashed.append(name)
                 log.exception("worker step crashed", extra={"step": name})
+        await self._heartbeat(failed="reminders" in crashed)
+
+    async def _heartbeat(self, *, failed: bool) -> None:
+        """Dead-man's switch (healthchecks.io style): ping every 5 minutes while reminders work,
+        `/fail` when they crash. If the Pi, the worker, or the network dies, the pings stop and
+        the external service alerts the student by email or text."""
+        now = self.clock.now()
+        if not self._ping_url:
+            return
+        if not failed and self._last_ping is not None and now - self._last_ping < PING_EVERY:
+            return
+        try:
+            await self._pinger.get(self._ping_url.rstrip("/") + ("/fail" if failed else ""))
+        except (AuthError, FetchError) as e:
+            log.warning("heartbeat ping failed", extra={"error": str(e)})
+            return
+        self._last_ping = now
 
     async def _plan(self) -> None:
         if replan(self.conn, self.config, self.clock) and self.ai.available:

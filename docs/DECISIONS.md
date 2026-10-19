@@ -110,6 +110,7 @@ and works for HTMX and no-JS posts alike.
 **Decision.** Alpine's standard build needs `unsafe-eval`, so no Content-Security-Policy is sent in Phase 2.
 Revisit in Phase 6 hardening: either switch to `@alpinejs/csp`, or set a CSP allowing `'unsafe-eval'` for the
 same origin only.
+**Resolved by D042.**
 
 ## D018 — Loading state = progress bar plus dimmed content during HTMX navigation (2026-10-18)
 **Context.** Pages are server-rendered, and on the LAN a full render takes milliseconds. Skeleton-first loading
@@ -224,7 +225,7 @@ student edits one, Argus leaves it alone for good, with no proposal: a diff of c
 ## D037 — Exam review: horizon, order, and nudges (2026-10-19)
 Review sessions (45 minutes, 3 concepts) sit 7, 5, 3, 2, and 1 days before an exam, in free time left after work
 sessions. They are planned for exams inside the 14-day planning horizon; days already past are skipped. Concepts
-go weakest first (untested, then shaky, then solid; inbox confusion raises priority) and interleave across
+go weakest first (shaky, meaning missed or unsure, then untested, then solid; inbox confusion raises priority) and interleave across
 modules. Self-grading triggers a replan, so the order follows readiness. Review blocks get their own start
 nudge, "Time to review", keyed apart from work nudges.
 
@@ -252,3 +253,74 @@ claims, wrong practice answers, wrong diagrams) and 73 clean elements. A miscite
 ruled unsupported or its citation is flagged. A missing verdict counts as a rejection, as in `apply_verification`.
 Gates: catch at least 90% of seeded errors, and false rejects at most 10%. The scorer is unit-tested in CI with
 three verifiers: a perfect one, a rubber stamp, and a dead one. The run itself (`make evals`) needs the API key (see D034).
+
+## D042 — Content-Security-Policy (resolves D017) (2026-10-19)
+Every page is sent with `default-src 'self'`; `script-src 'self' 'unsafe-eval'`; `style-src 'self' 'unsafe-inline'`;
+`img-src 'self' data:`; `object-src 'none'`; `base-uri 'none'`; `form-action 'self'`; `frame-ancestors 'none'`.
+There are no inline scripts or event handlers (a test-time grep found none). `'unsafe-eval'` remains because Alpine's
+standard build evaluates `x-*` expressions with `new Function`; the CSP build would mean rewriting every expression,
+for little gain on a tailnet-only app with no third-party content. Inline styles stay for computed widths (charts).
+An e2e test walks the main pages and interactions and asserts zero CSP violations.
+
+## D043 — The webhook is a separate app on its own port (2026-10-19)
+Tailscale Funnel exposes a whole port, so a webhook route inside the dashboard would make the dashboard public. The
+webhook is its own FastAPI app (`argus serve-webhook`, 127.0.0.1:8001, its own unit) with exactly one route. Only it
+goes behind Funnel (port 8443) or Cloudflare Tunnel (with a path rule). The dashboard (127.0.0.1:8000) is reached only
+through `tailscale serve`. It has no webhook route, and it refuses every cross-origin POST. Tests assert both.
+
+## D044 — Webhook checks (2026-10-19)
+The signature is HMAC-SHA1 over the configured `notifications.webhook_url` plus the sorted form parameters. It is checked
+against Twilio's documented example, and compared in constant time. The URL comes from config, not from request headers,
+so a proxy can't change what is signed. A missing or bad signature gets 403, and nothing is stored. A valid
+request from any number but `user_phone_number` gets an empty TwiML answer (so Twilio doesn't retry) and does nothing.
+Requests are handled one at a time. `inbound_messages.message_sid` is UNIQUE, so a replay gets the stored reply without acting again.
+
+## D045 — SMS commands: rules, then AI, then ask once (2026-10-19)
+The rule parser handles the documented forms (`LOG 1 90m`, `snooze 3`, `DONE #2.`) and refuses anything ambiguous.
+The AI fallback (fast tier) returns one command as JSON, and only confident readings (≥ 0.8) are used. That reading is
+turned back into a command string and run through the same parser, so the AI can never do anything a typed command
+couldn't (for example, a 30-hour LOG is refused either way). Replies say "Read as DONE 1." when the AI was used.
+An unclear text gets the command list once. A second unclear text within 30 minutes gets "nothing changed" instead
+of another prompt. Twilio's reserved keywords (STOP, START, HELP, ...) get no reply from Argus.
+`[n]` resolves against the item ids of the latest numbered text: a sent notification, or a TODAY reply, which wins ties.
+
+## D046 — OK/NO and Y/N answer the open question about an item (2026-10-19)
+Today the only questions Argus asks by text are about announced changes: a date conflict ("Reply OK 1 to use the
+post's date, NO 1 to keep the official one") and a possible cancellation. OK/Y confirms and NO/N dismisses, through the
+same functions as the Announcements page, so the official date changes only on the student's explicit yes.
+With one item in the latest text, the number may be left out.
+
+## D047 — Snooze never silences the 3-hour warning (2026-10-19)
+`SNOOZE n d` defers every reminder whose items are all snoozed (start nudges, 24-hour, at-risk, countdowns), up to
+3 days. The 3-hour warning still goes out: deadline alerts are deterministic and the last one is not optional.
+The reply says so.
+
+## D048 — Twilio: one attempt per send (2026-10-19)
+A POST that timed out may still have been accepted, so retrying inside the channel could double-text. The channel tries
+once. On failure the router falls back to ntfy at once, and the engine's retry for failed notifications still applies.
+The SMS simulated week includes an hour-long Twilio outage: those reminders arrive by ntfy, and none are lost or doubled.
+
+## D049 — "[1]" in texts was being sent as "?1?" (2026-10-19)
+`[` and `]` are in GSM-7's extension table, not the basic set, so `to_gsm7` replaced them with `?`. Extension
+characters are now kept and counted as two septets by `gsm_length`, and `fit` cuts by septets. Rule tests assert
+`gsm_length(sms) <= 160`.
+
+## D050 — Morning brief default 08:00 (2026-10-19)
+The brief used to default to 07:30, inside the default quiet hours (23:00 to 08:00), so it was always deferred to 08:00.
+The default is now 08:00. The brief lists today's open deadlines (numbered for replies) and the next session.
+Countdowns go out 7, 3, and 1 days before an exam, naming the two weakest concepts in `review_order`'s order
+(shaky, then untested). Announced changes are texted for two days after the post; older ones stay on the Announcements page.
+
+## D051 — Secrets on the Pi are credential files (2026-10-19)
+Each secret is a root-only file named for the secret in `/etc/argus/credentials/`. `install.sh` writes a
+`credentials.conf` drop-in per unit with one `LoadCredential=` per file (this works on any systemd ≥ 247, without
+depending on directory credentials). `argus-admin` runs any CLI command as a transient unit with the same user, folder,
+and credentials, so manual commands never need secrets in the shell environment. `load_secrets` accepts both
+`argus_<name>` (systemd) and `<name>` (the folder itself).
+
+## D052 — Backups and the dead-man's switch (2026-10-19)
+`argus backup` (a systemd timer, 03:30) takes an online SQLite snapshot, gzips it, checks its integrity, and prunes
+to 14 days. It then mirrors the folder to `paths.backup_remote` with `rsync -a --delete`, so the remote also holds
+exactly 14 days. A remote that starts with `-` is refused. `argus restore` verifies the archive before replacing the
+database and keeps the old file. The worker pings `healthchecks_url` every 5 minutes after a tick, or `/fail` when
+the reminder step crashed. A failed ping is logged, never raised.

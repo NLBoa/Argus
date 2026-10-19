@@ -330,3 +330,21 @@ def test_reject_proposal_keeps_my_version(
     expect(page.get_by_text("Kept your version.").first).to_be_visible()
     page.goto(server.url + "/today")
     expect(page.get_by_text("Argus wants to change")).to_have_count(0)
+
+
+def test_no_content_security_policy_violations(page: Page, base_url: str) -> None:
+    errors: list[str] = []
+    page.on(
+        "console", lambda m: errors.append(m.text) if "Content Security Policy" in m.text else None
+    )
+    for path in ("/today", "/exams/5", "/proposals", "/health", "/styleguide"):
+        page.goto(base_url + path)
+        page.wait_for_load_state("networkidle")
+    page.get_by_role("button", name="Open command palette").click()
+    expect(page.get_by_role("combobox")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("combobox")).to_have_count(0)
+    page.locator(".theme-toggle").click()
+    page.goto(base_url + "/kiosk")
+    page.wait_for_timeout(700)
+    assert errors == []

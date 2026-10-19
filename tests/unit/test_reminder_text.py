@@ -33,3 +33,13 @@ def test_when_formats_local_time() -> None:
     assert when(datetime(2026, 10, 19, 13, 0, tzinfo=UTC)) == "Mon 9am"
     assert when(datetime(2026, 10, 19, 16, 5, tzinfo=UTC)) == "Mon 12:05pm"
     assert when(datetime(2026, 10, 20, 4, 0, tzinfo=UTC)) == "Tue 12am"
+
+
+def test_item_numbers_survive_gsm7_and_count_double() -> None:
+    from argus.reminders.text import fit, gsm_length, to_gsm7
+
+    assert to_gsm7("[1] HW 3") == "[1] HW 3"  # brackets are GSM-7 (extension table), not "?"
+    assert gsm_length("[1]") == 5
+    long = "[1] " + "word " * 40
+    out = fit(long)
+    assert gsm_length(out) <= 160 and out.endswith("...") and out.startswith("[1]")

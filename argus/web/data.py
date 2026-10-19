@@ -44,7 +44,7 @@ from argus.web.viewmodels import (
 )
 
 PAST_DUE_WINDOW = timedelta(days=3)
-ACTIVE_RULES = {Rule.DUE_24H, Rule.DUE_3H, Rule.NEW_ITEM, Rule.SYSTEM_ALERT}
+ACTIVE_RULES = set(Rule)  # every rule is live as of Phase 6
 
 
 def configured_sources(

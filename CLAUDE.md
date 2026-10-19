@@ -31,7 +31,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Re-record visual baselines | `make visual-update` (macOS) · `scripts/visual_linux.sh --update` (Linux) |
 | AI evals (real API, not in CI) | `make evals` |
 | Everything CI runs | `make check` |
-| Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` |
+| Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
+| Webhook / backup / restore | `argus serve-webhook` · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
 | CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, …) |
 
 ## Architecture map
@@ -45,7 +46,9 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: `layout` (paths, links), `regions`, `ownership` (pure table), `proposals`, `writer` (the only
   vault writer), `render` (pure notes), `gitsync`, and `service` (the 15-minute cycle, inbox, health).
-- `argus/notify/`: Twilio SMS, ntfy, and the router that picks a channel and records the result.
+- `argus/notify/`: Twilio SMS (one attempt), ntfy, and the router (SMS first, ntfy fallback).
+- `argus/sms.py`: replies (parse → AI fallback → ask once → act). `argus/web/webhook.py`: the separate public
+  webhook app (D043). `argus/backup.py`: snapshots, prune, off-device copy, restore.
 - `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault,
   each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
@@ -99,6 +102,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - `piazza-api` login needs a `session_id` cookie. `content.get` is per post, so fetch only staff-relevant posts.
 - The Piazza notification email format is unverified until real mail arrives (`collectors/piazza_email.py`).
 - The newest Playwright Python Docker image is v1.63.0, so Playwright is pinned `==1.63.0` to match.
+- Twilio signs the exact public URL it posts to: `notifications.webhook_url` must match it character for character.
+  STOP/START/HELP are Twilio's (Argus stays silent). `[` and `]` are GSM-7 extension characters (2 septets each).
 
 ## AI rules
 - The AI judges and code decides. Every call goes through `AIClient.structured()` (schema-validated, one retry, then `None` → the caller's

@@ -99,3 +99,13 @@ def test_load_secrets_defaults_to_os_environ(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("ARGUS_NTFY_TOPIC", "topic-abc")
     s = load_secrets()
     assert s.ntfy_topic is not None
+
+
+def test_credentials_folder_with_plain_names(tmp_path: Path) -> None:
+    (tmp_path / "twilio_auth_token").write_text("plain-token\n")
+    (tmp_path / "argus_ntfy_topic").write_text("systemd-topic")
+    s = load_secrets({"CREDENTIALS_DIRECTORY": str(tmp_path)})
+    assert (
+        s.twilio_auth_token is not None and s.twilio_auth_token.get_secret_value() == "plain-token"
+    )
+    assert s.ntfy_topic is not None and s.ntfy_topic.get_secret_value() == "systemd-topic"

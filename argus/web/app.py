@@ -27,8 +27,24 @@ from argus.web.deps import STATIC_DIR, AppState, Runner, make_templates
 from argus.web.routes import actions, kiosk, pages, pwa
 
 log = get_logger(__name__)
-# State-changing routes that may be called cross-origin (they authenticate another way).
-CROSS_ORIGIN_ALLOWED = ("/webhooks/",)
+# D017/D042: everything is same-origin. Alpine's standard build evaluates x-* expressions with
+# `new Function`, hence 'unsafe-eval'; there are no inline scripts or event handlers.
+CSP = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "worker-src 'self'",
+        "manifest-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
 
 
 def _same_origin(request: Request) -> bool:
@@ -86,13 +102,13 @@ def create_app(
     @app.middleware("http")
     async def guard_and_headers(request: Request, call_next: Callable[[Request], Any]) -> Response:
         unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
-        exempt = request.url.path.startswith(CROSS_ORIGIN_ALLOWED)
-        if unsafe and not exempt and not _same_origin(request):
+        if unsafe and not _same_origin(request):  # the Twilio webhook is a separate app
             return PlainTextResponse("Cross-origin request refused.", status_code=403)
         response: Response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", CSP)
         if request.url.path.startswith("/static/") and "v=" in request.url.query:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response

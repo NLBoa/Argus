@@ -22,7 +22,11 @@ from argus.web.format import clock_time, due_text, relative
 from argus.web.viewmodels import CourseView, DiffView, PracticeView, course_views, diff_view
 
 PRACTICE_PER_VISIT = 10
-_READINESS_ORDER = {Readiness.UNTESTED: 0, Readiness.SHAKY: 1, Readiness.SOLID: 2}
+_READINESS_ORDER = {
+    Readiness.SHAKY: 0,
+    Readiness.UNTESTED: 1,
+    Readiness.SOLID: 2,
+}  # as review_order
 _LAST_ORDER = {None: 0, "incorrect": 1, "shaky": 2, "correct": 3}
 
 

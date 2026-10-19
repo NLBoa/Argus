@@ -79,7 +79,7 @@ class ScheduleConfig(_Strict):
     waking_window: TimeWindow = TimeWindow(start=time(8, 0), end=time(23, 0))
     quiet_hours: TimeWindow = TimeWindow(start=time(23, 0), end=time(8, 0))
     walking_buffer_minutes: int = Field(default=15, ge=0, le=60)
-    morning_brief: time = time(7, 30)
+    morning_brief: time = time(8, 0)  # when quiet hours end by default
     max_session_minutes: int = Field(default=120, ge=15, le=120)
     commitments: list[Commitment] = []
 
@@ -89,6 +89,9 @@ class NotificationsConfig(_Strict):
     ntfy_server: str = "https://ntfy.sh"
     # Where notification taps should open the dashboard (your Tailscale name), if anywhere.
     dashboard_url: str | None = None
+    # The exact public URL Twilio posts replies to (Funnel or Tunnel), used to check signatures,
+    # e.g. https://argus-pi.example.ts.net/webhooks/twilio/sms
+    webhook_url: str | None = None
 
 
 class AIModels(_Strict):
@@ -110,6 +113,8 @@ class PathsConfig(_Strict):
     data_dir: Path = Path("var")
     vault_dir: Path = Path("var/vault")
     backup_dir: Path = Path("var/backups")
+    # Where nightly backups are copied (rsync target): "user@nas:/backups/argus" or a mounted path.
+    backup_remote: str | None = None
     # The vault's name in Obsidian, for obsidian:// links (default: the vault folder's name).
     vault_name: str | None = None
 
@@ -195,9 +200,11 @@ def load_secrets(env: dict[str, str] | None = None) -> Secrets:
     values: dict[str, str] = {}
     if cred_dir and Path(cred_dir).is_dir():
         for name in Secrets.model_fields:
-            f = Path(cred_dir) / f"argus_{name}"
-            if f.is_file():
-                values[name] = f.read_text(encoding="utf-8").strip()
+            # systemd names them argus_<name>; /etc/argus/credentials itself holds plain <name>
+            for f in (Path(cred_dir) / f"argus_{name}", Path(cred_dir) / name):
+                if f.is_file():
+                    values[name] = f.read_text(encoding="utf-8").strip()
+                    break
     prefix = "ARGUS_"
     for key, value in source.items():
         if key.startswith(prefix) and key[len(prefix) :].lower() in Secrets.model_fields:

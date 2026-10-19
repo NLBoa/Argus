@@ -18,7 +18,7 @@ from argus.reminders.rules import (
     new_items,
     system_alerts,
 )
-from argus.reminders.text import SEGMENT
+from argus.reminders.text import SEGMENT, gsm_length
 
 NOW = datetime(2026, 10, 19, 13, tzinfo=UTC)  # Mon 09:00 EDT
 
@@ -58,7 +58,7 @@ def test_deadline_windows(due: timedelta, rule: Rule) -> None:
     assert r.rule == rule
     assert r.keys == (f"1:{rule.value}:{(NOW + due).strftime('%Y-%m-%dT%H:%M:%SZ')}",)
     assert r.item_ids == (1,)
-    assert len(r.sms) <= SEGMENT
+    assert gsm_length(r.sms) <= SEGMENT
 
 
 @pytest.mark.parametrize(
@@ -122,7 +122,7 @@ def test_sent_keys_suppress_and_moved_due_rearms() -> None:
 def test_long_titles_fit_one_segment() -> None:
     it = item(1, timedelta(hours=10), title="An extraordinarily long assignment title " * 5)
     [r] = candidates(snap(it))
-    assert len(r.sms) <= SEGMENT
+    assert gsm_length(r.sms) <= SEGMENT
 
 
 # ---------------------------------------------------------------- new items
@@ -221,7 +221,7 @@ def test_at_risk_is_immediate_and_uncapped() -> None:
     [r] = candidates(snap(it, at_risk=frozenset({1})))
     assert r.rule == Rule.AT_RISK
     assert not r.counts_toward_cap and not r.bypass_quiet
-    assert "EST 1" in r.body and len(r.sms) <= SEGMENT
+    assert "EST 1" in r.body and gsm_length(r.sms) <= SEGMENT
     assert candidates(snap(it, at_risk=frozenset({1}), sent=set(r.keys))) == []
     assert candidates(snap(item(1, timedelta(hours=-1)), at_risk=frozenset({1}))) == []
 

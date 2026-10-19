@@ -35,7 +35,9 @@ def engine(
     db: sqlite3.Connection, cfg: AppConfig, clock: FakeClock, topic: str | None = "argus-topic"
 ) -> ReminderEngine:
     router = Router([NtfyChannel(fetcher(), "https://ntfy.example.test", topic)])
-    return ReminderEngine(db, cfg, clock, router)
+    # These tests are about deadline rules; the morning brief has its own tests (test_sms_rules.py).
+    late = cfg.schedule.model_copy(update={"morning_brief": time(23, 59)})
+    return ReminderEngine(db, cfg.model_copy(update={"schedule": late}), clock, router)
 
 
 def seed(
