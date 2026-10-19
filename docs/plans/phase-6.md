@@ -33,7 +33,7 @@
   `install.sh`, `deploy.sh`, `argus-admin`, kiosk autostart, and the runbook (D042 to D052).
 - Gate: the webhook suite (`test_webhook.py`: signatures valid, invalid, missing, and tampered; unknown sender;
   every command; replay; the AI fallback; asking back; app separation) and the security checks (gitleaks; log
-  redaction of secrets and phone numbers in `test_logging`; unsigned requests rejected; a CSP with zero violations in e2e)
+  redaction of secrets and phone numbers in `test_logging_redaction.py`; unsigned requests rejected; a CSP with zero violations in e2e)
   pass. So does the SMS simulated week (`test_simulated_week_sms.py`).
 - Bug found and fixed on the way: item numbers were sent as "?1?" because `[` and `]` are GSM-7 extension characters (D049).
 - Needs the human: Twilio verification and credentials, the Funnel or Tunnel, a healthchecks.io check, a backup target.
