@@ -371,6 +371,10 @@
   .readiness__seg--untested { background: transparent; }
   .readiness__legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.875rem; font-size: 0.8125rem; color: var(--muted); }
 
+  .concept-level { flex: none; min-width: 5.25rem; text-align: center; font-size: 0.75rem; font-weight: 700; padding: 0.0625rem 0.5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .concept-level[data-level="solid"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .concept-level[data-level="shaky"] { color: var(--watch); border-color: color-mix(in srgb, var(--watch) 45%, transparent); }
+
   /* ------------------------------------------------------------ feedback */
   .empty-state { display: grid; justify-items: center; gap: 0.5rem; text-align: center; padding: 2rem 1rem; color: var(--muted); }
   .empty-state .icon { width: 2rem; height: 2rem; color: var(--brand); }

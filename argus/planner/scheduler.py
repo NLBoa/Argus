@@ -42,7 +42,7 @@ class Plan:
     unscheduled: dict[int, float]  # item_id -> hours that did not fit before the due time
 
 
-def _ceil(dt: datetime) -> datetime:
+def ceil_to_grid(dt: datetime) -> datetime:
     rem = (dt - _ANCHOR) % GRID
     return dt if rem == timedelta(0) else dt + (GRID - rem)
 
@@ -59,9 +59,9 @@ def schedule(
     items: Iterable[PlanItem], free: Sequence[Interval], *, max_chunk: timedelta = MAX_CHUNK
 ) -> Plan:
     segments = [
-        [_ceil(i.start), _floor(i.end)]
+        [ceil_to_grid(i.start), _floor(i.end)]
         for i in sorted(free)
-        if _floor(i.end) - _ceil(i.start) >= GRID
+        if _floor(i.end) - ceil_to_grid(i.start) >= GRID
     ]
     order = sorted(items, key=lambda p: (p.due_at is None, p.due_at or _ANCHOR, p.item_id))
     blocks: list[Block] = []
@@ -75,13 +75,11 @@ def schedule(
                 if length < GRID:
                     break
                 chunk = min(need, max_chunk, length)
-                if (
-                    timedelta(0) < need - chunk < MIN_CHUNK
-                    and chunk - (MIN_CHUNK - (need - chunk)) >= MIN_CHUNK
-                ):
-                    chunk -= MIN_CHUNK - (
-                        need - chunk
-                    )  # never leave a sliver: keep the remainder >= 30 min
+                leftover = need - chunk
+                if timedelta(0) < leftover < MIN_CHUNK:
+                    if chunk - (MIN_CHUNK - leftover) < MIN_CHUNK:
+                        break  # this gap would leave a sliver: look for a longer one
+                    chunk -= MIN_CHUNK - leftover  # keep the remainder >= 30 min
                 if chunk < MIN_CHUNK and need >= MIN_CHUNK:
                     break  # too small for real work: keep it for something shorter
                 blocks.append(Block(it.item_id, seg[0], seg[0] + chunk))

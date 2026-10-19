@@ -128,3 +128,55 @@ def strict_schema(model: type[BaseModel]) -> dict[str, Any]:
     result = walk(raw)
     assert isinstance(result, dict)
     return result
+
+
+# ---------------------------------------------------------------- study notes
+
+
+class Claim(_Out):
+    text: str = Field(min_length=1, max_length=700)
+    sources: list[str] = Field(min_length=1, max_length=4, description="Source ids like S3")
+
+
+class PracticeDraft(_Out):
+    kind: Literal["question", "flashcard"]
+    prompt: str = Field(min_length=1, max_length=600)
+    answer: str = Field(min_length=1, max_length=900)
+    sources: list[str] = Field(min_length=1, max_length=3)
+
+
+class ConceptDraft(_Out):
+    name: str = Field(min_length=1, max_length=80)
+    idea: list[Claim] = Field(min_length=1, max_length=3)
+    diagram: str | None = Field(max_length=1500, description="Mermaid diagram source, or null")
+    worked_example: list[Claim] = Field(max_length=6)
+    why_it_works: list[Claim] = Field(max_length=4)
+    common_mistakes: list[Claim] = Field(max_length=5)
+    practice: list[PracticeDraft] = Field(min_length=1, max_length=6)
+    related: list[str] = Field(max_length=6, description="Names of other concepts in this module")
+
+
+class ConceptBatchOut(_Out):
+    concepts: list[ConceptDraft] = Field(max_length=8)
+
+
+class PracticeBatchOut(_Out):
+    practice: list[PracticeDraft] = Field(min_length=1, max_length=4)
+
+
+class ClaimCheck(_Out):
+    id: str
+    supported: bool
+    citation_ok: bool
+    note: str = Field(max_length=300)
+
+
+class PracticeCheck(_Out):
+    id: str
+    answer_correct: bool
+    note: str = Field(max_length=300)
+
+
+class VerificationOut(_Out):
+    claims: list[ClaimCheck]
+    practice: list[PracticeCheck]

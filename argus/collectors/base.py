@@ -19,6 +19,7 @@ from argus.config import AppConfig, Secrets
 from argus.domain.models import (
     CourseInfo,
     GradeRecord,
+    MaterialRecord,
     MeetingRecord,
     ModuleRecord,
     PostRecord,
@@ -63,6 +64,7 @@ class CollectResult:
     # Complete module lists per course code (replaces what is stored).
     modules: Mapping[str, tuple[ModuleRecord, ...]] = field(default_factory=dict)
     grades: tuple[GradeRecord, ...] = ()
+    materials: tuple[MaterialRecord, ...] = ()
     state_updates: Mapping[str, SourceState] = field(default_factory=dict)
     error: str | None = None
 
@@ -74,6 +76,7 @@ class CollectResult:
             + sum(len(m) for m in self.meetings.values())
             + sum(len(m) for m in self.modules.values())
             + len(self.grades)
+            + len(self.materials)
         )
 
 

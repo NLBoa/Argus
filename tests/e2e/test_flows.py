@@ -293,3 +293,40 @@ def test_mobile_tab_bar(page: Page, base_url: str) -> None:
     tabs.get_by_role("link", name="Posts").click()
     expect(page.get_by_role("heading", level=1)).to_have_text("Announcements")
     expect(tabs.get_by_role("link", name="Posts")).to_have_attribute("aria-current", "page")
+
+
+def test_exam_prep_practice_and_self_grading(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
+    server = fresh_server()
+    page.goto(server.url + "/today")
+    page.locator("body").click(position={"x": 5, "y": 300})
+    page.keyboard.press("g")
+    page.keyboard.press("e")
+    expect(page.get_by_role("heading", level=1)).to_have_text("Exam prep")
+    page.get_by_role("link", name="Midterm 1").click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Midterm 1")
+    card = page.locator(".practice-card").first
+    expect(card.get_by_role("button", name="Got it")).to_be_hidden()  # answer first
+    card.get_by_text("Show answer").click()
+    card.get_by_role("button", name="Got it").click()
+    expect(page.locator(".practice-card").first.get_by_role("status")).to_have_text(
+        "Marked as got it."
+    )
+    expect(page.get_by_text("Marked as got it.")).to_be_visible()
+
+
+def test_reject_proposal_keeps_my_version(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
+    server = fresh_server()
+    page.goto(server.url + "/today")
+    banner = page.get_by_role("status").filter(has_text="Argus wants to change 1 note")
+    expect(banner).to_be_visible()
+    banner.get_by_role("link", name="Review proposals").click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Proposals")
+    expect(page.get_by_text("My own note: c can be any constant.").first).to_be_attached()
+    page.get_by_role("button", name="Keep my version").click()
+    expect(page.get_by_text("Kept your version.").first).to_be_visible()
+    page.goto(server.url + "/today")
+    expect(page.get_by_text("Argus wants to change")).to_have_count(0)

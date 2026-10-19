@@ -43,11 +43,14 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/planner/`: free time, EDF scheduler, risk, calibration. Pure and deterministic.
 - `argus/reminders/`: rules (what), guards (when and whether), engine (idempotent dispatch), SMS command parser.
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
-- `argus/vault/`: Obsidian layout, argus regions, ownership decisions, proposals, git sync.
+- `argus/vault/`: `layout` (paths, links), `regions`, `ownership` (pure table), `proposals`, `writer` (the only
+  vault writer), `render` (pure notes), `gitsync`, and `service` (the 15-minute cycle, inbox, health).
 - `argus/notify/`: Twilio SMS, ntfy, and the router that picks a channel and records the result.
-- `argus/worker.py`: the every-minute loop: sync → announcements → estimates → plan → reminders, each isolated.
+- `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault,
+  each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
-  overrides), `argus/planning.py` (replan, risk, workload), and `argus/demo.py` (the synthetic seed for demo and e2e).
+  overrides), `argus/planning.py` (replan with work and review blocks, risk, workload), `argus/study.py` (materials →
+  generate → verify → store), `argus/exams.py` (scope, readiness, attempts), and `argus/demo.py` (the synthetic seed).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
   routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
 - `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, and repository functions (including search).
@@ -114,7 +117,11 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - Proposals live in `Argus/Proposals.md` and the Proposals view, and expire after 14 days.
 - Git sync every 15 min: `pull --rebase` → write → commit as `Argus <argus@pi.local>` → push.
   On conflict, abort the rebase, keep the user's version, and retry next cycle. Never force-push. Alert after 3 failures.
-- Canvas files are linked, never copied, into the vault.
+- Canvas files are linked, never copied, into the vault. Layout and the course folder note: D035.
+- Nothing is published unverified: concepts and practice exist only after the verifier's verdict is applied
+  (`domain/study.py`). Without AI the vault still gets course, module, assignment, exam, Today, and weekly notes.
+- `Argus/Inbox/` is read-only for Argus (D038). Flashcards keep Obsidian_to_Anki ids ([docs/anki.md](docs/anki.md)).
+- Vault cycles are serialized by a file lock (D039). Tests must point `paths` at a temp dir, never `var/`.
 
 ## UI rules
 - Design tokens are CSS custom properties in `argus/web/static/src/tokens.css`, exposed to Tailwind via

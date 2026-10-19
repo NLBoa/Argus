@@ -102,3 +102,97 @@ def score(results: list[PostResult]) -> Report:
                         f"{post['id']}: {e['title']} expected {e['dates']} as a conflict, got {got}"
                     )
     return r
+
+
+# ---------------------------------------------------------------- verifier eval
+
+ERROR_KINDS = ("unsupported", "miscited", "wrong_answer")
+
+
+@dataclass
+class VerifierReport:
+    seeded: int = 0
+    caught: int = 0
+    missed: list[str] = field(default_factory=list)
+    clean: int = 0
+    false_rejects: list[str] = field(default_factory=list)
+    citation_flags_on_clean: list[str] = field(default_factory=list)  # kept, marked unverified
+
+    @property
+    def catch_rate(self) -> float:
+        return self.caught / self.seeded if self.seeded else 1.0
+
+    @property
+    def false_reject_rate(self) -> float:
+        return len(self.false_rejects) / self.clean if self.clean else 0.0
+
+    def gates(self) -> dict[str, bool]:
+        return {
+            "catches >= 90% of seeded errors": self.catch_rate >= 0.90,
+            "false rejects <= 10%": self.false_reject_rate <= 0.10,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "catch_rate": round(self.catch_rate, 3),
+            "false_reject_rate": round(self.false_reject_rate, 3),
+            "seeded": self.seeded,
+            "clean": self.clean,
+            "missed": self.missed,
+            "false_rejects": self.false_rejects,
+            "citation_flags_on_clean": self.citation_flags_on_clean,
+            "gates": self.gates(),
+        }
+
+
+def element_ids(note: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Claim ids (C1.., D1) and practice ids (P1..), numbered exactly as the verifier sees them."""
+    from argus.ai.schemas import ConceptDraft
+    from argus.domain.study import number
+
+    numbered = number(ConceptDraft.model_validate(note))
+    return [c[0] for c in numbered.claims], [p[0] for p in numbered.practice]
+
+
+def score_verification(results: list[tuple[dict[str, Any], Any]]) -> VerifierReport:
+    """`results` is (case, VerificationOut | None). A missing verdict counts as a rejection, as
+    in `apply_verification`; a failed call (None) rejects everything."""
+    r = VerifierReport()
+    for case, out in results:
+        claims, practice = element_ids(case["note"])
+        claim_v = {c.id: c for c in out.claims} if out is not None else {}
+        practice_v = {p.id: p for p in out.practice} if out is not None else {}
+        errors = case["errors"]
+        for cid in claims:
+            v = claim_v.get(cid)
+            rejected = v is None or not v.supported
+            flagged = rejected or not v.citation_ok
+            label = f"{case['id']}:{cid}"
+            if cid in errors:
+                r.seeded += 1
+                ok = flagged if errors[cid] == "miscited" else rejected
+                if ok:
+                    r.caught += 1
+                else:
+                    r.missed.append(f"{label} ({errors[cid]})")
+            else:
+                r.clean += 1
+                if rejected:
+                    r.false_rejects.append(label)
+                elif flagged:
+                    r.citation_flags_on_clean.append(label)
+        for pid in practice:
+            pv = practice_v.get(pid)
+            wrong = pv is None or not pv.answer_correct
+            label = f"{case['id']}:{pid}"
+            if pid in errors:
+                r.seeded += 1
+                if wrong:
+                    r.caught += 1
+                else:
+                    r.missed.append(f"{label} ({errors[pid]})")
+            else:
+                r.clean += 1
+                if wrong:
+                    r.false_rejects.append(label)
+    return r

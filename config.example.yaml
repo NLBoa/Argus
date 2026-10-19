@@ -49,3 +49,4 @@ paths:
   data_dir: var              # SQLite DB, caches
   vault_dir: var/vault       # git clone of the Obsidian vault
   backup_dir: var/backups
+  # vault_name: School       # the vault's name in Obsidian, for obsidian:// links

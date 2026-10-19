@@ -19,11 +19,14 @@ from argus.collectors.http import Fetcher
 from argus.collectors.runner import SyncRunner
 from argus.config import AppConfig, Secrets
 from argus.estimates import ensure_estimates
+from argus.exams import sync_exams
 from argus.logging import get_logger
 from argus.notify.ntfy import NtfyChannel
 from argus.notify.router import Router
 from argus.planning import explain, replan
 from argus.reminders.engine import ReminderEngine
+from argus.study import ensure_study, targeted_practice
+from argus.vault import service as vault
 
 log = get_logger(__name__)
 TICK_SECONDS = 60.0
@@ -67,8 +70,10 @@ class Worker:
             ("sync", self.runner.run_cycle),
             ("announcements", lambda: scan_posts(self.conn, self.ai, self.config, self.clock)),
             ("estimates", lambda: ensure_estimates(self.conn, self.ai, self.config, self.clock)),
+            ("study", self._study),
             ("plan", self._plan),
             ("reminders", self.engine.tick),
+            ("vault", self._vault),  # last: reminders never wait on git
         ]
         for name, step in steps:
             try:
@@ -79,6 +84,21 @@ class Worker:
     async def _plan(self) -> None:
         if replan(self.conn, self.config, self.clock) and self.ai.available:
             await explain(self.conn, self.ai, self.config, self.clock)
+
+    async def _study(self) -> None:
+        now = self.clock.now()
+        sync_exams(self.conn, now)
+        await ensure_study(self.conn, self.ai, self.config, self.clock)
+        for entry_id, concept_id, text in vault.pending_practice(self.conn):
+            if not self.ai.available:
+                break
+            await targeted_practice(self.conn, self.ai, self.clock, concept_id, text)
+            vault.mark_practiced(self.conn, entry_id, self.clock.now())
+
+    async def _vault(self) -> None:
+        # Blocking git calls (each with a timeout) every 15 minutes: the loop is single-user.
+        if vault.due(self.conn, self.clock.now()):
+            vault.run_cycle(self.conn, self.config, self.clock)
 
     async def run(self, stop: asyncio.Event, tick_seconds: float = TICK_SECONDS) -> None:
         while not stop.is_set():

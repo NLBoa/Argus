@@ -33,10 +33,18 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `plan_state` | 0004 | The inputs hash of the current plan, its one-line explanation, and when it was made |
 | `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 
-Later phases add `concepts`, `practice_items`, `practice_attempts`,
-`exams`, `inbound_messages`, `vault_regions`, and `proposals`
-(the `modules` table landed in 0003),
-each in its own migration, documented here when it lands.
+| `materials` | 0005 | Text extracted from course files and pages, per page or slide (JSON `pages` `[{ref, text}]`), with the Canvas `url` the student opens. Files themselves are never stored or copied into the vault. `UNIQUE(course_id, url)` |
+| `concepts` | 0005 | Verified concept notes: `slug`, `name`, `body` (JSON sections of `{text, cites, verified}` claims plus `diagram`), `sources` (JSON), `related` (JSON slugs), `priority` (raised by the confusion inbox), `input_hash` (generate+verify prompt ids + material hashes), `verified_at` |
+| `practice_items` | 0005 | Verified questions and flashcards per concept, with `source_ref`; `origin` `generated` or `inbox`. Items no longer generated are deactivated, never deleted (attempt history stays) |
+| `practice_attempts` | 0005 | Self-graded results (`correct`, `shaky`, `incorrect`). Readiness per concept derives from the latest attempt per item |
+| `exams` | 0005 | Per exam item: scope and logistics (from findings) and the concepts in scope (JSON ids) |
+| `vault_regions` | 0005 | Per (path, region): the hash Argus last wrote. `frontmatter` tracks Argus-owned keys; `file` tracks files outside the region model (D036) |
+| `proposals` | 0005 | Changes waiting for approval: exact `before_text`/`after_text`, `base_hash` of the whole note, unified `diff`, `status` (`open`, `applied`, `rejected`, `expired`, `stale`, `superseded`) |
+| `inbox_entries` | 0005 | Lines from `Argus/Inbox/`, keyed by `text_hash` (path + text), with the matched `concept_id`. `practice_at` (0006) is set once targeted practice was added |
+| `vault_runs` | 0005 | One row per vault cycle: `ok`, `conflict` (kept the student's version), `error`, or `skipped`, plus commit and files written. Three `error` rows in a row raise a system alert |
+| `vault_edit_log` | 0006 | Edits Argus made in notes opened to it with `argus-edit: allow`; the weekly note lists them |
+
+Phase 6 adds `inbound_messages` for SMS replies, documented here when it lands.
 
 ## items
 | Column | Notes |

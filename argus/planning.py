@@ -19,8 +19,11 @@ from argus.ai.client import AIClient, Tier
 from argus.ai.schemas import PlanNoteOut
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
+from argus.domain.models import ItemKind
 from argus.estimates import effective_estimates
+from argus.exams import review_concepts
 from argus.planner.freetime import Interval, free_hours_between, free_intervals, subtract
+from argus.planner.review import ReviewConcept, place_reviews, review_sessions
 from argus.planner.risk import RiskLevel, assess
 from argus.planner.scheduler import GRID, Block, Plan, PlanItem, schedule
 from argus.store import repo
@@ -86,6 +89,21 @@ def gather(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> PlanIn
     )
 
 
+def upcoming_reviews(
+    conn: sqlite3.Connection, now: datetime
+) -> list[tuple[int, datetime, list[ReviewConcept]]]:
+    """Exams within the planning horizon with concepts to review: (exam id, exam time, concepts).
+    Only sessions that fall inside the horizon are placed (review days are 7..1 days out)."""
+    out = []
+    for item in repo.list_items(conn, due_after=now, due_before=now + HORIZON, open_only=True):
+        if item.kind is not ItemKind.EXAM or item.due_at is None:
+            continue
+        concepts = review_concepts(conn, item.id)
+        if concepts:
+            out.append((item.id, item.due_at, concepts))
+    return out
+
+
 def credited_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
     """Progress per item. If the student logs time for an item (timer, LOG, or the form), the
     logs are the truth. Otherwise planned sessions that have passed count as done: the plan
@@ -114,6 +132,18 @@ class StoredBlock:
     kind: str
     start: datetime
     end: datetime
+    label: str | None = None
+
+
+def _stored(r: sqlite3.Row) -> StoredBlock:
+    return StoredBlock(
+        r["id"],
+        r["item_id"],
+        r["kind"],
+        parse_iso(r["start_at"]),
+        parse_iso(r["end_at"]),
+        r["label"],
+    )
 
 
 def current_blocks(
@@ -125,12 +155,7 @@ def current_blocks(
         sql += " AND start_at < ?"
         params.append(iso(until))
     rows = conn.execute(sql + " ORDER BY start_at", params).fetchall()
-    return [
-        StoredBlock(
-            r["id"], r["item_id"], r["kind"], parse_iso(r["start_at"]), parse_iso(r["end_at"])
-        )
-        for r in rows
-    ]
+    return [_stored(r) for r in rows]
 
 
 def blocks_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> list[StoredBlock]:
@@ -138,12 +163,7 @@ def blocks_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> 
         "SELECT * FROM plan_blocks WHERE end_at > ? AND start_at < ? ORDER BY start_at",
         (iso(start), iso(end)),
     ).fetchall()
-    return [
-        StoredBlock(
-            r["id"], r["item_id"], r["kind"], parse_iso(r["start_at"]), parse_iso(r["end_at"])
-        )
-        for r in rows
-    ]
+    return [_stored(r) for r in rows]
 
 
 def facts(plan: Plan, inputs: PlanInputs, titles: dict[int, str]) -> list[str]:
@@ -179,7 +199,15 @@ def replan(
     """Recompute future sessions if inputs changed (or hourly). Returns True if it replanned."""
     now = clock.now()
     inputs = gather(conn, config, now)
-    digest = inputs.digest()
+    exams = upcoming_reviews(conn, now)
+    digest = hashlib.sha256(
+        (
+            inputs.digest()
+            + json.dumps(
+                [(e, [(c.id, c.readiness.value, c.priority) for c in cs]) for e, _, cs in exams]
+            )
+        ).encode()
+    ).hexdigest()
     state = conn.execute("SELECT inputs_hash, planned_at FROM plan_state WHERE id = 1").fetchone()
     if (
         not force
@@ -191,14 +219,27 @@ def replan(
     plan = schedule(inputs.items, inputs.free)
     titles = {i.id: i.title for i in repo.list_items(conn)}
     line = fallback_line(facts(plan, inputs, titles))
+    # Reviews go in the free time the work plan leaves; past and started blocks stay put.
+    free = subtract(inputs.free, [Interval(b.start, b.end) for b in plan.blocks])
+    reviews: list[tuple[int, Block, str]] = []
+    for exam_id, exam_at, concepts in exams:
+        sessions = review_sessions(exam_at, inputs.now, concepts)
+        for session, block in zip(sessions, place_reviews(sessions, free), strict=False):
+            label = "Review: " + ", ".join(c.name for c in session.concepts)
+            reviews.append((exam_id, block, label))
+            free = subtract(free, [Interval(block.start, block.end)])
     with transaction(conn):
-        conn.execute(
-            "DELETE FROM plan_blocks WHERE start_at >= ? AND kind = 'work'", (iso(inputs.now),)
-        )
+        conn.execute("DELETE FROM plan_blocks WHERE start_at >= ?", (iso(inputs.now),))
         for b in plan.blocks:
             conn.execute(
                 "INSERT INTO plan_blocks (item_id, kind, start_at, end_at, created_at) VALUES (?, 'work', ?, ?, ?)",
                 (b.item_id, iso(b.start), iso(b.end), iso(now)),
+            )
+        for exam_id, b, label in reviews:
+            conn.execute(
+                "INSERT INTO plan_blocks (item_id, kind, start_at, end_at, label, created_at)"
+                " VALUES (?, 'review', ?, ?, ?, ?)",
+                (exam_id, iso(b.start), iso(b.end), label, iso(now)),
             )
         conn.execute(
             """INSERT INTO plan_state (id, inputs_hash, explanation, planned_at) VALUES (1, ?, ?, ?)

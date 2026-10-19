@@ -104,3 +104,79 @@ def test_ambiguous_dates_accept_either_reading() -> None:
             ).wrong_dates
             == []
         )
+
+
+# ---------------------------------------------------------------- verifier eval
+
+from argus.ai.schemas import ClaimCheck, ConceptDraft, PracticeCheck, VerificationOut  # noqa: E402
+from tests.evals.datasets.verification import CASES  # noqa: E402
+from tests.evals.scoring import ERROR_KINDS, element_ids, score_verification  # noqa: E402
+
+
+def verdicts(case: dict, *, perfect: bool, rubber_stamp: bool = False) -> VerificationOut:  # type: ignore[type-arg]
+    claims, practice = element_ids(case["note"])
+    errors = {} if rubber_stamp else case["errors"]
+    return VerificationOut(
+        claims=[
+            ClaimCheck(
+                id=c,
+                supported=errors.get(c) not in ("unsupported",) if perfect else True,
+                citation_ok=errors.get(c) != "miscited",
+                note="",
+            )
+            for c in claims
+        ],
+        practice=[PracticeCheck(id=p, answer_correct=p not in errors, note="") for p in practice],
+    )
+
+
+def test_verifier_dataset_shape() -> None:
+    assert len(CASES) >= 20
+    assert len({c["id"] for c in CASES}) == len(CASES)
+    kinds = set()
+    for c in CASES:
+        ConceptDraft.model_validate(c["note"])  # the generator's exact output shape
+        claims, practice = element_ids(c["note"])
+        assert c["errors"], f"{c['id']} has no seeded error"
+        for eid, kind in c["errors"].items():
+            assert kind in ERROR_KINDS
+            assert eid in (practice if kind == "wrong_answer" else claims), f"{c['id']}: {eid}"
+            kinds.add(kind)
+        ids = {s["id"] for s in c["sources"]}
+        cited = {
+            s
+            for part in ("idea", "worked_example", "why_it_works", "common_mistakes")
+            for x in c["note"][part]
+            for s in x["sources"]
+        }
+        cited |= {s for p in c["note"]["practice"] for s in p["sources"]}
+        assert cited <= ids, f"{c['id']} cites a missing source"
+    assert kinds == set(ERROR_KINDS)
+    assert sum(1 for c in CASES if "D1" in c["errors"]) >= 2  # diagrams are checked too
+
+
+def test_verifier_scorer() -> None:
+    perfect = score_verification([(c, verdicts(c, perfect=True)) for c in CASES])
+    assert perfect.catch_rate == 1.0 and perfect.false_reject_rate == 0.0
+    assert all(perfect.gates().values())
+    assert perfect.seeded >= 30 and perfect.clean >= 60
+    stamp = score_verification([(c, verdicts(c, perfect=False, rubber_stamp=True)) for c in CASES])
+    assert stamp.catch_rate == 0.0 and not stamp.gates()["catches >= 90% of seeded errors"]
+    failed = score_verification([(c, None) for c in CASES])  # a dead verifier rejects everything
+    assert failed.catch_rate == 1.0 and failed.false_reject_rate == 1.0
+    assert not failed.gates()["false rejects <= 10%"]
+    one = CASES[0]
+    miscite_only = verdicts(one, perfect=True)
+    flagged = score_verification([(one, miscite_only)])
+    assert flagged.caught == flagged.seeded  # miscited counts as caught when citation_ok is false
+    clean_flag = VerificationOut(
+        claims=[
+            ClaimCheck(id=c, supported=True, citation_ok=False, note="")
+            for c in element_ids(one["note"])[0]
+        ],
+        practice=[],
+    )
+    soft = score_verification([(one, clean_flag)])
+    assert soft.citation_flags_on_clean  # flagged, not rejected
+    assert all(":P" in x for x in soft.false_rejects)  # only the practice it gave no verdict on
+    assert soft.summary()["gates"] == soft.gates()

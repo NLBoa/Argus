@@ -11,7 +11,7 @@ from argus.collectors.base import CollectContext
 from argus.collectors.http import Fetcher
 from argus.collectors.runner import default_collectors
 from argus.config import AppConfig, Secrets
-from argus.domain.models import Item, ItemStatus
+from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.estimates import effective_estimates, estimate_sources
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import Busy, busy_on
@@ -19,7 +19,10 @@ from argus.planning import blocks_between, explanation, risk_map, workload
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
 from argus.store import repo
+from argus.vault.service import health as vault_health
+from argus.vault.service import item_note_path
 from argus.web.format import clock_time, day_label, due_text, hours, long_date, relative
+from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
     CourseView,
     DayGroup,
@@ -263,6 +266,35 @@ class HealthData:
     last_sync: str | None
     rules: list[RuleRow]
     notifications: list[NotificationLine]
+    vault: VaultStatus | None = None
+
+
+@dataclass(frozen=True)
+class VaultStatus:
+    state: str  # ok | failing | never (status-dot states)
+    state_label: str
+    last_sync: str | None
+    error: str | None
+    proposals: int
+
+
+def vault_status(conn: sqlite3.Connection, now: datetime) -> VaultStatus:
+    h = vault_health(conn)
+    if h.last_status is None:
+        state, label = "never", "Not synced yet"
+    elif h.failures:
+        state, label = "failing", f"Failing ({h.failures} in a row)"
+    elif h.last_status == "conflict":
+        state, label = "ok", "Kept your version after a conflict"
+    else:
+        state, label = "ok", "OK"
+    return VaultStatus(
+        state,
+        label,
+        relative(h.last_ok, now) if h.last_ok else None,
+        h.last_error if h.failures else None,
+        h.open_proposals,
+    )
 
 
 def load_health(
@@ -288,6 +320,7 @@ def load_health(
         ai_spend=ai_spend(conn, config, now),
         last_sync=relative(max(successes), now) if successes else None,
         rules=[RuleRow(r.value, r.label, r.value in muted, r in ACTIVE_RULES) for r in Rule],
+        vault=vault_status(conn, now),
         notifications=[
             NotificationLine(
                 when=_when(n.sent_at or n.created_at),
@@ -655,6 +688,8 @@ class ItemDetail:
     findings: list[repo.FindingRow]
     scope: str | None
     logistics: str | None
+    obsidian: str | None = None  # obsidian:// link to the item's vault note, when it exists
+    exam_prep: bool = False
 
 
 def load_item(
@@ -700,6 +735,8 @@ def load_item(
     risk = risk_map(conn, config, now).get(item.id)
     row = conn.execute("SELECT scope, logistics FROM items WHERE id = ?", (item.id,)).fetchone()
     return ItemDetail(
+        obsidian=obsidian_link(config, item_note_path(item)),
+        exam_prep=item.kind is ItemKind.EXAM,
         view=view,
         item=item,
         estimate=eff,

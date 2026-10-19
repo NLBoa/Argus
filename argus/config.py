@@ -110,6 +110,12 @@ class PathsConfig(_Strict):
     data_dir: Path = Path("var")
     vault_dir: Path = Path("var/vault")
     backup_dir: Path = Path("var/backups")
+    # The vault's name in Obsidian, for obsidian:// links (default: the vault folder's name).
+    vault_name: str | None = None
+
+    @property
+    def obsidian_vault(self) -> str:
+        return self.vault_name or self.vault_dir.name
 
     @property
     def db_path(self) -> Path:

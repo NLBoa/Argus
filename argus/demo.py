@@ -7,13 +7,16 @@ seed with a frozen clock.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, time, timedelta
+from pathlib import Path
+from typing import Any
 
 from pydantic import SecretStr
 
 from argus.clock import local_datetime, to_local
-from argus.config import AppConfig, Commitment, CourseConfig, ScheduleConfig, Secrets
+from argus.config import AppConfig, Commitment, CourseConfig, PathsConfig, ScheduleConfig, Secrets
 from argus.domain.models import (
     AuthorRole,
     GradeRecord,
@@ -47,6 +50,8 @@ DEMO_CONFIG = AppConfig(
         ),
         CourseConfig(code="ENGL393", section="0301", canvas_id=1000003, accent="plum"),
     ],
+    # The demo never touches a real vault: notes it writes go to a throwaway folder.
+    paths=PathsConfig(data_dir=Path("var/demo"), vault_dir=Path("var/demo/vault")),
     schedule=ScheduleConfig(
         commitments=[
             Commitment(title="Dining hall shift", days=["Tue", "Thu"], start=time(17), end=time(20))
@@ -271,6 +276,7 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
         repo.apply_merge(conn, ids, now)
         repo.refresh_statuses(conn, now)
         _seed_estimates(conn, now)
+        _seed_study(conn, ids, now)
         repo.rebuild_search_index(conn)
     from argus.clock import FakeClock
     from argus.planning import replan
@@ -379,6 +385,166 @@ def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
         ),
     ]
     repo.upsert_posts(conn, posts, ids, now)
+
+
+def _claim(text: str, cite: str, verified: bool = True) -> dict[str, object]:
+    return {"text": text, "cites": [cite], "verified": verified}
+
+
+DEMO_CONCEPTS: list[tuple[int, str, str, dict[str, Any], list[tuple[str, str, str | None]]]] = [
+    (
+        301,
+        "Big-O notation",
+        "Lecture 1 slides: big-O, big-Omega, big-Theta",
+        {
+            "idea": [
+                _claim(
+                    "f(n) is O(g(n)) when f(n) <= c * g(n) for some c > 0 and all n >= n0.",
+                    "slide 6",
+                )
+            ],
+            "diagram": None,
+            "worked_example": [
+                _claim("3n^2 + 5n is O(n^2): take c = 4 and n0 = 5.", "slide 8"),
+            ],
+            "why_it_works": [
+                _claim("Constants and lower-order terms stop mattering for large n.", "slide 7")
+            ],
+            "common_mistakes": [
+                _claim("Big-O is an upper bound, not a tight one: n is also O(n^2).", "slide 9")
+            ],
+        },
+        [
+            ("Is 5n + 3 in O(n)? Give c and n0.", "Yes: c = 6 and n0 = 3 work.", "correct"),
+            ("Is n^2 in O(n log n)?", "No: n^2 / (n log n) = n / log n grows without bound.", None),
+        ],
+    ),
+    (
+        302,
+        "Master theorem",
+        "Lecture 4 slides: the master theorem",
+        {
+            "idea": [
+                _claim(
+                    "For T(n) = aT(n/b) + f(n), compare f(n) with n^(log_b a) to pick one of three cases.",
+                    "slide 3",
+                )
+            ],
+            "diagram": 'flowchart LR\n  A["Compare f(n) with n^(log_b a)"] --> B[Case 1: leaves dominate]\n'
+            "  A --> C[Case 2: balanced]\n  A --> D[Case 3: root dominates]",
+            "worked_example": [
+                _claim(
+                    "T(n) = 2T(n/2) + n: a = 2, b = 2, n^(log_2 2) = n, so case 2 gives Theta(n log n).",
+                    "slide 5",
+                )
+            ],
+            "why_it_works": [
+                _claim(
+                    "Each case says which level of the recursion tree holds most of the work.",
+                    "slide 4",
+                )
+            ],
+            "common_mistakes": [
+                _claim(
+                    "Case 3 also needs the regularity condition a f(n/b) <= c f(n).",
+                    "slide 6",
+                    verified=False,
+                )
+            ],
+        },
+        [
+            ("Solve T(n) = 2T(n/2) + n.", "Theta(n log n), by case 2.", "shaky"),
+            (
+                "Solve T(n) = 8T(n/2) + n^2.",
+                "Theta(n^3), by case 1: n^(log_2 8) = n^3 dominates.",
+                "incorrect",
+            ),
+            (
+                "Does the master theorem apply to T(n) = T(n - 1) + 1?",
+                "No: the subproblem is not n/b.",
+                None,
+            ),
+        ],
+    ),
+    (
+        303,
+        "Memoization",
+        "Lecture 13 slides: memoization",
+        {
+            "idea": [
+                _claim("Store each subproblem's answer the first time, then reuse it.", "slide 2")
+            ],
+            "diagram": None,
+            "worked_example": [
+                _claim(
+                    "Memoized Fibonacci makes n + 1 distinct calls instead of an exponential number.",
+                    "slide 5",
+                )
+            ],
+            "why_it_works": [],
+            "common_mistakes": [],
+        },
+        [
+            (
+                "How many distinct calls does memoized fib(n) make?",
+                "n + 1 (one per value 0..n).",
+                None,
+            )
+        ],
+    ),
+]
+
+
+def _seed_study(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
+    """Verified concept notes, practice with some attempts, exam prep, and one vault proposal."""
+    from argus.exams import sync_exams
+    from argus.vault.proposals import unified_diff
+
+    course = ids["CMSC351"]
+    for module_id, name, deck, body, practice in DEMO_CONCEPTS:
+        cur = conn.execute(
+            """INSERT INTO concepts (course_id, module_id, slug, name, summary, sources, body, input_hash, model,
+                                     prompt_version, generated_at, verified_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'demo', 'claude-sonnet-5-5', 'generate.v1', ?, ?)""",
+            (
+                course,
+                module_id,
+                name.lower().replace(" ", "-"),
+                name,
+                body["idea"][0]["text"],
+                json.dumps([{"ref": f"{deck}, slide 3", "url": f"{CANVAS}/1000001/modules"}]),
+                json.dumps(body),
+                iso(now - timedelta(days=3)),
+                iso(now - timedelta(days=3)),
+            ),
+        )
+        for prompt, answer, result in practice:
+            pid = conn.execute(
+                """INSERT INTO practice_items (concept_id, kind, prompt, answer, source_ref, verified, created_at)
+                   VALUES (?, 'question', ?, ?, ?, 1, ?)""",
+                (cur.lastrowid, prompt, answer, f"{deck}, slide 5", iso(now - timedelta(days=3))),
+            ).lastrowid
+            if result:
+                conn.execute(
+                    "INSERT INTO practice_attempts (practice_item_id, result, created_at) VALUES (?, ?, ?)",
+                    (pid, result, iso(now - timedelta(days=1))),
+                )
+    sync_exams(conn, now)
+    before = (
+        "%% argus:begin core %%\n**The idea.** f(n) is O(g(n)) when f(n) <= c * g(n).\n"
+        "My own note: c can be any constant.\n%% argus:end core %%\n"
+    )
+    after = (
+        "%% argus:begin core %%\n**The idea.** f(n) is O(g(n)) when f(n) <= c * g(n) for some c > 0 "
+        "and all n >= n0. (Lecture 1 slides, slide 6)\n%% argus:end core %%\n"
+    )
+    path = "Courses/CMSC351/Concepts/Big-O notation.md"
+    conn.execute(
+        """INSERT INTO proposals (path, region_ids, reason, base_hash, before_text, after_text, diff, status,
+                                 created_at)
+           VALUES (?, '["core"]', 'Argus has a new version of core, which you edited', 'demo', ?, ?, ?, 'open', ?)""",
+        (path, before, after, unified_diff(before, after, path), iso(now - timedelta(hours=5))),
+    )
 
 
 def _seed_estimates(conn: sqlite3.Connection, now: datetime) -> None:

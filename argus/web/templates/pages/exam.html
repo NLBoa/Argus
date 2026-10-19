@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, course_chip, empty_state %}
+{% from "components/practice.html" import practice_card %}
+{% from "components/charts.html" import readiness_meter %}
+{% block content %}
+<div class="page-head" data-accent="{{ data.course.accent }}">
+  <h1 class="page-title">{{ data.title }}</h1>
+  <p class="page-sub">{{ course_chip(data.course, "/courses/" ~ data.course.code) }}{% if data.when %} {{ data.when }}, {{ data.relative }}{% endif %}</p>
+</div>
+<div class="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+  <section aria-labelledby="practice-heading" class="content-start">
+    <h2 class="section-title" id="practice-heading">Practice <span class="section-count">{{ data.practice|length }}</span></h2>
+    {% if data.practice %}
+    <p class="text-muted mb-4">Answer each one on paper before you open the answer, then say how it went. Your weakest concepts come first.</p>
+    <div class="grid gap-4">{% for q in data.practice %}{{ practice_card(q) }}{% endfor %}</div>
+    {% else %}
+    <div class="panel">{{ empty_state("notebook-pen", "No practice questions yet", "Questions appear once concept notes for this course are generated and verified.") }}</div>
+    {% endif %}
+  </section>
+  <aside class="grid gap-6 content-start" aria-label="Exam details">
+    <section class="panel panel-pad" aria-labelledby="ready-heading">
+      <h2 class="section-title" id="ready-heading">Readiness</h2>
+      {% if data.concepts %}
+      {{ readiness_meter(data.counts.solid, data.counts.shaky, data.counts.untested, "Readiness for " ~ data.title) }}
+      <ul class="mt-3 m-0 p-0 list-none grid gap-2">
+        {% for c in data.concepts %}
+        <li class="flex items-center gap-2"><span class="concept-level" data-level="{{ c.readiness }}">{{ c.readiness }}</span>{% if c.obsidian %}<a href="{{ c.obsidian }}">{{ c.name }}<span class="visually-hidden"> (opens in Obsidian)</span></a>{% else %}<span>{{ c.name }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="text-muted">No concepts in scope yet.</p>{% endif %}
+    </section>
+    <section class="panel panel-pad" aria-labelledby="plan-heading">
+      <h2 class="section-title" id="plan-heading">Review plan</h2>
+      {% if data.sessions %}
+      <ul class="m-0 p-0 list-none grid gap-2">
+        {% for s in data.sessions %}<li{% if s.past %} class="text-muted"{% endif %}><strong>{{ s.when }}</strong>: {{ s.label }}{% if s.past %} (done){% endif %}</li>{% endfor %}
+      </ul>
+      {% else %}<p class="text-muted">Review sessions are planned in your free time during the week before the exam.</p>{% endif %}
+    </section>
+    {% if data.scope or data.logistics %}
+    <section class="panel panel-pad" aria-labelledby="info-heading">
+      <h2 class="section-title" id="info-heading">From announcements</h2>
+      {% if data.scope %}<p><strong>Covers:</strong> {{ data.scope }}</p>{% endif %}
+      {% if data.logistics %}<p class="mt-1"><strong>Logistics:</strong> {{ data.logistics }}</p>{% endif %}
+    </section>
+    {% endif %}
+    {% if data.obsidian %}<p><a class="btn" href="{{ data.obsidian }}">{{ icon("book-open", "icon-sm") }}Open exam prep in Obsidian</a></p>{% endif %}
+  </aside>
+</div>
+{% endblock %}

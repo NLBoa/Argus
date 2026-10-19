@@ -39,6 +39,18 @@
   </div>
 </section>
 
+{% if data.vault %}
+<section aria-labelledby="vault-heading" class="mb-8">
+  <h2 class="section-title" id="vault-heading">Study vault</h2>
+  <div class="panel panel-pad flex flex-wrap items-center gap-x-6 gap-y-2">
+    <span class="status-dot" data-state="{{ data.vault.state }}">{{ data.vault.state_label }}</span>
+    <span class="text-sm">Last pushed to git: <span class="tnum">{{ data.vault.last_sync or "never" }}</span></span>
+    {% if data.vault.error %}<span class="text-sm">{{ data.vault.error }}</span>{% endif %}
+    {% if data.vault.proposals %}<a class="btn btn-sm" href="/proposals">{{ icon("git-compare", "icon-sm") }}{{ data.vault.proposals }} proposal{{ "" if data.vault.proposals == 1 else "s" }} waiting</a>{% else %}<span class="text-sm text-muted">No proposals waiting</span>{% endif %}
+  </div>
+</section>
+{% endif %}
+
 <section aria-labelledby="rules-heading" class="mb-8">
   <h2 class="section-title" id="rules-heading">Reminder rules</h2>
   <p class="text-muted text-sm mb-3">Muted rules send nothing. The 3-hour warning ignores quiet hours, so mute it only if you are sure.</p>

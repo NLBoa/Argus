@@ -141,6 +141,26 @@ class ModuleItemRecord:
     type: str  # File | Page | Assignment | Quiz | Discussion | ExternalUrl | SubHeader | ...
     url: str | None = None
     indent: int = 0
+    api_url: str | None = None  # Canvas API endpoint for File/Page items (used to fetch text)
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialPage:
+    ref: str  # "slide 3", "page 12", "page"
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialRecord:
+    """Text extracted from a course file or page. The file itself is never stored or copied."""
+
+    course_code: str
+    module_id: int | None
+    title: str
+    kind: str  # pdf | pptx | page | syllabus | inbox | text
+    url: str  # where the student opens it
+    pages: tuple[MaterialPage, ...]
+    content_hash: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -89,6 +89,12 @@
     <section class="panel panel-pad" aria-labelledby="src-heading">
       <h2 class="section-title" id="src-heading">Sources</h2>
       <p>{{ source_links(v) }}</p>
+      {% if data.obsidian or data.exam_prep %}
+      <p class="flex flex-wrap gap-2 mt-3">
+        {% if data.exam_prep %}<a class="btn btn-sm" href="/exams/{{ v.id }}">{{ icon("graduation-cap", "icon-sm") }}Exam prep</a>{% endif %}
+        {% if data.obsidian %}<a class="btn btn-sm" href="{{ data.obsidian }}">{{ icon("book-open", "icon-sm") }}Open note in Obsidian</a>{% endif %}
+      </p>
+      {% endif %}
     </section>
     <section class="panel panel-pad" aria-labelledby="past-heading">
       <h2 class="section-title" id="past-heading">Past {{ v.kind_label|lower }}s in {{ v.course.code }}</h2>

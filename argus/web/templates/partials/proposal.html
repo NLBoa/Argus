@@ -1,0 +1,16 @@
+{% from "components/ui.html" import icon %}
+{% from "components/diff.html" import diff_viewer %}
+<section class="panel panel-pad" id="proposal-{{ p.id }}" aria-labelledby="proposal-{{ p.id }}-title">
+  {% if outcome is defined and outcome %}
+  <h2 class="font-bold" id="proposal-{{ p.id }}-title">{{ p.path }}</h2>
+  <p class="mt-1" role="status">{{ outcome }}</p>
+  {% else %}
+  <h2 class="font-bold" id="proposal-{{ p.id }}-title">{% if p.obsidian %}<a href="{{ p.obsidian }}">{{ p.path }}<span class="visually-hidden"> (opens in Obsidian)</span></a>{% else %}{{ p.path }}{% endif %}</h2>
+  <p class="text-sm text-muted mt-1">{{ p.reason }}. Proposed {{ p.created }}; expires {{ p.expires }}.</p>
+  <div class="mt-4">{{ diff_viewer(p.diff) }}</div>
+  <form class="flex flex-wrap gap-2 mt-4" method="post" action="/proposals/{{ p.id }}/approve" hx-post="/proposals/{{ p.id }}/approve" hx-target="#proposal-{{ p.id }}" hx-swap="outerHTML">
+    <button class="btn btn-primary" type="submit">{{ icon("check", "icon-sm") }}Approve change</button>
+    <button class="btn" type="submit" formaction="/proposals/{{ p.id }}/reject" hx-post="/proposals/{{ p.id }}/reject">{{ icon("x", "icon-sm") }}Keep my version</button>
+  </form>
+  {% endif %}
+</section>

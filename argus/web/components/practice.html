@@ -15,6 +15,6 @@
     </div>
     {% endif %}
   </details>
-  {% if q.result %}<p class="mt-3 text-sm font-bold" role="status">{{ {"correct": "Marked as got it.", "shaky": "Marked as shaky; it will come back sooner.", "incorrect": "Marked as missed; it will come back tomorrow."}[q.result] }}</p>{% endif %}
+  {% if q.result %}<p class="mt-3 text-sm font-bold" role="status">{{ {"correct": "Marked as got it.", "shaky": "Marked as shaky; this concept moves up in your review plan.", "incorrect": "Marked as missed; this concept moves up in your review plan."}[q.result] }}</p>{% endif %}
 </article>
 {%- endmacro %}

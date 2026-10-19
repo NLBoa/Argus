@@ -25,6 +25,7 @@ from argus.reminders.guards import GuardContext, Verdict, check
 from argus.reminders.rules import Reminder, Rule, SessionRef, Snapshot, SourceAlertState, candidates
 from argus.store import repo
 from argus.store.db import transaction
+from argus.vault.service import health as vault_health
 
 log = get_logger(__name__)
 BOOTSTRAP_GRACE = timedelta(minutes=10)
@@ -68,12 +69,22 @@ class ReminderEngine:
         first = repo.first_success_at(self.conn)
         risk = risk_map(self.conn, self.config, now)
         sessions = [
-            SessionRef(b.item_id, b.start, b.end)
+            SessionRef(
+                b.item_id, b.start, b.end, (b.label or "Review") if b.kind == "review" else None
+            )
             for b in blocks_between(
                 self.conn, now - timedelta(minutes=15), now + timedelta(minutes=1)
             )
-            if b.kind == "work" and b.item_id is not None
+            if b.kind in ("work", "review") and b.item_id is not None
         ]
+        vault = vault_health(self.conn)
+        sources = {
+            s: SourceAlertState(s, h.failures, h.failing_since, h.last_error)
+            for s, h in health.items()
+        }
+        sources["vault"] = SourceAlertState(
+            "vault", vault.failures, vault.failing_since, vault.last_error
+        )
         return Snapshot(
             at_risk=frozenset(i for i, r in risk.items() if r.level is RiskLevel.AT_RISK),
             sessions=sessions,
@@ -81,10 +92,7 @@ class ReminderEngine:
             now=now,
             items=repo.list_items(self.conn),
             sent_keys=frozenset(repo.notification_keys(self.conn)),
-            sources={
-                s: SourceAlertState(s, h.failures, h.failing_since, h.last_error)
-                for s, h in health.items()
-            },
+            sources=sources,
             bootstrap_until=first + BOOTSTRAP_GRACE if first else None,
         )
 

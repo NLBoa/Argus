@@ -225,6 +225,7 @@ class SyncRunner:
                         repo.replace_modules(self.conn, ids[code], modules, now)
                 for grade in result.grades:
                     repo.set_grade(self.conn, grade, now)
+                repo.upsert_materials(self.conn, result.materials, ids, now)
                 touched = repo.upsert_posts(self.conn, result.posts, ids, now)
                 for key, state in result.state_updates.items():
                     repo.set_source_state(self.conn, result.source.value, key, state, now)

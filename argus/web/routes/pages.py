@@ -1,4 +1,4 @@
-"""Read-only views: Today, Upcoming, Health, Styleguide, plus the palette item feed."""
+"""Read-only views: Today, Upcoming, Health, Exam prep, Proposals, Styleguide, palette feed."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from argus.web.data import (
 from argus.web.deps import AppState, get_conn, get_state
 from argus.web.routes.common import LOAD_ERROR, configured, log, render
 from argus.web.samples import icon_names, styleguide_samples
+from argus.web.study_data import load_exam, load_exams, load_proposals
 from argus.web.viewmodels import ACCENTS, course_views
 
 router = APIRouter()
@@ -292,4 +293,68 @@ def announcements_view(request: Request, state: State, conn: Conn) -> HTMLRespon
         ctx,
         active="/announcements",
         title="Announcements",
+    )
+
+
+@router.get("/exams", response_class=HTMLResponse)
+def exams_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    try:
+        exams = load_exams(conn, state.config, state.clock.now())
+    except sqlite3.Error:
+        log.exception("exams failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/exams.html",
+            {"error": LOAD_ERROR},
+            active="/exams",
+            title="Exam prep",
+            status_code=503,
+        )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/exams.html",
+        {"exams": exams, "error": None},
+        active="/exams",
+        title="Exam prep",
+    )
+
+
+@router.get("/exams/{item_id}", response_class=HTMLResponse)
+def exam_view(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
+    data = load_exam(conn, state.config, state.clock.now(), item_id)
+    if data is None:
+        raise HTTPException(404, "No such exam")
+    return render(
+        request, state, conn, "pages/exam.html", {"data": data}, active="/exams", title=data.title
+    )
+
+
+@router.get("/proposals", response_class=HTMLResponse)
+def proposals_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    try:
+        proposals = load_proposals(conn, state.config, state.clock)
+    except sqlite3.Error:
+        log.exception("proposals failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/proposals.html",
+            {"error": LOAD_ERROR},
+            active="/proposals",
+            title="Proposals",
+            status_code=503,
+        )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/proposals.html",
+        {"proposals": proposals, "error": None},
+        active="/proposals",
+        title="Proposals",
     )

@@ -39,8 +39,11 @@ class LiveServer:
         if seed:
             seed_demo(conn, self.clock.now())
         conn.close()
+        paths = DEMO_CONFIG.paths.model_copy(
+            update={"data_dir": self.dir / "var", "vault_dir": self.dir / "vault"}
+        )
         app = create_app(
-            DEMO_CONFIG,
+            DEMO_CONFIG.model_copy(update={"paths": paths}),
             DEMO_SECRETS,
             self.clock,
             db_path=self.db,

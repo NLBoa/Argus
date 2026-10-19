@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, empty_state, error_banner %}
+{% from "components/diff.html" import diff_viewer %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Proposals</h1>
+  <p class="page-sub">Argus never changes a note you edited without asking. Approve a change to apply it exactly once.</p>
+</div>
+{% if error %}
+  {{ error_banner(error, "/proposals") }}
+{% elif not proposals %}
+  <div class="panel">{{ empty_state("git-compare", "No proposals", "When Argus has a newer version of a note you edited, it asks here first.", level=2) }}</div>
+{% else %}
+<div class="grid gap-6">
+  {% for p in proposals %}{% include "partials/proposal.html" %}{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

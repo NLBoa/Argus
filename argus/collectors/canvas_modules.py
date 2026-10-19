@@ -9,19 +9,25 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from argus.collectors.base import CollectContext, CollectResult, RunStatus
 from argus.collectors.canvas_api import _dt
+from argus.collectors.extract_text import MAX_BYTES, extract, kind_for, page_text
 from argus.collectors.text import html_to_text
 from argus.domain.models import (
     AuthorRole,
     GradeRecord,
+    MaterialRecord,
     ModuleItemRecord,
     ModuleRecord,
     PostRecord,
     Source,
 )
+from argus.logging import get_logger
 from argus.store.repo import SourceState, sha256
+
+log = get_logger(__name__)
 
 
 def parse_item(i: dict[str, Any]) -> ModuleItemRecord:
@@ -31,6 +37,7 @@ def parse_item(i: dict[str, Any]) -> ModuleItemRecord:
         type=str(i.get("type") or "Item"),
         url=url,
         indent=int(i.get("indent") or 0),
+        api_url=i.get("url") if i.get("type") in ("File", "Page") else None,
     )
 
 
@@ -58,6 +65,9 @@ def parse_grade(enrollments: Any, course_code: str) -> GradeRecord | None:
     )
 
 
+MAX_FILES_PER_COURSE = 60
+
+
 class CanvasModulesCollector:
     source = Source.CANVAS_MODULES
 
@@ -71,6 +81,7 @@ class CanvasModulesCollector:
         modules: dict[str, tuple[ModuleRecord, ...]] = {}
         grades: list[GradeRecord] = []
         posts: list[PostRecord] = []
+        materials: list[MaterialRecord] = []
         updates: dict[str, SourceState] = {}
         for course in ctx.config.courses:
             if course.canvas_id is None:
@@ -107,6 +118,16 @@ class CanvasModulesCollector:
             if digest == ctx.state(self.source, key).payload_hash:
                 continue
             modules[course.code] = tuple(parse_module(m, course.code, items) for m, items in raw)
+            materials.extend(
+                await self._materials(
+                    ctx,
+                    base=base,
+                    headers=headers,
+                    course_code=course.code,
+                    raw=raw,
+                    updates=updates,
+                )
+            )
             grade = parse_grade(enrollment.json(), course.code)
             if grade is not None:
                 grades.append(grade)
@@ -135,5 +156,83 @@ class CanvasModulesCollector:
             modules=modules,
             grades=tuple(grades),
             posts=tuple(posts),
+            materials=tuple(materials),
             state_updates=updates,
         )
+
+    async def _materials(
+        self,
+        ctx: CollectContext,
+        *,
+        base: str,
+        headers: dict[str, str],
+        course_code: str,
+        raw: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+        updates: dict[str, SourceState],
+    ) -> list[MaterialRecord]:
+        """Text of the module's files (PDF, PPTX) and pages, for study notes. Files are read in
+        memory and discarded; only extracted text is kept. Unchanged files are skipped."""
+        key = f"files:{course_code}"
+        seen: dict[str, str] = json.loads(ctx.state(self.source, key).data or "{}")
+        out: list[MaterialRecord] = []
+        host = urlsplit(base).netloc
+        fetched = 0
+        for module, items in raw:
+            for i in items:
+                api_url = i.get("url")
+                if (
+                    i.get("type") not in ("File", "Page")
+                    or not api_url
+                    or fetched >= MAX_FILES_PER_COURSE
+                ):
+                    continue
+                if urlsplit(str(api_url)).netloc != host:
+                    continue  # never send the token anywhere but Canvas
+                meta = (await ctx.fetcher.get(str(api_url), headers=headers)).json()
+                stamp = str(meta.get("updated_at") or meta.get("modified_at") or "")
+                if seen.get(str(api_url)) == stamp and stamp:
+                    continue
+                fetched += 1
+                link = str(i.get("html_url") or api_url)
+                try:
+                    if i["type"] == "Page":
+                        pages = page_text(meta.get("body"))
+                        kind = "page"
+                    else:
+                        kind_ = kind_for(
+                            str(meta.get("content-type", "")), str(meta.get("filename", ""))
+                        )
+                        if (
+                            kind_ is None
+                            or int(meta.get("size") or 0) > MAX_BYTES
+                            or not meta.get("url")
+                        ):
+                            continue
+                        download = str(meta["url"])
+                        same_host = urlsplit(download).netloc == host
+                        data = (
+                            await ctx.fetcher.get(download, headers=headers if same_host else None)
+                        ).body
+                        pages = extract(kind_, data)
+                        kind = kind_
+                except (ValueError, KeyError) as e:
+                    log.warning(
+                        "could not extract material",
+                        extra={"title": i.get("title"), "error": str(e)},
+                    )
+                    continue
+                seen[str(api_url)] = stamp
+                if pages:
+                    out.append(
+                        MaterialRecord(
+                            course_code=course_code,
+                            module_id=int(module["id"]),
+                            title=str(i.get("title") or meta.get("display_name") or "Untitled"),
+                            kind=kind,
+                            url=link,
+                            pages=pages,
+                            content_hash=sha256(json.dumps([p.text for p in pages])),
+                        )
+                    )
+        updates[key] = SourceState(data=json.dumps(seen, sort_keys=True))
+        return out

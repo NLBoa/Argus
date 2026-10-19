@@ -21,8 +21,17 @@ async def _no_sleep(_: float) -> None:
 
 
 @pytest.fixture
-def app_config() -> AppConfig:
-    return load_config(FIXTURES / "config.yaml")
+def app_config(tmp_path: Path) -> AppConfig:
+    """The fixture config, with every path inside the test's temp dir (never the repo's var/)."""
+    config = load_config(FIXTURES / "config.yaml")
+    paths = config.paths.model_copy(
+        update={
+            "data_dir": tmp_path / "var",
+            "vault_dir": tmp_path / "vault",
+            "backup_dir": tmp_path / "backups",
+        }
+    )
+    return config.model_copy(update={"paths": paths})
 
 
 @pytest.fixture

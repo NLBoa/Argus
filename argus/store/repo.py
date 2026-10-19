@@ -23,6 +23,8 @@ from argus.domain.models import (
     ItemKind,
     ItemLink,
     ItemStatus,
+    MaterialPage,
+    MaterialRecord,
     MeetingRecord,
     ModuleItemRecord,
     ModuleRecord,
@@ -1011,7 +1013,16 @@ def replace_modules(
             )
     for m in modules:
         items = json.dumps(
-            [{"title": i.title, "type": i.type, "url": i.url, "indent": i.indent} for i in m.items]
+            [
+                {
+                    "title": i.title,
+                    "type": i.type,
+                    "url": i.url,
+                    "indent": i.indent,
+                    "api_url": i.api_url,
+                }
+                for i in m.items
+            ]
         )
         conn.execute(
             """INSERT INTO modules (course_id, canvas_id, name, position, state, unlock_at, items,
@@ -1054,7 +1065,13 @@ def list_modules(conn: sqlite3.Connection, course_code: str) -> list[StoredModul
                 name=r["name"],
                 position=r["position"],
                 items=tuple(
-                    ModuleItemRecord(i["title"], i["type"], i.get("url"), int(i.get("indent") or 0))
+                    ModuleItemRecord(
+                        i["title"],
+                        i["type"],
+                        i.get("url"),
+                        int(i.get("indent") or 0),
+                        i.get("api_url"),
+                    )
                     for i in json.loads(r["items"])
                 ),
                 unlock_at=parse_iso_or_none(r["unlock_at"]),
@@ -1661,3 +1678,55 @@ def finished_history(conn: sqlite3.Connection, now: datetime) -> list[FinishedRo
             )
         )
     return out
+
+
+# ---------------------------------------------------------------- materials
+
+
+def upsert_materials(
+    conn: sqlite3.Connection,
+    materials: Iterable[MaterialRecord],
+    ids: dict[str, int],
+    now: datetime,
+) -> int:
+    changed = 0
+    for m in materials:
+        course_id = ids.get(m.course_code)
+        if course_id is None:
+            continue
+        pages = json.dumps([{"ref": p.ref, "text": p.text} for p in m.pages])
+        cur = conn.execute(
+            """INSERT INTO materials (course_id, module_id, title, kind, url, pages, content_hash, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (course_id, url) DO UPDATE SET module_id = excluded.module_id, title = excluded.title,
+                 kind = excluded.kind, pages = excluded.pages, content_hash = excluded.content_hash,
+                 fetched_at = excluded.fetched_at
+               WHERE materials.content_hash != excluded.content_hash""",
+            (course_id, m.module_id, m.title, m.kind, m.url, pages, m.content_hash, iso(now)),
+        )
+        changed += cur.rowcount
+    return changed
+
+
+def list_materials(
+    conn: sqlite3.Connection, course_code: str, module_id: int | None = None
+) -> list[MaterialRecord]:
+    sql = (
+        "SELECT m.*, c.code FROM materials m JOIN courses c ON c.id = m.course_id WHERE c.code = ?"
+    )
+    params: list[object] = [course_code]
+    if module_id is not None:
+        sql += " AND m.module_id = ?"
+        params.append(module_id)
+    return [
+        MaterialRecord(
+            course_code=r["code"],
+            module_id=r["module_id"],
+            title=r["title"],
+            kind=r["kind"],
+            url=r["url"],
+            pages=tuple(MaterialPage(p["ref"], p["text"]) for p in json.loads(r["pages"])),
+            content_hash=r["content_hash"],
+        )
+        for r in conn.execute(sql + " ORDER BY m.module_id, m.title", params)
+    ]

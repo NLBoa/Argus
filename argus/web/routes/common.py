@@ -14,6 +14,7 @@ from argus.ai.client import AIClient, build_transport
 from argus.logging import get_logger
 from argus.web.data import configured_sources, notices
 from argus.web.deps import THEME_COOKIE, AppState
+from argus.web.study_data import open_proposal_count
 
 log = get_logger(__name__)
 LOAD_ERROR = (
@@ -44,9 +45,11 @@ def render(
 ) -> HTMLResponse:
     now = state.clock.now()
     stale = []
+    proposals = 0
     if conn is not None:
         try:
             stale = notices(conn, configured(state), now)
+            proposals = open_proposal_count(conn)
         except sqlite3.Error:
             log.exception("could not load source health for banners")
     ctx = {
@@ -54,6 +57,7 @@ def render(
         "active": active,
         "theme": request.cookies.get(THEME_COOKIE, "system"),
         "stale": stale,
+        "open_proposals": proposals,
         "boot": {"now": now.isoformat(), "page": active},
         **context,
     }

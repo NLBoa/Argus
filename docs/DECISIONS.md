@@ -207,3 +207,48 @@ The planner property tests and the simulated-week pipeline test pass in `make ch
 (`make evals`) need `ARGUS_ANTHROPIC_API_KEY`, which has not been provided yet. The harness, datasets, and scorer are
 in place, and CI checks the scorer. Run `make evals` once a key exists and record the numbers in `docs/handoff.md`.
 Prompt tuning (a new prompt version) follows from whatever the first run shows.
+
+## D035 — Vault layout and the course folder note (2026-10-19)
+Every course lives in `Courses/<code>/`. The course page is the folder note `Courses/<code>/<code>.md`, so
+`argus-edit: allow` there opens the whole course folder to free edits. Under it: `Concepts/`, `Modules/`,
+`Assignments/`, `Exams/`, `Flashcards.md`, and `Concept map.canvas`. Vault-wide notes: `Review/Today.md`,
+`Weekly/YYYY-Www.md`, `Argus/Proposals.md`, and `Argus/Inbox/`. Wikilinks use full paths, so two courses can
+have a concept with the same name. Assignment notes carry logistics only (due date, status, estimate, links,
+scope); they never contain anything about how to solve the work.
+
+## D036 — Files outside the region model are written once (2026-10-19)
+The JSON Canvas concept map and the inbox README cannot hold `%% argus %%` markers. Argus writes them only when
+they are missing or still byte-identical to what it last wrote (hash in `vault_regions`, region `file`). If the
+student edits one, Argus leaves it alone for good, with no proposal: a diff of canvas JSON isn't useful to review.
+
+## D037 — Exam review: horizon, order, and nudges (2026-10-19)
+Review sessions (45 minutes, 3 concepts) sit 7, 5, 3, 2, and 1 days before an exam, in free time left after work
+sessions. They are planned for exams inside the 14-day planning horizon; days already past are skipped. Concepts
+go weakest first (untested, then shaky, then solid; inbox confusion raises priority) and interleave across
+modules. Self-grading triggers a replan, so the order follows readiness. Review blocks get their own start
+nudge, "Time to review", keyed apart from work nudges.
+
+## D038 — Confusion inbox is matched by code, not AI (2026-10-19)
+A line in `Argus/Inbox/*.md` matches the concept whose name words mostly appear in it (at least half), narrowed
+by a course code if the line names one. A match raises the concept's priority once (the entry is keyed by
+path and text hash, so a line never counts twice). Targeted practice (AI, then verified) runs in the worker's
+study step and is retried until `practice_at` is set. Unmatched lines are stored and do nothing else. Argus
+never edits or deletes inbox files.
+
+## D039 — One vault cycle at a time (2026-10-19)
+The worker (every 15 minutes) and the web app (approving a proposal) both run vault cycles. An `flock` on
+`<data_dir>/vault.lock` serializes them. The worker runs git synchronously at the end of its tick, after
+reminders, so reminders never wait on git. Each git call has a 120-second timeout. Approval runs inside a
+cycle: pull first, so the exact-base check sees the student's latest version, then apply, write, commit, and push.
+
+## D040 — Where proposals and exam prep show up (2026-10-19)
+A banner on Today (not on every page) says when proposals are waiting, and Health shows the vault's sync status and
+proposal count. Exam prep is in the desktop nav (`g e`). On mobile it is reached from exam items, the course page,
+and the palette, so the tab bar keeps its five tabs.
+
+## D041 — Verifier eval (2026-10-19)
+`tests/evals/datasets/verification.py` holds 22 synthetic notes with 32 seeded errors (unsupported claims, miscited
+claims, wrong practice answers, wrong diagrams) and 73 clean elements. A miscited claim counts as caught if it is
+ruled unsupported or its citation is flagged. A missing verdict counts as a rejection, as in `apply_verification`.
+Gates: catch at least 90% of seeded errors, and false rejects at most 10%. The scorer is unit-tested in CI with
+three verifiers: a perfect one, a rubber stamp, and a dead one. The run itself (`make evals`) needs the API key (see D034).

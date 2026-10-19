@@ -117,6 +117,16 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro proposals_banner(count) -%}
+{% if count %}
+<div class="banner banner--offline" role="status">
+  {{ icon("git-compare") }}
+  <p class="banner__text"><strong>Argus wants to change {{ count }} note{{ "" if count == 1 else "s" }} you edited.</strong> Nothing changes until you approve.</p>
+  <a class="btn btn-sm" href="/proposals">Review proposals</a>
+</div>
+{% endif %}
+{%- endmacro %}
+
 {% macro offline_banner(static=False) -%}
 <div class="banner banner--offline" role="status" {% if not static %}x-data x-show="$store.net.offline" x-cloak{% endif %}>
   {{ icon("wifi-off") }}

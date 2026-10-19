@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, course_chip, empty_state, error_banner %}
+{% from "components/charts.html" import readiness_meter %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Exam prep</h1>
+  <p class="page-sub">Practice questions from your course materials, checked against the sources</p>
+</div>
+{% if error %}
+  {{ error_banner(error, "/exams") }}
+{% elif not exams %}
+  <div class="panel">{{ empty_state("graduation-cap", "No exams coming up", "Exams from ELMS and Gradescope show up here with a review plan.", level=2) }}</div>
+{% else %}
+<ul class="grid gap-4 md:grid-cols-2 m-0 p-0 list-none">
+  {% for e in exams %}
+  <li class="panel panel-pad exam-card" data-accent="{{ e.course.accent }}">
+    <div class="flex flex-wrap items-center gap-2 text-sm text-muted">{{ course_chip(e.course) }}<span>{{ e.when }}, {{ e.relative }}</span></div>
+    <h2 class="text-lg font-bold mt-2"><a href="/exams/{{ e.id }}">{{ e.title }}</a></h2>
+    {% set total = e.counts.values()|sum %}
+    {% if total %}
+    <div class="mt-3">{{ readiness_meter(e.counts.solid, e.counts.shaky, e.counts.untested, "Readiness for " ~ e.title) }}</div>
+    <p class="mt-2 text-sm">{{ total }} concept{{ "" if total == 1 else "s" }}, {{ e.practice }} practice question{{ "" if e.practice == 1 else "s" }}</p>
+    {% else %}
+    <p class="mt-1 text-muted">No verified concept notes yet. They appear after course materials sync.</p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

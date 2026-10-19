@@ -9,15 +9,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
-from argus import announcements, estimates
+from argus import announcements, estimates, exams
 from argus.domain.models import Item
 from argus.planning import replan
 from argus.reminders.rules import Rule
 from argus.store import repo
 from argus.store.db import connect, transaction
+from argus.vault import service as vault
+from argus.vault.writer import VaultWriter
 from argus.web.data import finding_view
 from argus.web.deps import AppState, Runner, get_conn, get_state
 from argus.web.routes.common import ai_client, back, is_htmx, log, templates, toast
+from argus.web.study_data import practice_card
 from argus.web.viewmodels import course_views, item_view
 
 router = APIRouter()
@@ -250,3 +253,94 @@ def log_hours(
         raise HTTPException(422, str(e)) from e
     replan(conn, state.config, state.clock, force=True)
     return back(request, f"/items/{item_id}")
+
+
+# ---------------------------------------------------------------- study and vault
+
+
+@router.post("/practice/{practice_id}/attempt")
+def practice_attempt(
+    request: Request,
+    state: State,
+    conn: Conn,
+    practice_id: int,
+    result: Annotated[str, Form()],
+) -> Response:
+    try:
+        exams.record_attempt(conn, practice_id, result, state.clock.now())
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    replan(conn, state.config, state.clock)  # readiness feeds the review plan
+    if not is_htmx(request):
+        return back(request, "/exams")
+    view = practice_card(conn, state.config, practice_id, result)
+    if view is None:
+        raise HTTPException(404, "No such practice item")
+    macro = templates(request).env.get_template("components/practice.html").module.practice_card  # type: ignore[attr-defined]
+    return HTMLResponse(str(macro(view)))
+
+
+def _proposal_fragment(
+    request: Request, state: AppState, conn: sqlite3.Connection, proposal_id: int, outcome: str
+) -> HTMLResponse:
+    writer = VaultWriter(state.config.paths.vault_dir, conn, state.clock)
+    p = writer.proposal(proposal_id)
+    if p is None:
+        raise HTTPException(404, "No such proposal")
+    html = (
+        templates(request).env.get_template("partials/proposal.html").render(p=p, outcome=outcome)
+    )
+    return HTMLResponse(html)
+
+
+@router.post("/proposals/{proposal_id}/approve")
+async def approve_proposal(
+    request: Request, state: State, conn: Conn, proposal_id: int
+) -> Response:
+    """Apply the exact proposed note once, inside a vault cycle (pull first, then commit)."""
+    outcome: list[str] = []
+    errors: list[str] = []
+
+    def apply(writer: VaultWriter) -> None:
+        try:
+            outcome.append(writer.approve(proposal_id))
+        except LookupError as e:
+            errors.append(str(e))
+
+    result = await asyncio.to_thread(vault.run_cycle, conn, state.config, state.clock, before=apply)
+    if errors:
+        message, kind = errors[0], "error"
+    elif not outcome:
+        message, kind = (
+            f"Couldn't reach the vault ({result.status}); nothing was changed. Try again.",
+            "error",
+        )
+    elif outcome[0] == "stale":
+        message, kind = (
+            "The note changed since this was proposed, so nothing was applied. Argus will propose again.",
+            "error",
+        )
+    else:
+        message, kind = "Change applied to your note", "ok"
+    if not is_htmx(request):
+        if kind == "error":
+            raise HTTPException(409, message)
+        return back(request, "/proposals")
+    return toast(_proposal_fragment(request, state, conn, proposal_id, message), message, kind)
+
+
+@router.post("/proposals/{proposal_id}/reject")
+def reject_proposal(request: Request, state: State, conn: Conn, proposal_id: int) -> Response:
+    writer = VaultWriter(state.config.paths.vault_dir, conn, state.clock)
+    try:
+        writer.reject(proposal_id)
+    except LookupError as e:
+        if not is_htmx(request):
+            raise HTTPException(409, str(e)) from e
+        return toast(_proposal_fragment(request, state, conn, proposal_id, str(e)), str(e), "error")
+    message = "Kept your version. Argus won't propose this change again."
+    if not is_htmx(request):
+        return back(request, "/proposals")
+    return toast(_proposal_fragment(request, state, conn, proposal_id, message), message)

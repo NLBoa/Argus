@@ -19,6 +19,8 @@ dependencies = [
   "piazza-api==0.16.0",
   "python-multipart>=0.0.20",
   "anthropic>=1.15",
+  "pypdf>=6.0",
+  "python-pptx>=1.0",
 ]
 
 [project.scripts]
@@ -88,6 +90,7 @@ max-line-length = 120
 [tool.ruff.lint.per-file-ignores]
 "argus/clock.py" = ["TID251"]
 "argus/demo.py" = ["PLR0917", "E501"]  # synthetic data reads better unwrapped
+"tests/evals/datasets/**" = ["E501"]  # one source sentence per line
 "tests/**" = ["S", "PLR", "ARG", "TID251", "PT012", "PT018", "RUF001"]
 "scripts/**" = ["S", "TID251"]
 

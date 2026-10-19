@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from argus.clock import to_local
-from argus.domain.models import Item
+from argus.domain.models import Item, ItemKind
 from argus.reminders.text import fit, short, when
 from argus.store.db import iso
 
@@ -81,6 +81,7 @@ class SessionRef:
     item_id: int
     start: datetime
     end: datetime
+    review: str | None = None  # the review block's label; None for a work session
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +198,7 @@ SOURCE_NAMES = {
     "piazza": "Piazza",
     "piazza_email": "Piazza email",
     "umdio": "umd.io",
+    "vault": "Vault git",
 }
 
 
@@ -250,20 +252,37 @@ def at_risk(snap: Snapshot) -> list[Reminder]:
 
 def start_nudges(snap: Snapshot) -> list[Reminder]:
     items = {i.id: i for i in _deadline_candidates(snap.items)}
+    exams = {i.id: i for i in snap.items if i.status.is_open and i.kind is ItemKind.EXAM}
     out = []
     for s in snap.sessions:
-        it = items.get(s.item_id)
+        it = (exams if s.review else items).get(s.item_id)
         if it is None or not s.start <= snap.now < s.start + NUDGE_WINDOW:
             continue
-        key = f"{it.id}:{Rule.START_NUDGE.value}:{iso(s.start)}"
+        kind = ":review" if s.review else ""
+        key = f"{it.id}:{Rule.START_NUDGE.value}{kind}:{iso(s.start)}"
         if key in snap.sent_keys:
+            continue
+        until = when(s.end).split(" ", 1)[1]
+        if s.review:
+            out.append(
+                Reminder(
+                    rule=Rule.START_NUDGE,
+                    keys=(key,),
+                    title="Time to review",
+                    body=f"{it.course_code} {short(s.review, 70)} until {until}. "
+                    "Test yourself first; the practice questions are on the exam prep page.",
+                    item_ids=(it.id,),
+                    priority=3,
+                    expires_at=s.start + NUDGE_WINDOW,
+                )
+            )
             continue
         out.append(
             Reminder(
                 rule=Rule.START_NUDGE,
                 keys=(key,),
                 title="Time to start",
-                body=f"[1] {it.course_code} {short(it.title, 60)} until {when(s.end).split(' ', 1)[1]}. "
+                body=f"[1] {it.course_code} {short(it.title, 60)} until {until}. "
                 "Reply DONE 1 when submitted.",
                 item_ids=(it.id,),
                 priority=3,
