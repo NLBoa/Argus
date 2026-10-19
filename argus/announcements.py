@@ -29,6 +29,7 @@ from argus.domain.findings import (
 from argus.domain.models import ItemKind, Source
 from argus.domain.titles import infer_kind
 from argus.logging import get_logger
+from argus.reminders.text import when
 from argus.store import repo
 from argus.store.db import transaction
 
@@ -205,7 +206,7 @@ def confirm(conn: sqlite3.Connection, finding_id: int, now: datetime) -> str:
                 reason=f"Confirmed: {f.quote}",
                 now=now,
             )
-            message = f"Using the announced date for {f.title}"
+            message = f"Using the announced date for {f.title}: {when(due)}"
         elif f.kind in ("scope", "logistics") and f.item_id is not None:
             _apply(
                 conn,

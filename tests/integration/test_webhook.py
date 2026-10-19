@@ -244,6 +244,7 @@ def test_today_renumbers_and_ok_no_answer_the_waiting_question(
     # Point [1] at the midterm, as the "Dates disagree" text would.
     with sqlite3.connect(db_path) as c:
         c.execute("UPDATE inbound_messages SET item_ids = ?", (json.dumps([MIDTERM]),))
+        c.execute("UPDATE notifications SET item_ids = ?", (json.dumps([MIDTERM]),))
     assert "waiting" not in reply(text(client, "NO 1"))
     assert (
         db(db_path).execute("SELECT status FROM findings WHERE id = 1").fetchone()[0] == "dismissed"
@@ -275,11 +276,22 @@ def test_free_text_goes_to_the_llm_and_the_reply_says_how_it_was_read(
     transport.responder = lambda req: ok(
         {"command": "DONE", "number": 1, "hours": None, "minutes": None, "confidence": 0.95}
     )
+    # Review R16: an AI reading never marks work done by itself; it asks for the exact command.
     out = reply(text(client, "finished the hw lol"))
-    assert out.startswith("Read as DONE 1. Marked [1] CMSC351 Homework 3 done.")
+    assert out == "Did you mean DONE 1 ([1] CMSC351 Homework 3)? Reply DONE 1 to do it."
     [call] = transport.calls
     assert "[1] Homework 3" in call["user"] and "finished the hw lol" in call["user"]
-    assert db(db_path).execute("SELECT via FROM inbound_messages").fetchone()[0] == "ai"
+    assert (
+        db(db_path).execute("SELECT user_done_at FROM items WHERE id = ?", (HW3,)).fetchone()[0]
+        is None
+    )
+    assert reply(text(client, "DONE 1")).startswith("Marked [1] CMSC351 Homework 3 done.")
+    transport.responder = lambda req: ok(
+        {"command": "LOG", "number": 2, "hours": 0.75, "minutes": None, "confidence": 0.9}
+    )
+    assert reply(text(client, "spent 45 min on the problem set")).startswith(
+        "Read as LOG 2 0.75h. Logged"
+    )
 
 
 def test_llm_output_is_validated_like_typed_commands(
@@ -322,3 +334,118 @@ def test_only_the_webhook_is_public(config: AppConfig, db_path: Path, clock: Fak
     assert PATH not in {getattr(r, "path", None) for r in dashboard.routes}
     with TestClient(dashboard) as c:
         assert c.post(PATH, data={"Body": "DONE 1"}).status_code == 403  # cross-origin guard
+
+
+def test_numbers_come_from_texts_and_ambiguity_is_refused(
+    client: TestClient, db_path: Path, clock: FakeClock
+) -> None:
+    from datetime import timedelta
+
+    conn = db(db_path)
+    with transaction(conn):
+        for key, ids, channel in (("test:push", [MIDTERM], "ntfy"), ("test:sms2", [PS6], "sms")):
+            nid = repo.claim_notification(
+                conn,
+                keys=[key],
+                rule="new_item",
+                title="t",
+                body="b",
+                item_ids=ids,
+                priority=3,
+                counts_toward_cap=True,
+                now=clock.now() + timedelta(minutes=5),
+            )
+            assert nid is not None
+            repo.finish_notification(
+                conn,
+                nid,
+                ok=True,
+                channel=channel,
+                error=None,
+                now=clock.now() + timedelta(minutes=5),
+            )
+    clock.advance(timedelta(minutes=6))
+    # Review R7: the ntfy push is ignored; the two texts 5 minutes apart give [1] different meanings.
+    out = reply(text(client, "DONE 1"))
+    assert (
+        out.startswith("My last two texts both have a [1]")
+        and "Problem Set 6" in out
+        and "Homework 3" in out
+    )
+    assert (
+        conn.execute("SELECT COUNT(*) FROM items WHERE user_done_at IS NOT NULL").fetchone()[0] == 0
+    )
+    listing = reply(text(client, "TODAY"))
+    assert listing.startswith("Due today: [1]")
+    assert reply(text(client, "DONE 1")).startswith("Marked [1]")  # the fresh list is unambiguous
+
+
+def test_ok_answers_the_finding_that_was_texted(
+    client: TestClient, db_path: Path, clock: FakeClock
+) -> None:
+    conn = db(db_path)
+    with transaction(conn):  # a second change to the midterm is waiting, newer than finding 1
+        conn.execute(
+            """INSERT INTO findings (post_id, course_id, kind, title, date, date_only, scope, quote, confidence,
+                                     item_id, status, reason, created_at)
+               SELECT post_id, course_id, kind, title, '2026-11-10T14:30:00Z', date_only, scope, quote, confidence,
+                      item_id, status, reason, created_at FROM findings WHERE id = 1"""
+        )
+        conn.execute("UPDATE notifications SET item_ids = ?", (json.dumps([MIDTERM]),))
+    # Review R2: with two waiting and none texted, Argus refuses to guess.
+    assert "More than one change" in reply(text(client, "OK 1"))
+    with transaction(conn):
+        nid = repo.claim_notification(
+            conn,
+            keys=["finding:1:conflict"],
+            rule="announced",
+            title="Dates disagree",
+            body="b",
+            item_ids=[MIDTERM],
+            priority=4,
+            counts_toward_cap=True,
+            now=clock.now(),
+        )
+        assert nid is not None
+        repo.finish_notification(conn, nid, ok=True, channel="sms", error=None, now=clock.now())
+    out = reply(text(client, "OK 1"))
+    assert out.startswith("Using the announced date for Midterm 1: ")
+    statuses = dict(conn.execute("SELECT id, status FROM findings").fetchall())
+    assert statuses[1] == "confirmed" and statuses[max(statuses)] == "conflict"
+
+
+def test_oversized_or_non_form_bodies_are_refused_before_parsing(
+    client: TestClient, db_path: Path
+) -> None:
+    """Review R14: the one public route never parses a large or multipart body."""
+    big = {"MessageSid": "SMbig", "From": STUDENT, "Body": "x" * 20_000}
+    assert client.post(PATH, data=big).status_code == 413
+    files = client.post(PATH, files={"f": ("a.bin", b"\0" * 1000)}, data={"Body": "DONE 1"})
+    assert files.status_code == 415
+    assert (
+        client.post(PATH, content=b"{}", headers={"content-type": "application/json"}).status_code
+        == 415
+    )
+    assert db(db_path).execute("SELECT COUNT(*) FROM inbound_messages").fetchone()[0] == 0
+
+
+def test_a_crash_is_answered_and_recorded_so_retries_do_not_rerun(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argus.sms
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(argus.sms, "replan", boom)
+    out = reply(text(client, "EST 1 3h", sid="SMcrash"))
+    assert out.startswith("Something went wrong")
+    assert (
+        reply(text(client, "EST 1 3h", sid="SMcrash")) == out
+    )  # Twilio's retry gets the same answer
+    assert (
+        db(db_path)
+        .execute("SELECT status FROM inbound_messages WHERE message_sid = 'SMcrash'")
+        .fetchone()[0]
+        == "failed"
+    )

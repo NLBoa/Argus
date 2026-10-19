@@ -20,7 +20,15 @@ from argus.ai.schemas import ConceptBatchOut, ConceptDraft, PracticeBatchOut, Ve
 from argus.clock import Clock
 from argus.config import AppConfig
 from argus.domain.models import MaterialRecord
-from argus.domain.study import VerifiedConcept, apply_verification, kept_practice, number, slugify
+from argus.domain.study import (
+    VerifiedConcept,
+    apply_verification,
+    kept_practice,
+    looks_graded,
+    names_item,
+    number,
+    slugify,
+)
 from argus.logging import get_logger
 from argus.store import repo
 from argus.store.db import iso, transaction
@@ -48,6 +56,34 @@ def sources_for(materials: list[MaterialRecord], limit: int = MAX_SOURCE_CHARS) 
             out.append(Source(f"S{len(out) + 1}", m.title, page.ref, page.text, m.url))
             used += len(page.text)
     return out
+
+
+def item_titles(conn: sqlite3.Connection, course_code: str) -> list[str]:
+    return [
+        r["title"]
+        for r in conn.execute(
+            "SELECT i.title FROM items i JOIN courses c ON c.id = i.course_id WHERE c.code = ? AND i.kind != 'event'",
+            (course_code,),
+        )
+    ]
+
+
+def study_materials(
+    conn: sqlite3.Connection, course_code: str, module_id: int | None
+) -> list[MaterialRecord]:
+    """The module's materials minus anything that is or answers graded work (review R10)."""
+    materials = (
+        repo.list_materials(conn, course_code, module_id)
+        if module_id
+        else repo.list_materials(conn, course_code)
+    )
+    titles = item_titles(conn, course_code)
+    kept = [m for m in materials if not looks_graded(m.title, titles)]
+    if len(kept) < len(materials):
+        log.info(
+            "graded material left out of study notes", extra={"count": len(materials) - len(kept)}
+        )
+    return kept
 
 
 def input_hash(materials: list[MaterialRecord]) -> str:
@@ -125,7 +161,7 @@ async def generate_module(
     module_name: str,
 ) -> int:
     """Generate and verify concept notes for one module. Returns how many were published."""
-    materials = repo.list_materials(conn, course_code, module_id)
+    materials = study_materials(conn, course_code, module_id)
     sources = sources_for(materials)
     if not sources:
         return 0
@@ -277,7 +313,7 @@ async def ensure_study(
             break
         if config.course(code) is None:
             continue
-        materials = repo.list_materials(conn, code, module_id)
+        materials = study_materials(conn, code, module_id)
         if module_hash(conn, code, module_id) == input_hash(materials):
             continue
         await generate_module(
@@ -297,11 +333,10 @@ async def targeted_practice(
     ).fetchone()
     if row is None or not ai.available:
         return 0
-    materials = (
-        repo.list_materials(conn, row["code"], row["module_id"])
-        if row["module_id"]
-        else repo.list_materials(conn, row["code"])
-    )
+    if names_item(confusion, item_titles(conn, row["code"])):
+        log.info("inbox line names graded work: no practice generated")
+        return 0  # review R10: never generate practice around a homework or exam question
+    materials = study_materials(conn, row["code"], row["module_id"])
     sources = sources_for(materials, limit=30_000)
     if not sources:
         return 0

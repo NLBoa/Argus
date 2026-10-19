@@ -215,7 +215,8 @@ class ReminderEngine:
     async def tick(self) -> list[TickOutcome]:
         now = self.clock.now()
         outcomes: list[TickOutcome] = []
-        await self._retry_failed(now)
+        ctx = self.guard_context(now)
+        await self._retry_failed(now, ctx)
         ctx = self.guard_context(now)
         for r in candidates(self.snapshot(now)):
             verdict, reason = check(r, ctx, now)
@@ -255,10 +256,22 @@ class ReminderEngine:
         )
         return ("sent", channel) if channel else ("delivery failed", None)
 
-    async def _retry_failed(self, now: datetime) -> None:
+    async def _retry_failed(self, now: datetime, ctx: GuardContext) -> None:
         for n in repo.retryable_notifications(self.conn, now):
             if n.created_at > now - timedelta(seconds=1) and n.attempts == 0:
                 continue  # claimed this very instant by another tick
             rule = Rule(n.rule)
-            sms = Reminder(rule, (n.key,), n.title, n.body).sms
-            await self._deliver(n.id, self._message(n.title, n.body, sms, n.priority, rule))
+            again = Reminder(
+                rule,
+                (n.key,),
+                n.title,
+                n.body,
+                item_ids=n.item_ids,
+                priority=n.priority,
+                bypass_quiet=rule is Rule.DUE_3H,
+                counts_toward_cap=n.counts_toward_cap,
+                expires_at=n.expires_at,
+            )
+            if check(again, ctx, now)[0] is not Verdict.SEND:
+                continue  # quiet hours, class, mute, snooze, or the cap hold a retry back too
+            await self._deliver(n.id, self._message(n.title, n.body, again.sms, n.priority, rule))

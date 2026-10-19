@@ -26,6 +26,7 @@ from typing import Any
 
 from argus.vault.proposals import file_hash
 from argus.vault.regions import (
+    FrontmatterEditError,
     ParsedNote,
     compose,
     parse,
@@ -112,9 +113,13 @@ def _safe_rewrites(
     if have_fm == want_fm:
         written[FRONTMATTER] = want_fm
     elif stored.get(FRONTMATTER) == have_fm:
-        text = update_frontmatter(text, desired.frontmatter)
-        written[FRONTMATTER] = want_fm
-        changed = True
+        try:
+            text = update_frontmatter(text, desired.frontmatter)
+        except FrontmatterEditError:
+            pending.append((FRONTMATTER, None))  # can't edit in place: ask instead
+        else:
+            written[FRONTMATTER] = want_fm
+            changed = True
     else:
         pending.append((FRONTMATTER, None))
     for rid, content in desired.regions:
@@ -140,7 +145,7 @@ def _proposal(
     after = base
     for rid, content in pending:
         if content is None:
-            after = update_frontmatter(after, desired.frontmatter)
+            after = update_frontmatter(after, desired.frontmatter, strict=False)
         elif rid in parse(after).regions:
             after = replace_region(after, rid, content)
         else:
@@ -155,7 +160,7 @@ def _allow_edit(current: str, desired: DesiredNote, want_fm: str) -> Plan:
     log: list[str] = []
     note = parse(text)
     if frontmatter_hash(note.frontmatter, desired.frontmatter) != want_fm:
-        text = update_frontmatter(text, desired.frontmatter)
+        text = update_frontmatter(text, desired.frontmatter, strict=False)  # opened to Argus
         log.append("updated frontmatter")
     for rid, content in desired.regions:
         region = parse(text).regions.get(rid)

@@ -112,3 +112,26 @@ def test_configure_logging_installs_redacting_json_handler(
     root.handlers, root.level = saved[0], saved[1]
     assert "configured-secret" not in out
     assert json.loads(out.splitlines()[-1])["msg"] == f"using {REDACTED}"
+
+
+def test_servers_log_through_the_redactor() -> None:
+    """Review R13: uvicorn's own logging config would bypass the redacting handler."""
+    import ast
+    from pathlib import Path
+
+    import argus.cli
+
+    tree = ast.parse(Path(argus.cli.__file__).read_text())
+    runs = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "run"
+        and isinstance(n.func.value, ast.Name)
+        and n.func.value.id == "uvicorn"
+    ]
+    assert len(runs) == 4
+    for call in runs:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert isinstance(kw.get("log_config"), ast.Constant) and kw["log_config"].value is None

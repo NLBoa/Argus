@@ -43,6 +43,7 @@
 </span>
 {%- endmacro %}
 
+{#- Buttons keep stable ids so htmx returns keyboard focus to them after the row swaps (review R9). -#}
 {% macro item_row(v, actions=True) -%}
 <li class="item-row" id="item-{{ v.id }}" data-accent="{{ v.course.accent }}" data-done="{{ 'true' if v.done else 'false' }}" data-running="{{ 'true' if v.running else 'false' }}" data-nav-item>
   <div class="min-w-0">
@@ -68,14 +69,14 @@
     {% if v.status.is_open %}
     <form method="post" action="/items/{{ v.id }}/timer" hx-post="/items/{{ v.id }}/timer" hx-target="#item-{{ v.id }}" hx-swap="outerHTML">
       <input type="hidden" name="action" value="{{ 'stop' if v.running else 'start' }}">
-      <button class="btn btn-sm {{ 'btn-primary' if v.running else '' }}" type="submit" aria-pressed="{{ 'true' if v.running else 'false' }}">
+      <button id="timer-{{ v.id }}" class="btn btn-sm {{ 'btn-primary' if v.running else '' }}" type="submit" aria-pressed="{{ 'true' if v.running else 'false' }}">
         {% if v.running %}{{ icon("square", "icon-sm") }}Stop timer{% else %}{{ icon("play", "icon-sm") }}Start{% endif %}<span class="visually-hidden"> {{ v.title }}</span>
       </button>
     </form>
     {% endif %}
     <form method="post" action="/items/{{ v.id }}/done" hx-post="/items/{{ v.id }}/done" hx-target="#item-{{ v.id }}" hx-swap="outerHTML" data-optimistic="done">
       <input type="hidden" name="done" value="{{ '0' if v.done else '1' }}">
-      <button class="btn btn-sm btn-quiet" type="submit" aria-pressed="{{ 'true' if v.done else 'false' }}">
+      <button id="done-{{ v.id }}" class="btn btn-sm btn-quiet" type="submit" aria-pressed="{{ 'true' if v.done else 'false' }}">
         {{ icon("check", "icon-sm") }}{{ "Done" if v.done else "Mark done" }}<span class="visually-hidden"> {{ v.title }}</span>
       </button>
     </form>

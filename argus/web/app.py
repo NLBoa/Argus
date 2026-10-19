@@ -14,8 +14,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from argus import __version__
 from argus.clock import Clock, SystemClock
@@ -24,7 +26,7 @@ from argus.config import AppConfig, Secrets
 from argus.logging import get_logger
 from argus.store.db import connect, migrate
 from argus.web.deps import STATIC_DIR, AppState, Runner, make_templates
-from argus.web.routes import actions, kiosk, pages, pwa
+from argus.web.routes import actions, common, kiosk, pages, pwa
 
 log = get_logger(__name__)
 # D017/D042: everything is same-origin. Alpine's standard build evaluates x-* expressions with
@@ -116,6 +118,36 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> JSONResponse:
         return JSONResponse({"status": "ok", "version": __version__})
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
+        """Review R15: browsers (without HTMX) get the error state as a page, not raw JSON."""
+        wants_html = "text/html" in request.headers.get("accept", "") or request.method == "POST"
+        if (
+            request.headers.get("hx-request") == "true"
+            or not wants_html
+            or request.url.path.startswith("/static/")
+        ):
+            return await http_exception_handler(request, exc)
+        heading = {
+            404: "Not found",
+            409: "That changed already",
+            422: "Check what you entered",
+        }.get(exc.status_code, "Something went wrong")
+        return common.render(
+            request,
+            state,
+            None,
+            "pages/error.html",
+            {
+                "heading": heading,
+                "message": str(exc.detail),
+                "back_href": common.back(request).headers["location"],
+            },
+            active="",
+            title=heading,
+            status_code=exc.status_code,
+        )
 
     app.include_router(pages.router)
     app.include_router(actions.router)

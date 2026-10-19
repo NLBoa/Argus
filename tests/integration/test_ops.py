@@ -172,3 +172,97 @@ async def test_heartbeat_every_five_minutes_and_fail_on_crash(
 
 async def _none() -> None:
     return None
+
+
+async def test_reminders_never_wait_for_a_hung_ai_step(
+    tmp_path: Path, clock: FakeClock, app_config: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review R5: a hanging API call cannot delay the 3-hour warning."""
+    import asyncio
+
+    from argus import worker as worker_module
+    from argus.domain.models import ItemKind, Source, SourceItem
+    from argus.store import repo
+    from argus.store.db import transaction
+
+    async def hang(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(worker_module, "scan_posts", hang)
+    monkeypatch.setattr(worker_module, "AI_BUDGET", 0.05)
+    conn = open_db(tmp_path / "r5.db", clock)
+    with transaction(conn):
+        ids = repo.sync_courses(conn, app_config, clock.now())  # type: ignore[arg-type]
+        repo.record_sync_run(
+            conn,
+            source="canvas_ical",
+            started_at=clock.now() - timedelta(days=2),
+            finished_at=clock.now() - timedelta(days=2),
+            status="ok",
+        )
+        repo.upsert_source_items(
+            conn,
+            [
+                SourceItem(
+                    Source.CANVAS_ICAL,
+                    "hw",
+                    "CMSC351",
+                    "HW",
+                    ItemKind.ASSIGNMENT,
+                    clock.now() + timedelta(hours=2),
+                    "h",
+                )
+            ],
+            ids,
+            clock.now(),
+        )
+        repo.apply_merge(conn, ids, clock.now())
+        conn.execute("UPDATE items SET created_at = '2026-10-01T00:00:00Z'")
+    secrets = Secrets(ntfy_topic=SecretStr("t"))
+    async with httpx.AsyncClient() as client:
+        w = Worker(conn, app_config, secrets, clock, client, runner_factory=lambda f: NoSync())  # type: ignore[arg-type]
+        with respx.mock:
+            respx.post("https://ntfy.sh/").mock(return_value=httpx.Response(200))
+            await asyncio.wait_for(w.tick(), timeout=10)
+    assert "due_3h" in {n.rule for n in repo.recent_notifications(conn) if n.status == "sent"}
+
+
+async def test_heartbeat_fails_while_deadline_delivery_is_broken(
+    tmp_path: Path, clock: FakeClock, app_config: object
+) -> None:
+    from argus.store import repo
+    from argus.store.db import transaction
+
+    conn = open_db(tmp_path / "hb.db", clock)
+    with transaction(conn):
+        nid = repo.claim_notification(
+            conn,
+            keys=["k"],
+            rule="due_3h",
+            title="t",
+            body="b",
+            item_ids=[],
+            priority=5,
+            counts_toward_cap=False,
+            now=clock.now(),
+            expires_at=clock.now() + timedelta(hours=2),
+        )
+        assert nid is not None
+        conn.execute(
+            "UPDATE notifications SET status = 'failed', attempts = 3, last_attempt_at = ? WHERE id = ?",
+            ("2026-10-19T13:00:00Z", nid),
+        )
+    async with httpx.AsyncClient() as client:
+        w = Worker(
+            conn,
+            app_config,
+            Secrets(healthchecks_url=SecretStr(PING)),
+            clock,
+            client,  # type: ignore[arg-type]
+            runner_factory=lambda f: NoSync(),
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            fail = mock.get(PING + "/fail").mock(return_value=httpx.Response(200))
+            mock.post("https://ntfy.sh/").mock(return_value=httpx.Response(500))
+            await w.tick()
+            assert fail.call_count == 1

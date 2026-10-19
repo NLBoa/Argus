@@ -261,6 +261,31 @@ async def test_assignment_removed_from_canvas_disappears(
 
 
 @respx.mock
+async def test_empty_listing_keeps_items_until_it_persists_a_day(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Review R6: an empty feed (broken page, login page) must not delete every deadline."""
+    feed = fixture_bytes("canvas_ical", "feed.ics")
+    mock_sources(feed)
+    await runner.run_cycle()
+    before = {i.title for i in repo.list_items(db)}
+    assert "Homework 4" in before
+    respx.get(FEED_URL).respond(200, content=b"BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR\n")
+    for _ in range(3):
+        clock.advance(timedelta(minutes=31))
+        report = await runner.run_cycle(only={Source.CANVAS_ICAL})
+        assert {i.title for i in repo.list_items(db)} == before
+    [run] = repo.recent_sync_runs(db, "canvas_ical", limit=1)
+    assert run.status == "error" and run.error and "vanished at once" in run.error
+    assert repo.source_health(db, ["canvas_ical"])["canvas_ical"].failures == 3  # the alert fires
+    clock.advance(timedelta(hours=25))  # still empty a day later: believe it
+    report = await runner.run_cycle(only={Source.CANVAS_ICAL})
+    assert report is not None
+    assert "Homework 4" not in {i.title for i in repo.list_items(db)}
+    assert repo.recent_sync_runs(db, "canvas_ical", limit=1)[0].status in ("ok", "unchanged")
+
+
+@respx.mock
 async def test_only_and_force(runner: SyncRunner, db: sqlite3.Connection) -> None:
     mock_sources(fixture_bytes("canvas_ical", "feed.ics"))
     report = await runner.run_cycle(only={Source.UMDIO})

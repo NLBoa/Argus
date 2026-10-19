@@ -1,10 +1,10 @@
 """Guards (pure): whether a reminder goes out now, waits, or is dropped.
 
 Order: muted rule -> drop; expired -> drop; every item snoozed -> defer (never the 3-hour
-warning); quiet hours or class time -> defer (unless the
-reminder bypasses them: only the 3-hour warning); daily cap reached -> defer (at-risk and
-3-hour warnings are not counted). Deferral is stateless: the rule fires again next tick
-while its condition holds, and expires on its own.
+warning); quiet hours or class time -> defer (unless the reminder bypasses them: only the
+3-hour warning); daily cap reached -> defer (at-risk and 3-hour warnings are not counted, and
+the last 2 slots are kept for 24-hour warnings). Deferral is stateless: the rule fires again
+next tick while its condition holds, and expires on its own.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from argus.clock import to_local
 from argus.config import TimeWindow
 from argus.planner.freetime import Busy
 from argus.reminders.rules import Reminder, Rule
+
+DEADLINE_RESERVE = 2  # review R8: of the daily cap, kept for 24-hour warnings
 
 
 class Verdict(Enum):
@@ -54,4 +56,11 @@ def check(reminder: Reminder, ctx: GuardContext, now: datetime) -> tuple[Verdict
             return Verdict.DEFER, "in class"
     if reminder.counts_toward_cap and ctx.sent_today_capped >= ctx.daily_cap:
         return Verdict.DEFER, "daily cap reached"
+    reserve = DEADLINE_RESERVE if ctx.daily_cap > DEADLINE_RESERVE else 0
+    if (
+        reminder.counts_toward_cap
+        and reminder.rule is not Rule.DUE_24H
+        and ctx.sent_today_capped >= ctx.daily_cap - reserve
+    ):
+        return Verdict.DEFER, "daily cap: last slots kept for deadline warnings"
     return Verdict.SEND, "ok"

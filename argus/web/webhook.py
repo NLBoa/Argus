@@ -19,6 +19,7 @@ import hmac
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 
 from fastapi import FastAPI, Request
@@ -34,6 +35,7 @@ from argus.store.db import connect, migrate
 
 log = get_logger(__name__)
 PATH = "/webhooks/twilio/sms"
+MAX_BODY = 16 * 1024
 EMPTY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
 
@@ -53,6 +55,22 @@ def valid_signature(
 
 def _digits(number: str) -> str:
     return "".join(ch for ch in number if ch.isdigit())
+
+
+async def _bounded_form(request: Request) -> dict[str, str] | Response:
+    """Review R14: only small URL-encoded bodies are read (Twilio's are ~1 KB); nothing is
+    spooled to disk, and the size is checked before the body is parsed."""
+    if not request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
+        return PlainTextResponse("Expected a form post.", status_code=415)
+    declared = request.headers.get("content-length")
+    if declared is not None and (not declared.isdigit() or int(declared) > MAX_BODY):
+        return PlainTextResponse("Body too large.", status_code=413)
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_BODY:
+            return PlainTextResponse("Body too large.", status_code=413)
+    return dict(parse_qsl(body.decode("utf-8", errors="replace"), keep_blank_values=True))
 
 
 def twiml(reply: str) -> str:
@@ -82,8 +100,9 @@ def create_webhook_app(
         url = config.notifications.webhook_url
         if not token or not url:
             return PlainTextResponse("Webhook not configured.", status_code=503)
-        form = await request.form()
-        params = {k: str(v) for k, v in form.multi_items()}
+        params = await _bounded_form(request)
+        if isinstance(params, Response):
+            return params
         if not valid_signature(token, url, params, request.headers.get("x-twilio-signature")):
             log.warning("webhook: rejected a request with a missing or invalid signature")
             return PlainTextResponse("Invalid signature.", status_code=403)

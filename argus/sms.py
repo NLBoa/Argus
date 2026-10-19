@@ -21,14 +21,19 @@ from argus.ai.schemas import CommandOut
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item
+from argus.logging import get_logger
 from argus.planning import blocks_between, replan
 from argus.reminders.commands import Command, Verb, is_reserved, parse
 from argus.reminders.text import fit, short, when
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 
+log = get_logger(__name__)
 AI_CONFIDENCE = 0.8
 ASK_BACK_WINDOW = timedelta(minutes=30)
+AMBIGUOUS = timedelta(minutes=10)  # two numbered texts this close: [n] could mean either
+# An AI reading never silences reminders or changes dates by itself (review R16).
+CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE)
 HELP = "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, OK 1, NO 1, or TODAY. Numbers are the [n] in my last text."
 
 
@@ -41,23 +46,40 @@ class Outcome:
     item_ids: tuple[int, ...] = ()
 
 
-def numbered(conn: sqlite3.Connection) -> tuple[int, ...]:
-    """What [1], [2], ... mean: the item ids of the latest numbered text Argus sent."""
-    sent = conn.execute(
-        "SELECT item_ids, COALESCE(sent_at, created_at) AS at FROM notifications"
-        " WHERE status = 'sent' AND item_ids != '[]' ORDER BY at DESC, id DESC LIMIT 1"
-    ).fetchone()
-    reply = conn.execute(
-        "SELECT item_ids, created_at AS at FROM inbound_messages WHERE item_ids != '[]'"
-        " ORDER BY created_at DESC, id DESC LIMIT 1"
-    ).fetchone()
-    rows = [(r, rank) for rank, r in enumerate((sent, reply)) if r is not None]
+@dataclass(frozen=True)
+class Context:
+    """What [1], [2], ... mean, plus the text before it when that came close behind (review R7)."""
+
+    ids: tuple[int, ...] = ()
+    previous: tuple[int, ...] = ()  # only when sent within AMBIGUOUS of the latest
+
+
+def numbered(conn: sqlite3.Connection) -> Context:
+    """The item ids of the latest numbered text: an SMS Argus sent (replies only ever answer
+    texts, so ntfy pushes don't count) or a TODAY reply (which wins ties)."""
+    rows = [
+        (parse_iso(r["at"]), 0, tuple(json.loads(r["item_ids"])))
+        for r in conn.execute(
+            "SELECT item_ids, COALESCE(sent_at, created_at) AS at FROM notifications"
+            " WHERE status = 'sent' AND channel = 'sms' AND item_ids != '[]' ORDER BY at DESC, id DESC LIMIT 2"
+        )
+    ] + [
+        (parse_iso(r["at"]), 1, tuple(json.loads(r["item_ids"])))
+        for r in conn.execute(
+            "SELECT item_ids, created_at AS at FROM inbound_messages WHERE item_ids != '[]'"
+            " ORDER BY created_at DESC, id DESC LIMIT 2"
+        )
+    ]
     if not rows:
-        return ()
-    latest, _ = max(
-        rows, key=lambda x: (parse_iso(x[0]["at"]), x[1])
-    )  # a reply answers a text: it wins ties
-    return tuple(json.loads(latest["item_ids"]))
+        return Context()
+    rows.sort(key=lambda r: (r[0], r[1]), reverse=True)
+    latest = rows[0]
+    # A TODAY reply is the list the student just asked for: it is never ambiguous.
+    unsolicited = latest[1] == 0
+    prev = (
+        rows[1] if unsolicited and len(rows) > 1 and latest[0] - rows[1][0] <= AMBIGUOUS else None
+    )
+    return Context(latest[2], prev[2] if prev else ())
 
 
 class Inbox:
@@ -104,18 +126,38 @@ class Inbox:
             cmd, via = await self._interpret(body, context), "ai"
         if cmd is None:
             return self._ask_back()
+        if via == "ai" and cmd.verb in CONFIRM_FIRST:
+            return self._confirm_first(cmd, context)
         try:
             reply, ids = self._run(cmd, context)
         except LookupError as e:
             return Outcome(fit(str(e)), "failed", via, cmd)
+        except Exception:
+            # Recorded like any answer, so Twilio's retry of this message gets it instead of a rerun.
+            log.exception("sms command failed", extra={"command": cmd.describe()})
+            return Outcome(
+                fit("Something went wrong, so that may not have happened. Check the dashboard."),
+                "failed",
+                via,
+                cmd,
+            )
         prefix = f"Read as {cmd.describe()}. " if via == "ai" else ""
         return Outcome(fit(prefix + reply), "done", via, cmd, ids)
 
-    async def _interpret(self, body: str, context: tuple[int, ...]) -> Command | None:
+    def _confirm_first(self, cmd: Command, context: Context) -> Outcome:
+        try:
+            n, item = self._item(cmd, context)
+        except LookupError as e:
+            return Outcome(fit(str(e)), "unclear", "ai", cmd)
+        exact = Command(cmd.verb, n, cmd.hours, cmd.duration).describe()
+        reply = f"Did you mean {exact} ([{n}] {item.course_code} {short(item.title, 40)})? Reply {exact} to do it."
+        return Outcome(fit(reply), "unclear", "ai", cmd)
+
+    async def _interpret(self, body: str, context: Context) -> Command | None:
         if not self.ai.available:
             return None
         items = {i.id: i for i in repo.list_items(self.conn)}
-        listed = [(n, items[i].title) for n, i in enumerate(context, start=1) if i in items]
+        listed = [(n, items[i].title) for n, i in enumerate(context.ids, start=1) if i in items]
         result = await self.ai.structured(
             task="sms_command",
             tier=Tier.FAST,
@@ -150,7 +192,8 @@ class Inbox:
 
     # ---------------------------------------------------------------- commands
 
-    def _item(self, cmd: Command, context: tuple[int, ...]) -> tuple[int, Item]:
+    def _item(self, cmd: Command, ctx: Context) -> tuple[int, Item]:
+        context = ctx.ids
         n = cmd.number
         if n is None:
             if len(context) != 1:
@@ -158,12 +201,18 @@ class Inbox:
             n = 1
         if not 1 <= n <= len(context):
             raise LookupError(f"My last text has no [{n}]. Reply TODAY for a fresh list.")
+        if ctx.previous and len(ctx.previous) >= n and ctx.previous[n - 1] != context[n - 1]:
+            titles = [repo.get_item(self.conn, i) for i in (context[n - 1], ctx.previous[n - 1])]
+            names = " and ".join(short(t.title, 30) for t in titles if t is not None)
+            raise LookupError(
+                f"My last two texts both have a [{n}] ({names}). Reply TODAY for one list, then use its numbers."
+            )
         item = repo.get_item(self.conn, context[n - 1])
         if item is None:
             raise LookupError(f"[{n}] no longer exists. Reply TODAY for a fresh list.")
         return n, item
 
-    def _run(self, cmd: Command, context: tuple[int, ...]) -> tuple[str, tuple[int, ...]]:
+    def _run(self, cmd: Command, context: Context) -> tuple[str, tuple[int, ...]]:
         if cmd.verb is Verb.HELP:
             return HELP, ()
         if cmd.verb is Verb.TODAY:
@@ -217,7 +266,17 @@ class Inbox:
         ]
         if not waiting:
             raise LookupError(f"Nothing about {label} is waiting for a yes or no.")
-        f = waiting[-1]
+        asked = self._asked_about(item.id)
+        if asked is not None:
+            chosen = [f for f in waiting if f.id == asked]
+        else:
+            chosen = waiting if len(waiting) == 1 else []
+        if not chosen:
+            # Review R2: never guess which announcement the student means.
+            raise LookupError(
+                f"More than one change to {label} is waiting. Decide on the Announcements page."
+            )
+        f = chosen[0]
         now = self.clock.now()
         if cmd.verb is Verb.YES:
             message = announcements.confirm(self.conn, f.id, now)
@@ -225,6 +284,17 @@ class Inbox:
             message = announcements.dismiss(self.conn, f.id, now)
         replan(self.conn, self.config, self.clock, force=True)
         return message
+
+    def _asked_about(self, item_id: int) -> int | None:
+        """The finding of the latest announced-change text about this item, if any."""
+        for r in self.conn.execute(
+            """SELECT k.key, n.item_ids FROM notifications n JOIN notification_keys k ON k.notification_id = n.id
+               WHERE n.rule = 'announced' AND n.status = 'sent' AND k.key LIKE 'finding:%'
+               ORDER BY COALESCE(n.sent_at, n.created_at) DESC, n.id DESC"""
+        ):
+            if item_id in json.loads(r["item_ids"]):
+                return int(r["key"].split(":")[1])
+        return None
 
 
 def today_text(conn: sqlite3.Connection, now: datetime) -> tuple[str, tuple[int, ...]]:

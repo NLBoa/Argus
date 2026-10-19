@@ -154,12 +154,68 @@ async def test_date_change_of_official_item_waits_then_confirm_overrides(
     assert midterm.due_at == MIDTERM  # unchanged until the student decides
     [f] = repo.list_findings(db, ["conflict"])
     message = confirm(db, f.id, clock.now())
-    assert message == "Using the announced date for Midterm 1"
+    assert message == "Using the announced date for Midterm 1: Thu 9:30am"
     midterm = by_title(db)["Midterm 1"]
     assert midterm.due_at == datetime(2026, 11, 5, 14, 30, tzinfo=UTC)  # same 9:30 am, new day
     assert midterm.due_source == Source.MANUAL
     with pytest.raises(LookupError):
         confirm(db, f.id, clock.now())
+
+    # Review R1: when an official source later changes the date, the student's override yields.
+    with transaction(db):
+        repo.apply_merge(db, ids, clock.now())  # unchanged official date: the override stays
+    assert by_title(db)["Midterm 1"].due_source == Source.MANUAL
+    moved = datetime(2026, 11, 2, 14, 30, tzinfo=UTC)
+    with transaction(db):
+        repo.upsert_source_items(
+            db,
+            [
+                SourceItem(
+                    Source.CANVAS_ICAL, "mid1", "CMSC351", "Midterm 1", ItemKind.EXAM, moved, "h2"
+                )
+            ],
+            ids,
+            clock.now(),
+        )
+        repo.apply_merge(db, ids, clock.now())
+    midterm = by_title(db)["Midterm 1"]
+    assert (midterm.due_at, midterm.due_source) == (moved, Source.CANVAS_ICAL)
+    assert db.execute("SELECT COUNT(*) FROM item_overrides").fetchone()[0] == 0
+
+
+async def test_confirmed_cancellation_is_undone_when_canvas_redates_it(
+    setup: Any, app_config: AppConfig, clock: FakeClock
+) -> None:
+    db, ids = setup
+    quiz = by_title(db)["Quiz 2"]
+    with transaction(db):
+        repo.set_override(
+            db, quiz.id, due_at=None, cancelled=True, reason="Confirmed", now=clock.now()
+        )
+        repo.apply_merge(db, ids, clock.now())
+    assert "Quiz 2" not in by_title(db)
+    with transaction(db):
+        repo.apply_merge(db, ids, clock.now())  # still hidden while nothing official changed
+    assert "Quiz 2" not in by_title(db)
+    with transaction(db):
+        repo.upsert_source_items(
+            db,
+            [
+                SourceItem(
+                    Source.CANVAS_ICAL,
+                    "q2",
+                    "CMSC351",
+                    "Quiz 2",
+                    ItemKind.QUIZ,
+                    clock.now() + timedelta(days=5),
+                    "h2",
+                )
+            ],
+            ids,
+            clock.now(),
+        )
+        repo.apply_merge(db, ids, clock.now())
+    assert "Quiz 2" in by_title(db)
 
 
 async def test_dismiss_keeps_official_date(

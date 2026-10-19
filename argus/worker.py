@@ -28,12 +28,15 @@ from argus.notify.router import Router
 from argus.notify.twilio_sms import TwilioChannel
 from argus.planning import explain, replan
 from argus.reminders.engine import ReminderEngine
+from argus.store import repo
 from argus.study import ensure_study, targeted_practice
 from argus.vault import service as vault
 
 log = get_logger(__name__)
 TICK_SECONDS = 60.0
 PING_EVERY = timedelta(minutes=5)
+SYNC_BUDGET = 240.0  # seconds; each collector is bounded at 180 s and they run concurrently
+AI_BUDGET = 90.0
 
 
 def build_router(config: AppConfig, secrets: Secrets, fetcher: Fetcher) -> Router:
@@ -87,28 +90,53 @@ class Worker:
 
     async def tick(self) -> None:
         """One minute of work. Each step is isolated; reminders run even if all else fails."""
-        steps: list[tuple[str, Callable[[], Awaitable[object]]]] = [
-            ("sync", self.runner.run_cycle),
-            ("announcements", lambda: scan_posts(self.conn, self.ai, self.config, self.clock)),
-            ("estimates", lambda: ensure_estimates(self.conn, self.ai, self.config, self.clock)),
-            ("study", self._study),
-            ("plan", self._plan),
-            ("reminders", self.engine.tick),
-            ("vault", self._vault),  # last: reminders never wait on git
+        # Review R5: reminders run first, so nothing (a slow API, a hung source) delays them, and
+        # again after planning, so new sessions and items are picked up in the same minute. Every
+        # other step has a time budget; a step that runs out is cancelled and retried next tick.
+        steps: list[tuple[str, Callable[[], Awaitable[object]], float | None]] = [
+            ("reminders", self.engine.tick, None),
+            ("sync", self.runner.run_cycle, SYNC_BUDGET),
+            (
+                "announcements",
+                lambda: scan_posts(self.conn, self.ai, self.config, self.clock),
+                AI_BUDGET,
+            ),
+            (
+                "estimates",
+                lambda: ensure_estimates(self.conn, self.ai, self.config, self.clock),
+                AI_BUDGET,
+            ),
+            ("study", self._study, AI_BUDGET),
+            ("plan", self._plan, AI_BUDGET),
+            ("reminders", self.engine.tick, None),
+            (
+                "vault",
+                self._vault,
+                None,
+            ),  # last: reminders never wait on git (each git call has a timeout)
         ]
         crashed = []
-        for name, step in steps:
+        for name, step, budget in steps:
             try:
-                await step()
+                if budget is None:
+                    await step()
+                else:
+                    await asyncio.wait_for(step(), timeout=budget)
+            except TimeoutError:
+                log.warning("worker step ran out of time", extra={"step": name, "budget_s": budget})
             except Exception:
                 crashed.append(name)
                 log.exception("worker step crashed", extra={"step": name})
-        await self._heartbeat(failed="reminders" in crashed)
+        broken = (
+            "reminders" in crashed or repo.failing_deadline_sends(self.conn, self.clock.now()) > 0
+        )
+        await self._heartbeat(failed=broken)
 
     async def _heartbeat(self, *, failed: bool) -> None:
         """Dead-man's switch (healthchecks.io style): ping every 5 minutes while reminders work,
-        `/fail` when they crash. If the Pi, the worker, or the network dies, the pings stop and
-        the external service alerts the student by email or text."""
+        `/fail` when they crash or deadline reminders can't be delivered (review R4). If the Pi,
+        the worker, or the network dies, the pings stop and the external service alerts the
+        student by email or text."""
         now = self.clock.now()
         if not self._ping_url:
             return

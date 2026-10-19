@@ -196,7 +196,7 @@ def serve_webhook(
     from argus.web.webhook import create_webhook_app
 
     cfg, secrets = _setup(config)
-    uvicorn.run(create_webhook_app(cfg, secrets), host=host, port=port)
+    uvicorn.run(create_webhook_app(cfg, secrets), host=host, port=port, log_config=None)
 
 
 @app.command()
@@ -273,11 +273,21 @@ def serve(
             db_path=db,
             runner_factory=lambda c, f: OfflineRunner(),
         )
-        uvicorn.run(demo_app, host=host, port=port)
+        uvicorn.run(demo_app, host=host, port=port, log_config=None)
         return
     secrets = load_secrets()
     configure_logging(secrets=secrets.secret_values())
     if reload:
-        uvicorn.run("argus.web.app:create_app", factory=True, host=host, port=port, reload=True)
+        uvicorn.run(
+            "argus.web.app:create_app",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+            log_config=None,
+        )
         return
-    uvicorn.run(create_app(load_config(config), secrets), host=host, port=port)  # pragma: no cover
+    # log_config=None: uvicorn's loggers go through the redacting root handler (review R13)
+    uvicorn.run(
+        create_app(load_config(config), secrets), host=host, port=port, log_config=None
+    )  # pragma: no cover

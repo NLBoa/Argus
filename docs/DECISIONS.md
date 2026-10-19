@@ -324,3 +324,38 @@ to 14 days. It then mirrors the folder to `paths.backup_remote` with `rsync -a -
 exactly 14 days. A remote that starts with `-` is refused. `argus restore` verifies the archive before replacing the
 database and keeps the old file. The worker pings `healthchecks_url` every 5 minutes after a tick, or `/fail` when
 the reminder step crashed. A failed ping is logged, never raised.
+
+## D053 — Fixes from the independent review (2026-10-19)
+All 16 findings in [review.md](review.md) are fixed and tested. Where the fix is a judgment call:
+- **R1.** An override (confirmed date or cancellation) records the official date it was made against (`basis`). Any
+  later official change drops it, and official wins again. Reminders re-arm, because their keys include the due date.
+- **R2, R7, R16 (SMS).**
+  - OK/NO resolves to the finding named in the latest "announced" text about that item. With several waiting and none
+    texted, Argus refuses and points to the Announcements page.
+  - `[n]` counts SMS texts only. When two unsolicited texts within 10 minutes give the same `[n]` different meanings,
+    Argus refuses and asks for TODAY.
+  - AI readings never run DONE, OK, NO, or SNOOZE. They answer "Did you mean …? Reply … to do it." LOG, EST, and TODAY still run, with "Read as …".
+- **R3.** Argus-owned frontmatter keys are edited line by line; everything else stays byte for byte. If that can't be
+  done and verified by re-parsing (for example, a one-line flow mapping), the change becomes a proposal.
+- **R4.** Failed sends retry with backoff (1, 2, 4, 8, then every 15 minutes) until they expire, through the guards.
+  Deadline reminders still failing after 3 tries make the heartbeat report `/fail`. That alert travels through
+  healthchecks.io, a different path than the one that is failing.
+- **R5.** The reminder engine runs first and last in every tick. Sync has a 240-second budget, and each AI step has
+  90 seconds (a step that runs out is cancelled and retried next tick). A separate reminders task was considered,
+  but steps share one SQLite connection, and interleaving at awaits inside transactions isn't worth the risk.
+- **R6.** A complete listing that drops all, or at least 3 and more than half, of a course's upcoming records is not
+  believed. Nothing is marked absent, the run is an error (three in a row alert), and the payload is fetched in
+  full again. If the listing is still the same 24 hours later, it is believed. The cost is a deleted assignment
+  that keeps reminding for a day; the alternative was silently losing deadlines.
+- **R8.** The cap stays at 6, but its last 2 slots are kept for 24-hour warnings. The spec defines the cap as
+  excluding only at-risk alerts and 3-hour warnings, so 24-hour warnings stay counted, with room reserved for them.
+- **R10.** Code enforces the graded-work rule, not just the prompts. Materials whose titles look like graded work
+  (homework, problem sets, projects, assignments, solutions, answer keys) or name a tracked item never reach the
+  generator. Practice and review material is allowed. Inbox lines naming a tracked item get no targeted practice.
+- **R11.** Only trusted posts (staff, confident) create a texted conflict; others are held for the Announcements page.
+- **R12–R15.**
+  - R12: `TimeWindow` refuses start == end.
+  - R13: uvicorn logs go through the redactor (`log_config=None`).
+  - R14: the webhook reads only URL-encoded bodies of 16 KB or less, before parsing.
+  - R15: browsers without HTMX get an error page with the same status code.
+- **Also.** An unexpected error inside an SMS command is answered and recorded, so Twilio's retry never reruns it.

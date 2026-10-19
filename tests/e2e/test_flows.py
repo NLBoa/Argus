@@ -348,3 +348,26 @@ def test_no_content_security_policy_violations(page: Page, base_url: str) -> Non
     page.goto(base_url + "/kiosk")
     page.wait_for_timeout(700)
     assert errors == []
+
+
+def test_keyboard_focus_stays_on_the_button_after_a_row_swap(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
+    """Review R9: Enter on "Mark done" or "Start" keeps focus there, so Tab continues in place."""
+    s = fresh_server()
+    page.goto(s.url + "/today")
+    row = page.locator("li.item-row", has_text="Problem Set 6")
+    done = row.get_by_role("button", name=re.compile("^Mark done"))
+    done.focus()
+    page.keyboard.press("Enter")
+    expect(row).to_have_attribute("data-done", "true")
+    expect(
+        page.locator("li.item-row", has_text="Problem Set 6").get_by_role(
+            "button", name=re.compile("^Done")
+        )
+    ).to_be_focused()
+    other = page.locator("li.item-row", has_text="Homework 3").first
+    start = other.get_by_role("button", name=re.compile("^Start"))
+    start.focus()
+    page.keyboard.press("Enter")
+    expect(other.get_by_role("button", name=re.compile("^Stop timer"))).to_be_focused()

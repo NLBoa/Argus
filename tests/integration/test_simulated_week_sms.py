@@ -86,7 +86,7 @@ async def test_simulated_week_over_sms(tmp_path: Any, app_config: AppConfig) -> 
 
     texts: list[tuple[datetime, str]] = []
     pushes: list[datetime] = []
-    twilio_down = (at(1, 12), at(1, 13))  # Tuesday noon: Twilio returns 503 for an hour
+    twilio_down = (at(1, 7, 55), at(1, 8, 10))  # Twilio returns 503 around Tuesday's morning brief
 
     def twilio(request: httpx.Request) -> httpx.Response:
         if twilio_down[0] <= clock.now() < twilio_down[1]:
@@ -224,8 +224,8 @@ async def test_simulated_week_over_sms(tmp_path: Any, app_config: AppConfig) -> 
 
     # One morning brief a day, at or after 8:00.
     briefs = [to_local(w) for w, b in texts if b.startswith("Today: ")]
-    assert len(briefs) == 7 and all(b.hour >= 8 for b in briefs)
-    assert len({b.date() for b in briefs}) == 7
+    assert len(briefs) == 6 and all(b.hour >= 8 for b in briefs)  # Tuesday's went by ntfy
+    assert len({b.date() for b in briefs}) == 6
 
     # DONE stopped Homework A's warnings, once, even though the reply was replayed.
     hw_a = items["Homework A"]

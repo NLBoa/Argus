@@ -130,12 +130,52 @@ def compose(
     return head + body + "\n" + tail
 
 
-def update_frontmatter(text: str, updates: Mapping[str, Any]) -> str:
-    """Set Argus-owned keys, keeping the student's keys and their order."""
-    fm, _raw, body = split_frontmatter(text)
-    data = dict(fm or {})
-    data.update(updates)
-    return f"---\n{_dump(data)}---\n" + body
+class FrontmatterEditError(ValueError):
+    """The owned keys can't be changed without touching the student's bytes."""
+
+
+_TOP_KEY = re.compile(r"""^(?:"([^"]+)"|'([^']+)'|([^\s#'"\-][^:]*?)):(?:\s|$)""")
+
+
+def _key_of(line: str) -> str | None:
+    m = _TOP_KEY.match(line)
+    return next((g for g in m.groups() if g is not None), None) if m else None
+
+
+def update_frontmatter(text: str, updates: Mapping[str, Any], *, strict: bool = True) -> str:
+    """Set Argus-owned keys by replacing only their own lines (review R3): the student's keys,
+    comments, order, and formatting stay byte for byte. If that can't be done safely (and the
+    result re-checked), raise `FrontmatterEditError` (or, with `strict=False`, re-serialize:
+    used only inside proposals, which the student reviews)."""
+    fm, raw, body = split_frontmatter(text)
+    if fm is None:
+        if strict and _FRONTMATTER.match(text):
+            raise FrontmatterEditError("the frontmatter is not plain YAML")
+        return f"---\n{_dump(dict(updates))}---\n" + text
+    lines = raw.split("\n")
+    inner = lines[1:-2]  # between the --- lines (raw ends with "---\n")
+    for key, value in updates.items():
+        new = _dump({key: value}).rstrip("\n").split("\n")
+        start = next((i for i, line in enumerate(inner) if _key_of(line) == key), None)
+        if start is None:
+            inner += new
+            continue
+        end = start + 1
+        while (
+            end < len(inner)
+            and inner[end]
+            and (inner[end][0] in " \t" or inner[end].startswith("- "))
+        ):
+            end += 1
+        inner[start:end] = new
+    out = "---\n" + "\n".join(inner) + ("\n" if inner else "") + "---\n" + body
+    expected = dict(fm)
+    expected.update(updates)
+    if split_frontmatter(out)[0] != expected:
+        if strict:
+            raise FrontmatterEditError("could not edit the owned keys in place")
+        return f"---\n{_dump(expected)}---\n" + body
+    return out
 
 
 def allows_edit(frontmatter: Mapping[str, Any] | None) -> bool:

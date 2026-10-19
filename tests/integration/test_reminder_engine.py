@@ -136,6 +136,51 @@ async def test_failed_send_is_retried_without_duplicates(
 
 
 @respx.mock
+async def test_outage_longer_than_three_ticks_still_delivers_the_warning(
+    db: sqlite3.Connection, app_config: AppConfig, noon: FakeClock
+) -> None:
+    """Review R4: retries continue (with backoff) until the reminder expires."""
+    outage_until = noon.now() + timedelta(minutes=20)
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503 if noon.now() < outage_until else 200)
+
+    route = respx.post(NTFY).mock(side_effect=flaky)
+    seed(db, app_config, noon, {"Homework 3": timedelta(hours=2)})
+    eng = engine(db, app_config, noon)
+    for _ in range(40):
+        await eng.tick()
+        noon.advance(timedelta(minutes=1))
+    [row] = repo.recent_notifications(db)
+    assert row.status == "sent" and row.rule == "due_3h"
+    # Backoff: 1, 2, 4, 8, 15 minutes between tries, so about 6 attempts, not one per tick.
+    assert 4 <= route.call_count <= 8, route.call_count
+    assert repo.failing_deadline_sends(db, noon.now()) == 0
+
+
+@respx.mock
+async def test_retries_respect_quiet_hours_and_report_broken_delivery(
+    db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock
+) -> None:
+    respx.post(NTFY).respond(500)
+    clock.set(local_datetime(date(2026, 10, 19), 22, 50))
+    seed(db, app_config, clock, {"Tomorrow": timedelta(hours=12)})
+    eng = engine(db, app_config, clock)
+    await eng.tick()  # 22:50: due_24h claimed, delivery fails
+    [row] = repo.recent_notifications(db)
+    assert (row.rule, row.status, row.attempts) == ("due_24h", "failed", 1)
+    clock.set(local_datetime(date(2026, 10, 19), 23, 30))  # quiet hours: the retry waits
+    await eng.tick()
+    assert repo.recent_notifications(db)[0].attempts == 1
+    clock.set(local_datetime(date(2026, 10, 20), 8, 0))
+    for _ in range(3):
+        await eng.tick()
+        clock.advance(timedelta(minutes=10))
+    assert repo.recent_notifications(db)[0].attempts >= 3
+    assert repo.failing_deadline_sends(db, clock.now()) == 1  # the heartbeat reports /fail
+
+
+@respx.mock
 async def test_quiet_hours_defer_24h_but_not_3h(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock
 ) -> None:

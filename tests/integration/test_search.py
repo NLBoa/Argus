@@ -137,6 +137,7 @@ def test_rebuild_drops_removed_items(indexed: sqlite3.Connection, clock: FakeClo
             course_id=repo.course_ids(indexed)["MATH240"],
             present_external_ids=set(),
             now=clock.now(),
+            guard=False,  # these tests are about removal itself
         )
         repo.apply_merge(indexed, repo.course_ids(indexed), clock.now())
         repo.rebuild_search_index(indexed)

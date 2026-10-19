@@ -246,7 +246,10 @@ def decide(f: Finding, post: PostContext, item: ItemRef | None) -> Decision:
     if f.date is None or same_due(f, item.due_at):
         return Decision(Action.LINK, iid, "Matches what is already known")
     if item.official:
-        return Decision(Action.CONFLICT, iid, "Disagrees with the official date")
+        if trusted:
+            return Decision(Action.CONFLICT, iid, "Disagrees with the official date")
+        # Review R11: a student's (or hedged) guess is shown, never texted as an override prompt.
+        return Decision(Action.HOLD, iid, "Disagrees with the official date, but not from staff")
     if trusted:
         return Decision(Action.APPLY_DATE, iid, "Updates an announced date")
     return Decision(Action.HOLD, iid, "Not from staff, or hedged")

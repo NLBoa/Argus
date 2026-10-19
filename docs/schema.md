@@ -46,6 +46,8 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 
 | `inbound_messages` | 0007 | One row per Twilio `MessageSid` (UNIQUE, so a replay is answered once): the text, what Argus understood (`command`, `via` `rules`/`ai`/`none`), `status` (`done`, `unclear`, `failed`), the reply, and `item_ids` (what `[n]` meant in the reply, for TODAY) |
 | `snoozes` | 0007 | Per item: reminders deferred until `until` (`SNOOZE n d`), except the 3-hour warning |
+| `item_overrides.basis` | 0008 | The official due date an override was made against; when an official source changes it, the override is dropped (review R1) |
+| `notifications.last_attempt_at` | 0008 | When delivery was last tried; failed sends retry with backoff until they expire (review R4) |
 
 ## items
 | Column | Notes |

@@ -36,7 +36,10 @@ from argus.domain.models import (
     Weekday,
 )
 from argus.domain.status import StatusFacts, derive_status
+from argus.logging import get_logger
 from argus.store.db import iso, iso_or_none, parse_iso, parse_iso_or_none, transaction
+
+log = get_logger(__name__)
 
 # ---------------------------------------------------------------- helpers
 
@@ -250,6 +253,11 @@ def upsert_source_items(
     return changed
 
 
+class SuspiciousListingError(Exception):
+    """A complete fetch dropped most (or all) upcoming records at once: more likely a broken
+    page or login than real deletions (review R6). Nothing is marked absent."""
+
+
 def mark_absent(
     conn: sqlite3.Connection,
     source: Source,
@@ -258,8 +266,10 @@ def mark_absent(
     present_external_ids: set[str],
     now: datetime,
     not_before: datetime | None = None,
+    guard: bool = True,
 ) -> int:
     """After a complete fetch of (source, course), mark records it no longer lists as absent.
+    With `guard`, a listing that drops all or most upcoming records raises instead (R6).
 
     Records due before `not_before` are left alone: they fell out of the source's window
     (the Canvas feed keeps about 30 days of history), they were not deleted.
@@ -276,6 +286,19 @@ def mark_absent(
         if r["external_id"] not in present_external_ids
         and not (cutoff and r["due_at"] is not None and r["due_at"] < cutoff)
     ]
+    upcoming = {r["external_id"] for r in rows if r["due_at"] is None or r["due_at"] >= iso(now)}
+    vanishing = upcoming.intersection(gone)
+    if (
+        guard
+        and vanishing
+        and (
+            not present_external_ids or (len(vanishing) >= 3 and len(vanishing) * 2 > len(upcoming))
+        )
+    ):
+        raise SuspiciousListingError(
+            f"{source.value} listed {len(present_external_ids)} records;"
+            f" {len(vanishing)} upcoming ones vanished at once"
+        )
     for ext in gone:
         conn.execute(
             "UPDATE item_sources SET present = 0, changed_at = ?"
@@ -381,9 +404,24 @@ def apply_merge(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
     for group in merge_sources(records, links):
         members = [by_key[k] for k in group.keys]
         resolved = resolve_item(members)
+        override = student.get(group.item_id) if group.item_id else None
         override_due, cancelled = (
-            student.get(group.item_id, (None, False)) if group.item_id else (None, False)
+            (override.due_at, override.cancelled) if override else (None, False)
         )
+        if override is not None and group.item_id is not None:
+            official = iso_or_none(resolved.due_at) or "none"
+            if override.basis is None:
+                conn.execute(
+                    "UPDATE item_overrides SET basis = ? WHERE item_id = ?",
+                    (official, group.item_id),
+                )
+            elif override.basis != official:
+                # An official source changed the date after the student's decision: official wins again.
+                conn.execute("DELETE FROM item_overrides WHERE item_id = ?", (group.item_id,))
+                log.info(
+                    "override dropped: official date changed", extra={"item_id": group.item_id}
+                )
+                override_due, cancelled = None, False
         if cancelled:
             continue  # the student confirmed a cancellation: the item stays hidden
         if override_due is not None:
@@ -922,9 +960,9 @@ def finish_notification(
 ) -> None:
     conn.execute(
         """UPDATE notifications SET status = ?, channel = ?, error = ?, attempts = attempts + 1,
-             sent_at = CASE WHEN ? THEN ? ELSE sent_at END
+             sent_at = CASE WHEN ? THEN ? ELSE sent_at END, last_attempt_at = ?
            WHERE id = ?""",
-        ("sent" if ok else "failed", channel, error, int(ok), iso(now), notification_id),
+        ("sent" if ok else "failed", channel, error, int(ok), iso(now), iso(now), notification_id),
     )
 
 
@@ -932,18 +970,42 @@ def notification_keys(conn: sqlite3.Connection) -> set[str]:
     return {r["key"] for r in conn.execute("SELECT key FROM notification_keys")}
 
 
-def retryable_notifications(
-    conn: sqlite3.Connection, now: datetime, max_attempts: int = 3
-) -> list[NotificationRow]:
-    """Failed (or never-finished) sends that are still relevant."""
+RETRY_BACKOFF_MAX = timedelta(minutes=15)
+RETRY_MAX_ATTEMPTS = 100  # with no expiry (system alerts): about a day of retries
+
+
+def retry_delay(attempts: int) -> timedelta:
+    """1, 2, 4, 8 minutes, then every 15 minutes."""
+    return min(timedelta(minutes=2 ** max(attempts - 1, 0)), RETRY_BACKOFF_MAX)
+
+
+def retryable_notifications(conn: sqlite3.Connection, now: datetime) -> list[NotificationRow]:
+    """Failed (or never-finished) sends that are still relevant and due for another try.
+    They are retried until they expire (review R4), not a fixed three times."""
     rows = conn.execute(
         """SELECT * FROM notifications
            WHERE status IN ('failed', 'pending') AND attempts < ?
              AND (expires_at IS NULL OR expires_at > ?)
            ORDER BY id""",
-        (max_attempts, iso(now)),
+        (RETRY_MAX_ATTEMPTS, iso(now)),
     ).fetchall()
-    return [_row_to_notification(r) for r in rows]
+    due = []
+    for r in rows:
+        last = parse_iso_or_none(r["last_attempt_at"])
+        if r["attempts"] == 0 or last is None or now - last >= retry_delay(r["attempts"]):
+            due.append(_row_to_notification(r))
+    return due
+
+
+def failing_deadline_sends(conn: sqlite3.Connection, now: datetime) -> int:
+    """Deadline reminders still undelivered after 3 tries: delivery itself is broken."""
+    return int(
+        conn.execute(
+            """SELECT COUNT(*) FROM notifications WHERE status = 'failed' AND attempts >= 3
+               AND rule IN ('due_24h', 'due_3h') AND (expires_at IS NULL OR expires_at > ?)""",
+            (iso(now),),
+        ).fetchone()[0]
+    )
 
 
 def notifications_sent_between(
@@ -1476,15 +1538,22 @@ def set_override(
         """INSERT INTO item_overrides (item_id, due_at, cancelled, reason, created_at) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (item_id) DO UPDATE SET due_at = COALESCE(excluded.due_at, due_at),
              cancelled = MAX(cancelled, excluded.cancelled), reason = excluded.reason,
-             created_at = excluded.created_at""",
+             created_at = excluded.created_at, basis = NULL""",
         (item_id, iso_or_none(due_at), int(cancelled), reason, iso(now)),
     )
 
 
-def overrides(conn: sqlite3.Connection) -> dict[int, tuple[datetime | None, bool]]:
+@dataclass(frozen=True, slots=True)
+class Override:
+    due_at: datetime | None
+    cancelled: bool
+    basis: str | None  # the official due date (ISO or 'none') it was made against
+
+
+def overrides(conn: sqlite3.Connection) -> dict[int, Override]:
     return {
-        r["item_id"]: (parse_iso_or_none(r["due_at"]), bool(r["cancelled"]))
-        for r in conn.execute("SELECT item_id, due_at, cancelled FROM item_overrides")
+        r["item_id"]: Override(parse_iso_or_none(r["due_at"]), bool(r["cancelled"]), r["basis"])
+        for r in conn.execute("SELECT item_id, due_at, cancelled, basis FROM item_overrides")
     }
 
 

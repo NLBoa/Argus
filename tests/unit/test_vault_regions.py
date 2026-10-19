@@ -87,7 +87,7 @@ def test_frontmatter_update_keeps_user_keys_and_order() -> None:
         "verified": "2026-10-19",
     }
     assert out.startswith(
-        "---\ncourse: CMSC351\nmodule: Week 3\ntags:\n- mine\nverified: '2026-10-19'\n---\n"
+        "---\ncourse: CMSC351\nmodule: Week 3\ntags: [mine]\nverified: '2026-10-19'\n---\n"  # tags untouched
     )
     assert body == split_frontmatter(NOTE)[2]
     plain = update_frontmatter("no frontmatter\n", {"a": 1})
@@ -125,3 +125,78 @@ def test_replace_round_trip(content: str) -> None:
     new = replace_region(text, "core", content)
     assert region_hash(parse(new).regions["core"].content) == region_hash(content)
     assert new.endswith("\nuser text\n")
+
+
+# ---------------------------------------------------------------- review R3: frontmatter bytes
+
+
+def test_owned_keys_change_without_touching_the_students_yaml() -> None:
+    import pytest
+
+    from argus.vault.regions import FrontmatterEditError, update_frontmatter
+
+    note = (
+        "---\n"
+        "course: CMSC351\n"
+        "# keep: my reminder to self\n"
+        'aliases: [hw1, "Homework 1"]\n'
+        "due: '2026-10-20T23:59:00-04:00'\n"
+        "summary: >\n"
+        "  folded text\n"
+        "  over two lines\n"
+        "sources:\n"
+        "- old 1\n"
+        "- old 2\n"
+        "tags:\n"
+        "  - mine\n"
+        "---\n"
+        "body\n"
+    )
+    out = update_frontmatter(
+        note, {"due": "2026-10-22T23:59:00-04:00", "sources": ["new"], "verified": False}
+    )
+    assert out == (
+        "---\n"
+        "course: CMSC351\n"
+        "# keep: my reminder to self\n"
+        'aliases: [hw1, "Homework 1"]\n'
+        "due: '2026-10-22T23:59:00-04:00'\n"
+        "summary: >\n"
+        "  folded text\n"
+        "  over two lines\n"
+        "sources:\n"
+        "- new\n"
+        "tags:\n"
+        "  - mine\n"
+        "verified: false\n"
+        "---\n"
+        "body\n"
+    )
+    assert (
+        update_frontmatter("plain body\n", {"course": "X"}) == "---\ncourse: X\n---\nplain body\n"
+    )
+    assert update_frontmatter("---\n---\nbody\n", {"course": "X"}) == "---\ncourse: X\n---\nbody\n"
+    flow = "---\n{due: 1, course: X}\n---\nx\n"  # one flow mapping: no line belongs to "due"
+    with pytest.raises(FrontmatterEditError):
+        update_frontmatter(flow, {"due": 2})
+    assert "due: 2" in update_frontmatter(flow, {"due": 2}, strict=False)
+    anchored = "---\nbase: &b 1\ndue: *b\n---\nx\n"
+    assert update_frontmatter(anchored, {"due": 2}) == "---\nbase: &b 1\ndue: 2\n---\nx\n"
+    broken = "---\n: : :\n---\nx\n"
+    with pytest.raises(FrontmatterEditError):
+        update_frontmatter(broken, {"due": 2})
+
+
+def test_unsafe_frontmatter_edit_becomes_a_proposal() -> None:
+    from argus.vault.ownership import Action, DesiredNote, plan_note
+
+    v1 = DesiredNote({"due": 1}, (("core", "x"),), "")
+    first = plan_note(None, v1, {}, allow=False)
+    assert first.text is not None
+    anchored = first.text.replace("---\ndue: 1\n", "---\n{due: 1, course: X}\n", 1)
+    plan = plan_note(
+        anchored, DesiredNote({"due": 2}, (("core", "x"),), ""), dict(first.written), allow=False
+    )
+    assert plan.action is Action.PROPOSE and plan.text is None
+    [prop] = plan.proposals
+    assert prop.region_ids == ("frontmatter",)

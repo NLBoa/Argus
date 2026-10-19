@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 
 from argus.announcements import attach_official
 from argus.clock import Clock
@@ -32,9 +32,10 @@ from argus.config import AppConfig, Secrets
 from argus.domain.models import Source
 from argus.logging import get_logger, redactor
 from argus.store import repo
-from argus.store.db import transaction
+from argus.store.db import iso, parse_iso, transaction
 
 log = get_logger(__name__)
+VANISH_TRUST_AFTER = timedelta(hours=24)
 COLLECTOR_TIMEOUT_S = 180.0
 _FAILED = (RunStatus.ERROR, RunStatus.AUTH_ERROR)
 
@@ -191,6 +192,49 @@ class SyncRunner:
             )
         return report
 
+    def _mark_absent(
+        self,
+        result: CollectResult,
+        ids: dict[str, int],
+        code: str,
+        *,
+        present: set[str],
+        window_start: datetime | None,
+        now: datetime,
+    ) -> CollectResult:
+        """Review R6: a listing that drops all or most upcoming records at once is kept and
+        reported as an error (three in a row alert the student). If it is still the case 24
+        hours later, it is believed: the records are marked absent."""
+        key = f"vanish:{code}"
+        state = repo.all_source_state(self.conn).get((result.source.value, key))
+        since = parse_iso(state.data) if state and state.data else None
+        trust = since is not None and now - since >= VANISH_TRUST_AFTER
+        try:
+            repo.mark_absent(
+                self.conn,
+                result.source,
+                course_id=ids[code],
+                present_external_ids=present,
+                now=now,
+                not_before=window_start,
+                guard=not trust,
+            )
+        except repo.SuspiciousListingError as e:
+            if since is None:
+                repo.set_source_state(
+                    self.conn, result.source.value, key, repo.SourceState(data=iso(now)), now
+                )
+            return replace(
+                result,
+                status=RunStatus.ERROR,
+                error=f"{code}: {e}. Kept them for now; check the source (a page or login change?).",
+            )
+        if state is not None:
+            self.conn.execute(
+                "DELETE FROM source_state WHERE source = ? AND key = ?", (result.source.value, key)
+            )
+        return result
+
     def _persist(
         self,
         result: CollectResult,
@@ -207,13 +251,8 @@ class SyncRunner:
                     if code not in ids:
                         continue
                     present = {i.external_id for i in result.items if i.course_code == code}
-                    repo.mark_absent(
-                        self.conn,
-                        result.source,
-                        course_id=ids[code],
-                        present_external_ids=present,
-                        now=now,
-                        not_before=window_start,
+                    result = self._mark_absent(
+                        result, ids, code, present=present, window_start=window_start, now=now
                     )
                 for code, meetings in result.meetings.items():
                     if code in ids:
@@ -227,8 +266,11 @@ class SyncRunner:
                     repo.set_grade(self.conn, grade, now)
                 repo.upsert_materials(self.conn, result.materials, ids, now)
                 touched = repo.upsert_posts(self.conn, result.posts, ids, now)
-                for key, state in result.state_updates.items():
-                    repo.set_source_state(self.conn, result.source.value, key, state, now)
+                if (
+                    result.status is not RunStatus.ERROR
+                ):  # a suspicious listing is fetched again in full
+                    for key, state in result.state_updates.items():
+                        repo.set_source_state(self.conn, result.source.value, key, state, now)
             repo.record_sync_run(
                 self.conn,
                 source=result.source.value,

@@ -109,3 +109,12 @@ def test_credentials_folder_with_plain_names(tmp_path: Path) -> None:
         s.twilio_auth_token is not None and s.twilio_auth_token.get_secret_value() == "plain-token"
     )
     assert s.ntfy_topic is not None and s.ntfy_topic.get_secret_value() == "systemd-topic"
+
+
+def test_time_window_from_a_time_to_itself_is_refused() -> None:
+    from datetime import time
+
+    from argus.config import TimeWindow
+
+    with pytest.raises(ValueError, match="must differ"):
+        TimeWindow(start=time(0), end=time(0))

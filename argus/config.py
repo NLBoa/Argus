@@ -31,6 +31,16 @@ class TimeWindow(_Strict):
     start: time
     end: time
 
+    @model_validator(mode="after")
+    def _not_empty_or_everything(self) -> Self:
+        # Review R12: start == end would read as "all day" (a wrap), silencing every reminder
+        # but the 3-hour warning. To turn quiet hours off, use a short window you sleep through.
+        if self.start == self.end:
+            raise ValueError(
+                "start and end must differ (a window from a time to itself is ambiguous)"
+            )
+        return self
+
     @property
     def wraps_midnight(self) -> bool:
         return self.end <= self.start

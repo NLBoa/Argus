@@ -14,6 +14,7 @@ PAGES: list[tuple[str, str, tuple[str, ...]]] = [
     ("exams", "/exams", ("mobile", "desktop")),
     ("exam", "/exams/5", ("mobile", "desktop")),
     ("proposals", "/proposals", ("mobile", "desktop")),
+    ("not-found", "/exams/9999", ("mobile",)),
     ("search", "/search?q=master+theorem", ("mobile", "desktop")),
     ("search-empty", "/search", ("mobile",)),
     ("styleguide", "/styleguide", ("mobile", "desktop")),

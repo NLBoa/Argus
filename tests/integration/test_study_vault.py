@@ -316,6 +316,44 @@ async def test_confusion_inbox_targets_practice_and_never_edits_the_entry(
     assert "Which case is T(n) = 2T(n/2) + n?" in note(app_config, CONCEPT)
 
 
+async def test_graded_work_never_feeds_generation(
+    db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
+) -> None:
+    """Review R10: homework files are left out, and inbox lines naming graded work get no practice."""
+    from argus.study import study_materials
+
+    with transaction(db):
+        repo.upsert_materials(
+            db,
+            [
+                MaterialRecord(
+                    "CMSC351",
+                    1,
+                    "Homework 3 solutions",
+                    "pdf",
+                    "https://elms.example/files/9",
+                    (MaterialPage("page 1", "Answer to problem 1: ..."),),
+                    "h9",
+                )
+            ],
+            repo.course_ids(db),
+            clock.now(),
+        )
+    assert [m.title for m in study_materials(db, "CMSC351", 1)] == ["Lecture 7 slides"]
+    transport = await study(db, app_config, clock)
+    assert "Answer to problem 1" not in transport.calls[0]["user"]
+    concept_id = db.execute("SELECT id FROM concepts").fetchone()[0]
+    before = len(transport.calls)
+    added = await targeted_practice(
+        db,
+        ai(db, app_config, clock, transport),
+        clock,
+        concept_id,
+        "how do I do Homework 3 problem 2 case 3",
+    )
+    assert added == 0 and len(transport.calls) == before
+
+
 def test_match_concept() -> None:
     concepts = [
         (1, "CMSC351", "Master theorem"),

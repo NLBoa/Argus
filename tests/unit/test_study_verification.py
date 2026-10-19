@@ -108,3 +108,34 @@ def test_bad_diagram_dropped() -> None:
 def test_slugify() -> None:
     assert slugify("Big-O, Big-Omega & Big-Theta") == "big-o-big-omega-big-theta"
     assert slugify("!!!") == "concept"
+
+
+# ---------------------------------------------------------------- review R10: graded work
+
+
+def test_graded_material_is_recognized() -> None:
+    from argus.domain.study import looks_graded, names_item
+
+    items = ["Homework 3", "Midterm 1", "Programming Project 1"]
+    for title in (
+        "HW3.pdf",
+        "hw 4 starter",
+        "Homework 2 solutions",
+        "Problem Set 6",
+        "Project 2 spec",
+        "Answer key",
+        "Take-home portion",
+        "Midterm 1 questions",  # names a tracked item
+    ):
+        assert looks_graded(title, items), title
+    for title in (
+        "Lecture 4 slides: the master theorem",
+        "Practice midterm (from a past term)",
+        "Review problems with solutions",
+        "Growth-rate worksheet",
+        "Chapter 5 reading",
+    ):
+        assert not looks_graded(title, items), title
+    assert names_item("how do I start homework 3 problem 2?", items)
+    assert not names_item("confused by the master theorem", items)
+    assert not names_item("anything", [""])

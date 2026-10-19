@@ -218,6 +218,7 @@ def test_merge_creates_updates_and_removes(
             course_id=ids["CMSC351"],
             present_external_ids=set(),
             now=clock.now(),
+            guard=False,  # these tests are about removal itself
         )
         repo.mark_absent(
             db,
@@ -225,6 +226,7 @@ def test_merge_creates_updates_and_removes(
             course_id=ids["CMSC351"],
             present_external_ids=set(),
             now=clock.now(),
+            guard=False,  # these tests are about removal itself
         )
         repo.apply_merge(db, ids, clock.now())
     assert repo.list_items(db) == []

@@ -108,3 +108,17 @@ def test_due_during_class_three_hour_warning_still_sends() -> None:
     in_class = local(2026, 10, 19, 10)
     r = reminder(Rule.DUE_3H, expires_at=in_class + timedelta(hours=1))
     assert check(r, ctx(_local_day(in_class)), in_class)[0] == Verdict.SEND
+
+
+def test_last_cap_slots_are_kept_for_24_hour_warnings() -> None:
+    """Review R8: briefs, nudges, and new items can't use up the slots a deadline needs."""
+    noon = local(2026, 10, 19, 12)
+    four = ctx(_local_day(noon), sent=4)
+    assert check(reminder(Rule.START_NUDGE), four, noon) == (
+        Verdict.DEFER,
+        "daily cap: last slots kept for deadline warnings",
+    )
+    assert check(reminder(Rule.DUE_24H), four, noon)[0] is Verdict.SEND
+    assert check(reminder(Rule.DUE_24H), ctx(_local_day(noon), sent=6), noon)[0] is Verdict.DEFER
+    tiny = ctx(_local_day(noon), sent=1, cap=2)  # a cap this small reserves nothing
+    assert check(reminder(Rule.START_NUDGE), tiny, noon)[0] is Verdict.SEND

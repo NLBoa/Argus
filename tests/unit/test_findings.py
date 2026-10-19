@@ -170,6 +170,9 @@ def test_ties_prefer_nearest_due() -> None:
         ("new_assessment", AuthorRole.INSTRUCTOR, 0.95, "unofficial", Action.APPLY_DATE),
         # date changes: anything changing an official date is held
         ("date_change", AuthorRole.INSTRUCTOR, 0.99, "official", Action.CONFLICT),
+        # review R11: a student guess or hedged post never becomes a texted conflict
+        ("date_change", AuthorRole.STUDENT, 0.99, "official", Action.HOLD),
+        ("date_change", AuthorRole.INSTRUCTOR, 0.6, "official", Action.HOLD),
         ("date_change", AuthorRole.INSTRUCTOR, 0.95, "unofficial", Action.APPLY_DATE),
         ("date_change", AuthorRole.INSTRUCTOR, 0.6, "unofficial", Action.HOLD),
         ("date_change", AuthorRole.INSTRUCTOR, 0.95, "same", Action.LINK),

@@ -9,6 +9,7 @@ whose core idea does not survive is dropped. The diagram is checked like a claim
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from argus.ai.schemas import ConceptDraft, PracticeDraft, VerificationOut
@@ -151,3 +152,32 @@ def kept_practice(
             continue
         kept.append(CheckedPractice(p.kind, p.prompt.strip(), p.answer.strip(), tuple(p.sources)))
     return kept, dropped
+
+
+# ---------------------------------------------------------------- graded work (review R10)
+
+_GRADED = re.compile(
+    r"\b(home ?works?|hw ?\d+|problem ?sets?|psets?|ps ?\d+|projects?|assignments?|lab reports?|"
+    r"take-?home|answer ?keys?|solutions?|submissions?)\b",
+    re.IGNORECASE,
+)
+_STUDY = re.compile(r"\b(practice|review|sample|study guide|worksheet)\b", re.IGNORECASE)
+_WORDS = re.compile(r"[a-z0-9]+")
+
+
+def _title_words(title: str) -> set[str]:
+    return set(_WORDS.findall(title.casefold()))
+
+
+def names_item(text: str, item_titles: Sequence[str]) -> bool:
+    """Every word of some tracked item's title appears in the text ("HW 3", "Project 1")."""
+    words = _title_words(text)
+    return any((t := _title_words(title)) and t <= words for title in item_titles)
+
+
+def looks_graded(title: str, item_titles: Sequence[str]) -> bool:
+    """Material that is (or answers) graded work never feeds note or practice generation.
+    Practice and review material is allowed unless it names a tracked item."""
+    if names_item(title, item_titles):
+        return True
+    return bool(_GRADED.search(title)) and not _STUDY.search(title)

@@ -198,3 +198,19 @@ def test_health_shows_the_vault_and_banner_is_only_on_today(client: TestClient) 
         )
     html = client.get("/health").text
     assert "Failing (1 in a row)" in html and "git push failed" in html
+
+
+def test_errors_without_javascript_render_a_page(client: TestClient) -> None:
+    """Review R15: a plain form post that fails gets the error state, not raw JSON."""
+    pid = db(client).execute("SELECT id FROM proposals").fetchone()[0]
+    r = client.post(
+        f"/proposals/{pid}/approve", headers={**ORIGIN, "Referer": "http://testserver/proposals"}
+    )
+    assert r.status_code == 409 and r.headers["content-type"].startswith("text/html")
+    assert "That changed already" in r.text and "changed since this was proposed" in r.text
+    assert 'href="/proposals"' in r.text
+    missing = client.get("/exams/9999", headers={"Accept": "text/html"})
+    assert missing.status_code == 404 and "Not found" in missing.text
+    assert client.get("/exams/9999", headers={"Accept": "application/json"}).json() == {
+        "detail": "No such exam"
+    }

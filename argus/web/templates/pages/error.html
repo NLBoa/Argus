@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">{{ heading }}</h1>
+</div>
+<div class="banner banner--error" role="alert">
+  {{ icon("circle-alert") }}
+  <p class="banner__text">{{ message }}</p>
+</div>
+<p class="mt-6"><a class="btn" href="{{ back_href }}">Go back</a></p>
+{% endblock %}

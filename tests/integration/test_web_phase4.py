@@ -130,9 +130,8 @@ def test_announcements_and_decisions(client: TestClient) -> None:
     assert "Use announced date" in html
     assert "Lab 3 room change" in html  # not analyzed yet: the no-AI fallback
     r = client.post(f"/findings/{MIDTERM_FINDING}/confirm", headers=HX)
-    assert (
-        json.loads(r.headers["HX-Trigger"])["toast"]["message"]
-        == "Using the announced date for Midterm 1"
+    assert json.loads(r.headers["HX-Trigger"])["toast"]["message"].startswith(
+        "Using the announced date for Midterm 1: "
     )
     assert "Use announced date" not in r.text
     again = client.post(f"/findings/{MIDTERM_FINDING}/confirm", headers=HX)
