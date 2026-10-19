@@ -1,0 +1,16 @@
+[
+  {
+    "id": 301, "name": "Week 1: Asymptotics", "position": 1, "unlock_at": null, "state": "completed",
+    "items_count": 3,
+    "items": [
+      {"id": 1, "title": "Week 1", "type": "SubHeader", "indent": 0},
+      {"id": 2, "title": "Lecture 1 slides: big-O", "type": "File", "html_url": "https://umd.instructure.com/courses/1234567/modules/items/2", "indent": 1},
+      {"id": 3, "title": "Visualizing growth rates", "type": "ExternalUrl", "external_url": "https://example.test/growth", "html_url": "https://umd.instructure.com/courses/1234567/modules/items/3", "indent": 1}
+    ]
+  },
+  {
+    "id": 302, "name": "Week 2: Recurrences", "position": 2, "unlock_at": "2026-09-07T04:00:00Z", "state": "unlocked",
+    "items_count": 40,
+    "items_url": "https://umd.instructure.com/api/v1/courses/1234567/modules/302/items"
+  }
+]

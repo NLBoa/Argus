@@ -1,19 +1,20 @@
 """Canvas tier 2: REST API with a personal access token (only if UMD allows tokens).
 
-Phase 1 covers assignments with the student's submission state. Modules, announcements,
-and files arrive in Phase 3. Quirk: pagination uses `Link` headers. Follow `rel="next"`,
+Every 30 minutes: assignments with the student's submission state, and course
+announcements (which become posts). Modules, the syllabus, and grades are nightly
+(`canvas_modules.py`). Quirk: pagination uses `Link` headers. Follow `rel="next"`,
 never compute page numbers.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from argus.collectors.base import CollectContext, CollectResult, RunStatus
 from argus.collectors.text import html_to_text
-from argus.domain.models import ItemKind, Source, SourceItem
+from argus.domain.models import AuthorRole, ItemKind, PostRecord, Source, SourceItem
 from argus.domain.titles import infer_kind
 from argus.store.repo import SourceState, sha256
 
@@ -63,6 +64,31 @@ def parse_assignment(a: dict[str, Any], course_code: str) -> SourceItem:
     )
 
 
+ANNOUNCEMENT_LOOKBACK = timedelta(days=60)
+
+
+def parse_announcement(a: dict[str, Any], course_code: str) -> PostRecord:
+    title = str(a.get("title") or "(untitled)")
+    body = html_to_text(a.get("message")) or ""
+    posted = _dt(a.get("posted_at") or a.get("created_at"))
+    if posted is None:
+        raise ValueError(f"announcement {a.get('id')} has no posted_at")
+    return PostRecord(
+        platform="canvas",
+        external_id=f"announcement:{a['id']}",
+        via=Source.CANVAS_API,
+        course_code=course_code,
+        title=title,
+        body=body,
+        posted_at=posted,
+        # Only instructors and TAs can post course announcements in Canvas.
+        author_role=AuthorRole.INSTRUCTOR,
+        kind="announcement",
+        url=a.get("html_url"),
+        raw_hash=sha256(json.dumps([title, body])),
+    )
+
+
 class CanvasApiCollector:
     source = Source.CANVAS_API
 
@@ -95,7 +121,49 @@ class CanvasApiCollector:
                 items.extend(parse_assignment(a, course.code) for a in data)
             scopes[course.code] = None
             updates[key] = SourceState(payload_hash=digest)
-        status = RunStatus.OK if scopes else RunStatus.UNCHANGED
+        posts = await self._announcements(ctx, base, headers, updates)
+        status = RunStatus.OK if scopes or posts else RunStatus.UNCHANGED
         return CollectResult(
-            self.source, status, items=tuple(items), complete_scopes=scopes, state_updates=updates
+            self.source,
+            status,
+            items=tuple(items),
+            posts=tuple(posts),
+            complete_scopes=scopes,
+            state_updates=updates,
         )
+
+    async def _announcements(
+        self,
+        ctx: CollectContext,
+        base: str,
+        headers: dict[str, str],
+        updates: dict[str, SourceState],
+    ) -> list[PostRecord]:
+        by_context = {f"course_{c.canvas_id}": c.code for c in ctx.config.courses if c.canvas_id}
+        if not by_context:
+            return []
+        now = ctx.clock.now()
+        pages = await ctx.fetcher.get_all_pages(
+            f"{base}/api/v1/announcements",
+            params={
+                "context_codes[]": sorted(by_context),
+                "start_date": (now - ANNOUNCEMENT_LOOKBACK).date().isoformat(),
+                "end_date": (now + timedelta(days=1)).date().isoformat(),
+                "per_page": "50",
+            },
+            headers=headers,
+        )
+        digest = sha256(b"".join(p.body for p in pages))
+        if digest == ctx.state(self.source, "announcements").payload_hash:
+            return []
+        posts = []
+        for page in pages:
+            data = page.json()
+            if not isinstance(data, list):
+                raise ValueError("expected a list of announcements")
+            for a in data:
+                code = by_context.get(str(a.get("context_code")))
+                if code:
+                    posts.append(parse_announcement(a, code))
+        updates["announcements"] = SourceState(payload_hash=digest)
+        return posts

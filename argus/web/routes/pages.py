@@ -5,10 +5,17 @@ from __future__ import annotations
 import sqlite3
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from argus.web.data import load_health, load_today, load_upcoming, palette_items
+from argus.web.data import (
+    load_course,
+    load_health,
+    load_search,
+    load_today,
+    load_upcoming,
+    palette_items,
+)
 from argus.web.deps import AppState, get_conn, get_state
 from argus.web.routes.common import LOAD_ERROR, configured, log, render
 from argus.web.samples import icon_names, styleguide_samples
@@ -133,3 +140,77 @@ def styleguide(request: Request, state: State) -> HTMLResponse:
 @router.get("/palette.json")
 def palette(state: State, conn: Conn) -> JSONResponse:
     return JSONResponse({"items": palette_items(conn, state.config, state.clock.now())})
+
+
+@router.get("/courses/{code}", response_class=HTMLResponse)
+def course(request: Request, state: State, conn: Conn, code: str) -> HTMLResponse:
+    code = code.upper()
+    try:
+        data = load_course(conn, state.config, configured(state), state.clock.now(), code)
+    except sqlite3.Error:
+        log.exception("course failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/course.html",
+            {"error": LOAD_ERROR, "code": code, "data": None},
+            active="/courses",
+            title=code,
+            status_code=503,
+        )
+    if data is None:
+        raise HTTPException(404, f"{code} is not one of your courses")
+    return render(
+        request,
+        state,
+        conn,
+        "pages/course.html",
+        {"data": data, "error": None, "code": code},
+        active="/courses",
+        title=code,
+    )
+
+
+@router.get("/search", response_class=HTMLResponse)
+def search_view(
+    request: Request,
+    state: State,
+    conn: Conn,
+    q: Annotated[str, Query(max_length=200)] = "",
+    course: Annotated[str | None, Query(max_length=10)] = None,
+) -> HTMLResponse:
+    courses = list(course_views(state.config).values())
+    course_filter = course if course in {c.code for c in courses} else None
+    ctx: dict[str, Any] = {
+        "q": q,
+        "courses": courses,
+        "course_filter": course_filter,
+        "groups": [],
+        "error": None,
+    }
+    if q.strip():
+        try:
+            ctx["groups"] = load_search(conn, state.config, q, course_filter)
+        except sqlite3.Error:
+            log.exception("search failed")
+            ctx["error"] = LOAD_ERROR
+            return render(
+                request,
+                state,
+                None,
+                "pages/search.html",
+                ctx,
+                active="/search",
+                title="Search",
+                status_code=503,
+            )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/search.html",
+        ctx,
+        active="/search",
+        title=f"Search: {q}" if q else "Search",
+    )

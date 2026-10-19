@@ -283,6 +283,7 @@ def timeline(
 SOURCE_NAMES = {
     "canvas_ical": "ELMS calendar",
     "canvas_api": "ELMS (API)",
+    "canvas_modules": "ELMS modules",
     "gradescope": "Gradescope",
     "piazza": "Piazza",
     "piazza_email": "Piazza email",
@@ -291,6 +292,7 @@ SOURCE_NAMES = {
 SOURCE_HINTS = {
     "canvas_ical": "Set ARGUS_CANVAS_ICAL_URL (ELMS > Calendar > Calendar Feed).",
     "canvas_api": "Set ARGUS_CANVAS_TOKEN, if ELMS lets you create an access token.",
+    "canvas_modules": "Uses ARGUS_CANVAS_TOKEN; syncs modules, syllabus, and grade nightly.",
     "gradescope": "Set ARGUS_GRADESCOPE_EMAIL and ARGUS_GRADESCOPE_PASSWORD.",
     "piazza": "Set ARGUS_PIAZZA_EMAIL and ARGUS_PIAZZA_PASSWORD, and add piazza_network_id.",
     "piazza_email": "Optional fallback: set ARGUS_GMAIL_TOKEN_PATH.",
@@ -299,6 +301,7 @@ SOURCE_HINTS = {
 STALE_AFTER = {
     "canvas_ical": timedelta(minutes=90),
     "canvas_api": timedelta(minutes=90),
+    "canvas_modules": timedelta(hours=26),
     "gradescope": timedelta(minutes=90),
     "piazza": timedelta(minutes=90),
     "piazza_email": timedelta(minutes=90),
@@ -363,7 +366,8 @@ def stale_notices(statuses: Iterable[SourceStatusView]) -> list[StaleNotice]:
     """'Gradescope last synced 3h ago' for every configured source that is stale or failing."""
     out = []
     for s in statuses:
-        if s.state not in ("stale", "failing") or (s.source == "umdio" and s.state == "stale"):
+        slow = s.source in ("umdio", "canvas_modules")
+        if s.state not in ("stale", "failing") or (slow and s.state == "stale"):
             continue
         when = f"last synced {s.last_success}" if s.last_success else "has not synced yet"
         out.append(StaleNotice(f"{s.name} {when}", failing=s.state == "failing"))

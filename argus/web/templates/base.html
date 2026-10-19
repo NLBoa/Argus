@@ -30,8 +30,15 @@
         {% endfor %}
       </nav>
       <div class="header-tools">
+        <form class="header-search" action="/search" method="get" role="search">
+          {{ icon("search", "icon-sm") }}
+          <label for="site-search" class="visually-hidden">Search</label>
+          <input id="site-search" name="q" type="search" placeholder="Search" autocomplete="off">
+          <span class="kbd" aria-hidden="true">/</span>
+        </form>
+        <a class="btn btn-quiet btn-icon header-search-link" href="/search" aria-label="Search">{{ icon("search") }}</a>
         <button class="btn btn-quiet btn-icon" type="button" @click="$store.palette.show()" aria-label="Open command palette" title="Command palette (Ctrl K)">{{ icon("command") }}</button>
-        <button class="btn btn-quiet btn-icon" type="button" x-data @click="$store.theme.cycle()" :aria-label="$store.theme.label" aria-label="Theme: match system" title="Change theme">
+        <button class="btn btn-quiet btn-icon theme-toggle" type="button" x-data @click="$store.theme.cycle()" :aria-label="$store.theme.label" aria-label="Theme: match system" title="Change theme">
           <span x-show="$store.theme.mode === 'light'" x-cloak>{{ icon("sun") }}</span>
           <span x-show="$store.theme.mode === 'dark'" x-cloak>{{ icon("moon") }}</span>
           <span x-show="$store.theme.mode === 'system'">{{ icon("monitor") }}</span>

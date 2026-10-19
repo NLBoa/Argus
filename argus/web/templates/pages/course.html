@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, item_row, empty_state, error_banner, course_chip %}
+{% block content %}
+{% if error %}
+  <div class="page-head"><h1 class="page-title">{{ code }}</h1></div>
+  {{ error_banner(error, "/courses/" ~ code) }}
+{% else %}
+<div class="page-head" data-accent="{{ data.course.accent }}">
+  <h1 class="page-title">{{ data.course.code }}{% if data.title %}<span class="text-muted font-semibold">: {{ data.title }}</span>{% endif %}</h1>
+  <p class="page-sub">Section {{ data.section }}{% if data.instructors %}, {{ data.instructors|join(", ") }}{% endif %}</p>
+</div>
+
+<div class="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+  <div class="grid gap-8 content-start">
+    <section aria-labelledby="upcoming-heading">
+      <h2 class="section-title" id="upcoming-heading">Coming up <span class="section-count">{{ data.upcoming|length }}</span></h2>
+      {% if data.upcoming %}
+        <ul class="item-list m-0 p-0 list-none">{% for v in data.upcoming %}{{ item_row(v) }}{% endfor %}</ul>
+      {% else %}
+        <div class="panel">{{ empty_state("circle-check", "Nothing coming up", "No assignments, quizzes, or exams in the next 60 days.") }}</div>
+      {% endif %}
+    </section>
+
+    {% if data.tier2 %}
+    <section aria-labelledby="modules-heading">
+      <h2 class="section-title" id="modules-heading">Modules <span class="section-count">{{ data.modules|length }}</span></h2>
+      {% if data.modules %}
+      <div class="panel">
+        {% for m in data.modules %}
+        <details class="module border-b border-line last:border-b-0" id="{{ m.id }}" {% if m.state in ("unlocked", "started") %}open{% endif %}>
+          <summary class="module__summary">
+            <span class="font-bold">{{ m.name }}</span>
+            {% set n = m.items|rejectattr("is_header")|list|length %}<span class="text-sm text-muted">{{ n }} item{{ "" if n == 1 else "s" }}{% if m.state == "completed" %}, completed{% elif m.state == "locked" %}, locked{% endif %}</span>
+          </summary>
+          {% if m.digest %}<p class="module__digest">{{ m.digest }}</p>{% endif %}
+          <ul class="module__items">
+            {% for i in m.items %}
+              {% if i.is_header %}<li class="module__header" style="--indent: {{ i.indent }}">{{ i.title }}</li>
+              {% else %}<li class="module__item" style="--indent: {{ i.indent }}">{{ icon(i.icon, "icon-sm") }}{% if i.url %}<a href="{{ i.url }}" rel="noopener" target="_blank">{{ i.title }}<span class="visually-hidden"> ({{ i.type }}, opens in a new tab)</span></a>{% else %}<span>{{ i.title }}</span>{% endif %}</li>{% endif %}
+            {% endfor %}
+          </ul>
+        </details>
+        {% endfor %}
+      </div>
+      {% else %}
+        <div class="panel">{{ empty_state("layers", "No modules yet", "Modules sync from ELMS every night.") }}</div>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if data.recent %}
+    <section aria-labelledby="recent-heading">
+      <h2 class="section-title" id="recent-heading">Last two weeks</h2>
+      <ul class="item-list m-0 p-0 list-none">{% for v in data.recent %}{{ item_row(v, actions=False) }}{% endfor %}</ul>
+    </section>
+    {% endif %}
+  </div>
+
+  <aside class="grid gap-6 content-start" aria-label="Course details">
+    {% if data.tier2 %}
+    <section class="panel panel-pad" aria-labelledby="grade-heading">
+      <h2 class="section-title" id="grade-heading">Current grade</h2>
+      {% if data.grade %}<p class="stat__value">{{ data.grade }}</p><p class="text-sm text-muted">From ELMS, updated {{ data.grade_updated }}</p>
+      {% else %}<p class="text-muted">ELMS hasn't published a grade yet.</p>{% endif %}
+    </section>
+    {% endif %}
+    <section class="panel panel-pad" aria-labelledby="meet-heading">
+      <h2 class="section-title" id="meet-heading">Meets</h2>
+      {% if data.meetings %}
+      <ul class="m-0 p-0 list-none grid gap-2">
+        {% for m in data.meetings %}<li><strong>{{ m.kind }}</strong>: {{ m.days }}, <span class="tnum">{{ m.time }}</span>{% if m.where %}, {{ m.where }}{% endif %}</li>{% endfor %}
+      </ul>
+      {% else %}<p class="text-muted">No meeting times from the schedule of classes yet.</p>{% endif %}
+    </section>
+    {% if data.links %}
+    <section class="panel panel-pad" aria-labelledby="links-heading">
+      <h2 class="section-title" id="links-heading">Open in</h2>
+      <p class="flex flex-wrap gap-2">{% for l in data.links %}<a class="btn btn-sm" href="{{ l.url }}" rel="noopener" target="_blank">{{ l.label }}{{ icon("external-link", "icon-sm") }}<span class="visually-hidden"> (opens in a new tab)</span></a>{% endfor %}</p>
+    </section>
+    {% endif %}
+    <section aria-labelledby="posts-heading">
+      <h2 class="section-title" id="posts-heading">From the instructors</h2>
+      {% if data.posts %}
+      <ul class="panel m-0 p-0 list-none">
+        {% for p in data.posts %}
+        <li class="px-4 py-3 border-b border-line last:border-b-0">
+          <p class="font-bold">{% if p.url %}<a href="{{ p.url }}" rel="noopener" target="_blank">{{ p.title }}<span class="visually-hidden"> (opens in a new tab)</span></a>{% else %}{{ p.title }}{% endif %}</p>
+          <p class="text-sm text-muted">{{ p.kind_label }}, {{ p.when }}</p>
+          <p class="mt-1 text-sm">{{ p.body }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+        <div class="panel">{{ empty_state("megaphone", "No announcements yet", "Staff posts from ELMS and Piazza appear here.") }}</div>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endif %}
+{% endblock %}

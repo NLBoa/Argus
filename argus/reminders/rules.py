@@ -176,6 +176,7 @@ def new_items(snap: Snapshot) -> list[Reminder]:
 SOURCE_NAMES = {
     "canvas_ical": "ELMS calendar",
     "canvas_api": "ELMS",
+    "canvas_modules": "ELMS modules",
     "gradescope": "Gradescope",
     "piazza": "Piazza",
     "piazza_email": "Piazza email",

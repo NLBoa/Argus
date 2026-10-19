@@ -105,6 +105,9 @@ def mock_sources(feed: bytes) -> None:
     respx.get(f"{CANVAS}/1234568/assignments").respond(
         200, content=fixture_bytes("canvas_api", "math240_page1.json")
     )
+    respx.get("https://umd.instructure.com/api/v1/announcements").respond(
+        200, content=fixture_bytes("canvas_api", "announcements.json")
+    )
     for code, section in (("CMSC351", "0101"), ("MATH240", "0201")):
         low = code.lower()
         respx.get(f"{UMDIO}/courses/{code}/sections/{section}").respond(
@@ -198,7 +201,7 @@ async def test_first_cycle_end_to_end(runner: SyncRunner, db: sqlite3.Connection
     assert by_title[("CMSC351", "Programming Project 1")].status == ItemStatus.SUBMITTED
 
     assert {m.course_code for m in repo.list_meetings(db)} == {"CMSC351", "MATH240"}
-    assert len(report.new_posts) == 2
+    assert len(report.new_posts) == 4  # 2 Canvas announcements + 2 Piazza emails
     health = repo.source_health(db, ["piazza"])["piazza"]
     assert health.last_status == "auth_error"
     assert health.failures == 1

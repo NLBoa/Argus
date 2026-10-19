@@ -17,11 +17,14 @@ from argus.domain.merge import merge_sources, resolve_item
 from argus.domain.models import (
     AuthorRole,
     CourseInfo,
+    GradeRecord,
     Item,
     ItemKind,
     ItemLink,
     ItemStatus,
     MeetingRecord,
+    ModuleItemRecord,
+    ModuleRecord,
     PostRecord,
     ResolvedItem,
     Source,
@@ -978,3 +981,198 @@ def first_success_at(conn: sqlite3.Connection) -> datetime | None:
         "SELECT MIN(finished_at) FROM sync_runs WHERE status IN ('ok', 'unchanged')"
     ).fetchone()
     return parse_iso_or_none(r[0])
+
+
+# ---------------------------------------------------------------- modules & grades
+
+
+def replace_modules(
+    conn: sqlite3.Connection, course_id: int, modules: Sequence[ModuleRecord], now: datetime
+) -> None:
+    """Make the stored modules for a course exactly `modules` (keeping digests by canvas id)."""
+    keep = {m.canvas_id for m in modules}
+    for r in conn.execute(
+        "SELECT canvas_id FROM modules WHERE course_id = ?", (course_id,)
+    ).fetchall():
+        if r["canvas_id"] not in keep:
+            conn.execute(
+                "DELETE FROM modules WHERE course_id = ? AND canvas_id = ?",
+                (course_id, r["canvas_id"]),
+            )
+    for m in modules:
+        items = json.dumps(
+            [{"title": i.title, "type": i.type, "url": i.url, "indent": i.indent} for i in m.items]
+        )
+        conn.execute(
+            """INSERT INTO modules (course_id, canvas_id, name, position, state, unlock_at, items,
+                                    updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (course_id, canvas_id) DO UPDATE SET name = excluded.name,
+                 position = excluded.position, state = excluded.state,
+                 unlock_at = excluded.unlock_at, items = excluded.items,
+                 updated_at = excluded.updated_at""",
+            (
+                course_id,
+                m.canvas_id,
+                m.name,
+                m.position,
+                m.state,
+                iso_or_none(m.unlock_at),
+                items,
+                iso(now),
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StoredModule:
+    record: ModuleRecord
+    digest: str | None
+
+
+def list_modules(conn: sqlite3.Connection, course_code: str) -> list[StoredModule]:
+    rows = conn.execute(
+        """SELECT m.*, c.code FROM modules m JOIN courses c ON c.id = m.course_id
+           WHERE c.code = ? ORDER BY m.position, m.name""",
+        (course_code,),
+    ).fetchall()
+    return [
+        StoredModule(
+            ModuleRecord(
+                course_code=r["code"],
+                canvas_id=r["canvas_id"],
+                name=r["name"],
+                position=r["position"],
+                items=tuple(
+                    ModuleItemRecord(i["title"], i["type"], i.get("url"), int(i.get("indent") or 0))
+                    for i in json.loads(r["items"])
+                ),
+                unlock_at=parse_iso_or_none(r["unlock_at"]),
+                state=r["state"],
+            ),
+            r["digest"],
+        )
+        for r in rows
+    ]
+
+
+def set_grade(conn: sqlite3.Connection, grade: GradeRecord, now: datetime) -> None:
+    conn.execute(
+        "UPDATE courses SET grade_score = ?, grade_letter = ?, grade_updated_at = ? WHERE code = ?",
+        (grade.score, grade.letter, iso(now), grade.course_code),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CourseRow:
+    code: str
+    section: str
+    title: str | None
+    instructors: tuple[str, ...]
+    canvas_id: int | None
+    gradescope_id: str | None
+    piazza_network_id: str | None
+    grade_score: float | None
+    grade_letter: str | None
+    grade_updated_at: datetime | None
+
+
+def get_course(conn: sqlite3.Connection, code: str) -> CourseRow | None:
+    r = conn.execute("SELECT * FROM courses WHERE code = ? AND active = 1", (code,)).fetchone()
+    if r is None:
+        return None
+    return CourseRow(
+        code=r["code"],
+        section=r["section"],
+        title=r["title"],
+        instructors=tuple(json.loads(r["instructors"] or "[]")),
+        canvas_id=r["canvas_id"],
+        gradescope_id=r["gradescope_id"],
+        piazza_network_id=r["piazza_network_id"],
+        grade_score=r["grade_score"],
+        grade_letter=r["grade_letter"],
+        grade_updated_at=parse_iso_or_none(r["grade_updated_at"]),
+    )
+
+
+# ---------------------------------------------------------------- search
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    kind: str
+    ref_id: str
+    course: str
+    title: str
+    snippet: str  # HTML-safe: escaped text with <mark> around matches
+    url: str | None
+
+
+_MARK_OPEN, _MARK_CLOSE = "\x02", "\x03"
+
+
+def rebuild_search_index(conn: sqlite3.Connection) -> int:
+    """Rebuild the FTS index from items, modules, and posts. Returns the row count."""
+    conn.execute("DELETE FROM search_index")
+    conn.execute(
+        """INSERT INTO search_index (title, body, kind, ref_id, course, url)
+           SELECT i.title, COALESCE(i.description, ''), 'item', i.id, c.code,
+                  (SELECT s.url FROM item_sources s WHERE s.item_id = i.id AND s.present = 1
+                     AND s.url IS NOT NULL ORDER BY s.source LIMIT 1)
+           FROM items i JOIN courses c ON c.id = i.course_id
+           WHERE i.removed_at IS NULL AND c.active = 1"""
+    )
+    for r in conn.execute(
+        """SELECT m.id, m.name, m.items, m.digest, c.code FROM modules m
+           JOIN courses c ON c.id = m.course_id WHERE c.active = 1"""
+    ).fetchall():
+        titles = "; ".join(i["title"] for i in json.loads(r["items"]))
+        body = titles + ("\n" + r["digest"] if r["digest"] else "")
+        conn.execute(
+            "INSERT INTO search_index (title, body, kind, ref_id, course, url)"
+            " VALUES (?, ?, 'module', ?, ?, ?)",
+            (r["name"], body, r["id"], r["code"], f"/courses/{r['code']}#module-{r['id']}"),
+        )
+    conn.execute(
+        """INSERT INTO search_index (title, body, kind, ref_id, course, url)
+           SELECT p.title, p.body, 'post', p.id, c.code, p.url
+           FROM posts p JOIN courses c ON c.id = p.course_id WHERE c.active = 1"""
+    )
+    return int(conn.execute("SELECT COUNT(*) FROM search_index").fetchone()[0])
+
+
+def fts_query(text: str) -> str | None:
+    """User text -> a safe FTS5 query: every word quoted, the last one as a prefix."""
+    words = [w for w in "".join(ch if ch.isalnum() else " " for ch in text).split() if w]
+    if not words:
+        return None
+    quoted = [f'"{w}"' for w in words[:12]]
+    quoted[-1] += "*"
+    return " ".join(quoted)
+
+
+def search(
+    conn: sqlite3.Connection, text: str, *, course: str | None = None, limit: int = 50
+) -> list[SearchHit]:
+    from html import escape
+
+    q = fts_query(text)
+    if q is None:
+        return []
+    # Only module constants are interpolated; user text is bound as a parameter.
+    sql = (
+        "SELECT kind, ref_id, course, title, url,"  # noqa: S608
+        f" snippet(search_index, 1, '{_MARK_OPEN}', '{_MARK_CLOSE}', '...', 14) AS snip"
+        " FROM search_index WHERE search_index MATCH ?"
+    )
+    params: list[object] = [q]
+    if course:
+        sql += " AND course = ?"
+        params.append(course)
+    sql += " ORDER BY bm25(search_index, 4.0, 1.0) LIMIT ?"
+    params.append(limit)
+    hits = []
+    for r in conn.execute(sql, params).fetchall():
+        snip = escape(r["snip"] or "").replace(_MARK_OPEN, "<mark>").replace(_MARK_CLOSE, "</mark>")
+        hits.append(SearchHit(r["kind"], str(r["ref_id"]), r["course"], r["title"], snip, r["url"]))
+    return hits

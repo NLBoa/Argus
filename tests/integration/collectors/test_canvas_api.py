@@ -14,6 +14,7 @@ from tests.integration.conftest import fixture_bytes
 
 BASE = "https://umd.instructure.com/api/v1/courses"
 TOKEN = "synthetic-canvas-token-0000"
+ANNOUNCEMENTS = "https://umd.instructure.com/api/v1/announcements"
 
 
 def mock_canvas() -> respx.Route:
@@ -27,6 +28,7 @@ def mock_canvas() -> respx.Route:
     respx.get(f"{BASE}/1234568/assignments").respond(
         200, content=fixture_bytes("canvas_api", "math240_page1.json")
     )
+    respx.get(ANNOUNCEMENTS).respond(200, content=fixture_bytes("canvas_api", "announcements.json"))
     return route
 
 
@@ -90,6 +92,7 @@ async def test_non_list_payload_is_error(make_ctx: Callable[..., CollectContext]
 async def test_empty_course(make_ctx: Callable[..., CollectContext]) -> None:
     respx.get(f"{BASE}/1234567/assignments").respond(200, json=[])
     respx.get(f"{BASE}/1234568/assignments").respond(200, json=[])
+    respx.get(ANNOUNCEMENTS).respond(200, json=[])
     result = await CanvasApiCollector().collect(make_ctx(canvas_token=TOKEN))
     assert result.status == RunStatus.OK
     assert result.items == ()
@@ -124,3 +127,45 @@ def test_raw_hash_ignores_key_order() -> None:
     a = {"id": 1, "name": "x"}
     b = json.loads('{"name": "x", "id": 1}')
     assert parse_assignment(a, "C").raw_hash == parse_assignment(b, "C").raw_hash
+
+
+@respx.mock
+async def test_announcements_become_posts(make_ctx: Callable[..., CollectContext]) -> None:
+    mock_canvas()
+    route = respx.routes[-1]
+    result = await CanvasApiCollector().collect(make_ctx(canvas_token=TOKEN))
+    params = route.calls[0].request.url.params
+    assert params.get_list("context_codes[]") == ["course_1234567", "course_1234568"]
+    assert params["start_date"] == "2026-08-20"
+    posts = {p.external_id: p for p in result.posts}
+    assert set(posts) == {"announcement:880101", "announcement:880102"}
+    mid = posts["announcement:880101"]
+    assert mid.platform == "canvas"
+    assert mid.kind == "announcement"
+    assert mid.course_code == "CMSC351"
+    assert mid.author_role.is_staff
+    assert (
+        mid.body == "Because of the campus event, Midterm 1 moves to Thursday, Nov 5, in class.\n"
+        "It still covers lectures 1\u201312."
+    )
+    assert posts["announcement:880102"].course_code == "MATH240"
+
+
+@respx.mock
+async def test_unchanged_announcements_are_skipped(make_ctx: Callable[..., CollectContext]) -> None:
+    mock_canvas()
+    first = await CanvasApiCollector().collect(make_ctx(canvas_token=TOKEN))
+    states = {(Source.CANVAS_API.value, k): v for k, v in first.state_updates.items()}
+    second = await CanvasApiCollector().collect(make_ctx(states, canvas_token=TOKEN))
+    assert second.posts == ()
+
+
+@respx.mock
+async def test_announcement_without_date_is_error(make_ctx: Callable[..., CollectContext]) -> None:
+    respx.get(f"{BASE}/1234567/assignments").respond(200, json=[])
+    respx.get(f"{BASE}/1234568/assignments").respond(200, json=[])
+    respx.get(ANNOUNCEMENTS).respond(
+        200, json=[{"id": 1, "title": "x", "context_code": "course_1234567"}]
+    )
+    with pytest.raises(ValueError, match="no posted_at"):
+        await CanvasApiCollector().collect(make_ctx(canvas_token=TOKEN))

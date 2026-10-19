@@ -122,12 +122,48 @@ def test_command_palette(page: Page, base_url: str) -> None:
     expect(page.get_by_role("heading", level=1)).to_have_text("Health")
 
 
-def test_slash_opens_palette_but_not_while_typing(page: Page, base_url: str) -> None:
+def test_slash_focuses_search_and_typing_is_not_a_shortcut(page: Page, base_url: str) -> None:
     page.goto(base_url + "/today")
     page.keyboard.press("/")
-    expect(page.get_by_role("combobox")).to_be_focused()
-    page.keyboard.type("/g")  # typed into the box, not handled as shortcuts
-    expect(page.get_by_role("combobox")).to_have_value("/g")
+    box = page.get_by_role("searchbox", name="Search")
+    expect(box).to_be_focused()
+    page.keyboard.type("master theorem")  # "g", "t" etc. go into the box, not to shortcuts
+    page.keyboard.press("Enter")
+    expect(page).to_have_url(re.compile(r"/search\?q=master\+theorem"))
+    expect(page.get_by_role("heading", name=re.compile("^Modules"))).to_be_visible()
+    expect(page.locator("mark", has_text="master").first).to_be_visible()
+
+
+def test_slash_on_mobile_opens_search_page(page: Page, base_url: str) -> None:
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(base_url + "/today")
+    page.keyboard.press("/")
+    expect(page.get_by_role("heading", level=1)).to_have_text("Search")
+    expect(
+        page.get_by_role("searchbox", name="Search assignments, modules, and posts")
+    ).to_be_visible()
+
+
+def test_course_page_from_chip_and_modules(page: Page, base_url: str) -> None:
+    page.goto(base_url + "/today")
+    page.locator("li.item-row", has_text="Homework 3").get_by_role(
+        "link", name="CMSC351", exact=True
+    ).click()
+    expect(page.get_by_role("heading", level=1)).to_contain_text("CMSC351")
+    expect(page.get_by_text("91.5% (A-)")).to_be_visible()
+    week1 = page.locator("details", has_text="Week 1: Asymptotics")
+    expect(week1.get_by_role("link", name=re.compile("Lecture 1 slides"))).to_be_hidden()
+    week1.locator("summary").click()
+    expect(week1.get_by_role("link", name=re.compile("Lecture 1 slides"))).to_be_visible()
+
+
+def test_search_filter_and_no_results(page: Page, base_url: str) -> None:
+    page.goto(base_url + "/search?q=room")
+    expect(page.get_by_text("Lab 3 room change")).to_be_visible()
+    page.get_by_role("navigation", name="Filter by course").get_by_role(
+        "link", name="CMSC351"
+    ).click()
+    expect(page.get_by_role("heading", name=re.compile("No matches"))).to_be_visible()
 
 
 def test_theme_toggle_persists(page: Page, base_url: str) -> None:

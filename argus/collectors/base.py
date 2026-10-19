@@ -16,7 +16,15 @@ from typing import Protocol
 from argus.clock import Clock
 from argus.collectors.http import Fetcher
 from argus.config import AppConfig, Secrets
-from argus.domain.models import CourseInfo, MeetingRecord, PostRecord, Source, SourceItem
+from argus.domain.models import (
+    CourseInfo,
+    GradeRecord,
+    MeetingRecord,
+    ModuleRecord,
+    PostRecord,
+    Source,
+    SourceItem,
+)
 from argus.store.repo import SourceState
 
 
@@ -52,12 +60,21 @@ class CollectResult:
     # Course codes whose item listing is complete. Records missing from it are marked absent,
     # unless their due date is before the window start (the feed's lookback limit).
     complete_scopes: Mapping[str, datetime | None] = field(default_factory=dict)
+    # Complete module lists per course code (replaces what is stored).
+    modules: Mapping[str, tuple[ModuleRecord, ...]] = field(default_factory=dict)
+    grades: tuple[GradeRecord, ...] = ()
     state_updates: Mapping[str, SourceState] = field(default_factory=dict)
     error: str | None = None
 
     @property
     def record_count(self) -> int:
-        return len(self.items) + len(self.posts) + sum(len(m) for m in self.meetings.values())
+        return (
+            len(self.items)
+            + len(self.posts)
+            + sum(len(m) for m in self.meetings.values())
+            + sum(len(m) for m in self.modules.values())
+            + len(self.grades)
+        )
 
 
 class Collector(Protocol):

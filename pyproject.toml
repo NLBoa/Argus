@@ -81,7 +81,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "argus/clock.py" = ["TID251"]
-"argus/demo.py" = ["PLR0917"]
+"argus/demo.py" = ["PLR0917", "E501"]  # synthetic data reads better unwrapped
 "tests/**" = ["S", "PLR", "ARG", "TID251", "PT012", "PT018", "RUF001"]
 "scripts/**" = ["S", "TID251"]
 

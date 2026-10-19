@@ -97,7 +97,7 @@ def test_health_with_data(client: TestClient) -> None:
     html = client.get("/health").text
     assert "Failing (4 in a row)" in html
     assert "Gradescope page format changed" in html
-    assert "Set ARGUS_CANVAS_TOKEN" in html  # unconfigured hint
+    assert "Set ARGUS_PIAZZA_EMAIL" in html  # unconfigured hint
     assert "Gradescope sync failing" in html  # recent reminder
     assert 'href="/health">Check health' not in html  # no self-link on Health
 
@@ -280,7 +280,9 @@ def test_palette_items(client: TestClient) -> None:
     items = client.get("/palette.json").json()["items"]
     titles = {i["label"] for i in items}
     assert {"Homework 3", "Problem Set 7"} <= titles
-    assert all(i["href"].startswith("/upcoming#item-") for i in items)
+    assert all(
+        i["href"].startswith("/upcoming#item-") for i in items if i["id"].startswith("item-")
+    )
 
 
 def test_manifest_service_worker_offline(client: TestClient) -> None:

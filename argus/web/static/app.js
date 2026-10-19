@@ -22,6 +22,7 @@
     { id: "go-today", label: "Go to Today", hint: "g t", href: "/today" },
     { id: "go-upcoming", label: "Go to Upcoming", hint: "g u", href: "/upcoming" },
     { id: "go-health", label: "Go to Health", hint: "g h", href: "/health" },
+    { id: "go-search", label: "Search", hint: "/", href: "/search" },
     { id: "go-styleguide", label: "Open the styleguide", hint: "", href: "/styleguide" },
     { id: "go-kiosk", label: "Open kiosk view", hint: "", href: "/kiosk" },
     { id: "sync", label: "Sync all sources now", hint: "", action: "sync" },
@@ -29,7 +30,7 @@
     { id: "theme-dark", label: "Use dark theme", hint: "", action: "theme:dark" },
     { id: "theme-system", label: "Match system theme", hint: "", action: "theme:system" },
   ];
-  const GO = { t: "/today", u: "/upcoming", h: "/health" };
+  const GO = { t: "/today", u: "/upcoming", h: "/health", s: "/search" };
 
   const navigate = (href) => {
     if (window.htmx && href.startsWith("/") && !href.startsWith("/kiosk")) {
@@ -98,7 +99,12 @@
           return;
         }
         if (e.key === "g") { this.pending = "g"; setTimeout(() => { this.pending = null; }, 1200); return; }
-        if (e.key === "/") { e.preventDefault(); palette.show(); return; }
+        if (e.key === "/") {
+          e.preventDefault();
+          const box = $("#search-q") || $("#site-search");
+          if (box && box.offsetParent !== null) { box.focus(); box.select(); } else navigate("/search");
+          return;
+        }
         if (e.key === "j" || e.key === "k") {
           const targets = $$("[data-nav-item] [data-nav-target]");
           if (!targets.length) return;

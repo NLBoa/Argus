@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, empty_state, error_banner, course_chip %}
+{% block content %}
+<div class="page-head"><h1 class="page-title">Search</h1></div>
+<form class="search-form mb-6" action="/search" method="get" role="search">
+  <label for="search-q" class="visually-hidden">Search assignments, modules, and posts</label>
+  {{ icon("search") }}
+  <input id="search-q" name="q" type="search" value="{{ q }}" placeholder="Search assignments, modules, and posts" autocomplete="off" {% if not q %}autofocus{% endif %}>
+  {% if course_filter %}<input type="hidden" name="course" value="{{ course_filter }}">{% endif %}
+  <button class="btn btn-primary" type="submit">Search</button>
+</form>
+{% if q %}
+<nav class="flex flex-wrap gap-2 mb-6" aria-label="Filter by course">
+  <a class="btn btn-sm {{ 'btn-primary' if not course_filter else '' }}" href="/search?q={{ q|urlencode }}" {% if not course_filter %}aria-current="page"{% endif %}>All courses</a>
+  {% for c in courses %}<a class="btn btn-sm {{ 'btn-primary' if course_filter == c.code else '' }}" href="/search?q={{ q|urlencode }}&course={{ c.code }}" {% if course_filter == c.code %}aria-current="page"{% endif %}>{{ c.code }}</a>{% endfor %}
+</nav>
+{% endif %}
+{% if error %}
+  {{ error_banner(error, "/search?q=" ~ q|urlencode) }}
+{% elif not q %}
+  <div class="panel">{{ empty_state("search", "Search everything Argus knows", "Assignment instructions, module files, announcements, and Piazza posts. Try \"master theorem\" or \"midterm\".", level=2) }}</div>
+{% elif not groups %}
+  <div class="panel">{{ empty_state("search", "No matches for “" ~ q ~ "”", "Try fewer words, or check the spelling. Search covers what has synced so far.", level=2) }}</div>
+{% else %}
+  {% set total = groups|map(attribute="hits")|map("length")|sum %}
+  <p class="visually-hidden" role="status">{{ total }} result{{ "" if total == 1 else "s" }} for {{ q }}</p>
+  <div class="grid gap-8">
+  {% for g in groups %}
+    <section aria-labelledby="sg-{{ loop.index }}">
+      <h2 class="section-title" id="sg-{{ loop.index }}">{{ g.label }} <span class="section-count">{{ g.hits|length }}</span></h2>
+      <ul class="panel m-0 p-0 list-none">
+        {% for hit, course in g.hits %}
+        <li class="search-hit" data-nav-item>
+          <p class="font-bold">{% if hit.url %}<a href="{{ hit.url }}" data-nav-target {% if hit.url.startswith("http") %}rel="noopener" target="_blank"{% endif %}>{{ hit.title }}{% if hit.url.startswith("http") %}<span class="visually-hidden"> (opens in a new tab)</span>{% endif %}</a>{% else %}<span data-nav-target tabindex="-1">{{ hit.title }}</span>{% endif %}</p>
+          <p class="flex flex-wrap items-center gap-2 mt-1">{{ course_chip(course, "/courses/" ~ course.code) }}</p>
+          {% if hit.snippet %}<p class="search-hit__snippet">{{ hit.snippet|safe }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

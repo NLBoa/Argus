@@ -18,6 +18,7 @@ from argus.reminders.rules import Rule
 from argus.store import repo
 from argus.web.format import clock_time, long_date, relative
 from argus.web.viewmodels import (
+    CourseView,
     DayGroup,
     ItemView,
     SourceStatusView,
@@ -316,4 +317,243 @@ def palette_items(
             "href": f"/upcoming#item-{v.id}",
         }
         for v in views
+    ] + [
+        {
+            "id": f"course-{c.code}",
+            "label": f"Open {c.code}",
+            "hint": "course",
+            "href": f"/courses/{c.code}",
+        }
+        for c in course_views(config).values()
     ]
+
+
+# ---------------------------------------------------------------- course & search
+
+
+@dataclass(frozen=True)
+class MeetingLine:
+    kind: str
+    days: str
+    time: str
+    where: str | None
+
+
+@dataclass(frozen=True)
+class ModuleItemView:
+    title: str
+    type: str
+    icon: str
+    url: str | None
+    indent: int
+    is_header: bool
+
+
+@dataclass(frozen=True)
+class ModuleView:
+    id: str
+    name: str
+    state: str | None
+    items: list[ModuleItemView]
+    digest: str | None
+
+
+@dataclass(frozen=True)
+class CourseLink:
+    label: str
+    url: str
+
+
+@dataclass(frozen=True)
+class CourseData:
+    course: CourseView
+    title: str | None
+    section: str
+    instructors: tuple[str, ...]
+    meetings: list[MeetingLine]
+    tier2: bool  # Canvas token configured: grade and modules exist as concepts
+    grade: str | None
+    grade_updated: str | None
+    modules: list[ModuleView]
+    upcoming: list[ItemView]
+    recent: list[ItemView]
+    posts: list[PostView]
+    links: list[CourseLink]
+
+
+@dataclass(frozen=True)
+class PostView:
+    title: str
+    body: str
+    kind_label: str
+    when: str
+    url: str | None
+    staff: bool
+
+
+_MODULE_ICONS = {
+    "File": "book-open",
+    "Page": "notebook-pen",
+    "Assignment": "list-checks",
+    "Quiz": "circle-help",
+    "Discussion": "megaphone",
+    "ExternalUrl": "external-link",
+    "ExternalTool": "external-link",
+}
+_DAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_POST_KINDS = {
+    "announcement": "Canvas announcement",
+    "syllabus": "Syllabus",
+    "note": "Piazza note",
+    "question": "Piazza question",
+    "instructor_answer": "Instructor answer on Piazza",
+}
+
+
+def load_course(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    configured: dict[str, bool],
+    now: datetime,
+    code: str,
+) -> CourseData | None:
+    row = repo.get_course(conn, code)
+    cfg = config.course(code)
+    if row is None or cfg is None:
+        return None
+    courses = course_views(config)
+    meetings = [
+        MeetingLine(
+            kind=m.kind.capitalize(),
+            days=" ".join(_DAY_ABBR[d] for d in m.days),
+            time=f"{_wall(m.start.hour, m.start.minute)} to {_wall(m.end.hour, m.end.minute)}",
+            where=" ".join(x for x in (m.building, m.room) if x) or None,
+        )
+        for m in repo.list_meetings(conn)
+        if m.course_code == code
+    ]
+    tier2 = configured.get("canvas_modules", False)
+    modules = []
+    if tier2:
+        for sm in repo.list_modules(conn, code):
+            modules.append(
+                ModuleView(
+                    id=f"module-{_module_row_id(conn, code, sm.record.canvas_id)}",
+                    name=sm.record.name,
+                    state=sm.record.state,
+                    items=[
+                        ModuleItemView(
+                            title=i.title,
+                            type=i.type,
+                            icon=_MODULE_ICONS.get(i.type, "link"),
+                            url=i.url,
+                            indent=min(i.indent, 3),
+                            is_header=i.type == "SubHeader",
+                        )
+                        for i in sm.record.items
+                    ],
+                    digest=sm.digest,
+                )
+            )
+    views = [
+        v
+        for v in _views(
+            conn,
+            config,
+            now,
+            due_after=now - timedelta(days=14),
+            due_before=now + timedelta(days=60),
+        )
+        if v.course.code == code
+    ]
+    upcoming = [v for v in views if v.due_at is None or v.due_at >= now]
+    recent = sorted(
+        (v for v in views if v.due_at is not None and v.due_at < now),
+        key=lambda v: v.due_at or now,
+        reverse=True,
+    )
+    posts = [
+        PostView(
+            title=p.title,
+            body=p.body[:400] + ("..." if len(p.body) > 400 else ""),
+            kind_label=_POST_KINDS.get(p.kind, p.kind),
+            when=relative(p.posted_at, now),
+            url=p.url,
+            staff=p.author_role.is_staff,
+        )
+        for p in repo.list_posts(conn, code)
+        if p.author_role.is_staff and p.kind != "syllabus"
+    ][:8]
+    base = config.canvas.base_url.rstrip("/")
+    links = []
+    if cfg.canvas_id:
+        links.append(CourseLink("ELMS", f"{base}/courses/{cfg.canvas_id}"))
+    if cfg.gradescope_id:
+        links.append(
+            CourseLink("Gradescope", f"https://www.gradescope.com/courses/{cfg.gradescope_id}")
+        )
+    if cfg.piazza_network_id:
+        links.append(CourseLink("Piazza", f"https://piazza.com/class/{cfg.piazza_network_id}"))
+    grade = None
+    if row.grade_score is not None:
+        grade = f"{row.grade_score:g}%" + (f" ({row.grade_letter})" if row.grade_letter else "")
+    return CourseData(
+        course=courses[code],
+        title=row.title,
+        section=row.section,
+        instructors=row.instructors,
+        meetings=meetings,
+        tier2=tier2,
+        grade=grade,
+        grade_updated=relative(row.grade_updated_at, now) if row.grade_updated_at else None,
+        modules=modules,
+        upcoming=upcoming,
+        recent=recent[:6],
+        posts=posts,
+        links=links,
+    )
+
+
+def _wall(hour: int, minute: int) -> str:
+    h12 = hour % 12 or 12
+    suffix = "am" if hour < 12 else "pm"
+    return f"{h12}:{minute:02d} {suffix}" if minute else f"{h12} {suffix}"
+
+
+def _module_row_id(conn: sqlite3.Connection, code: str, canvas_id: int) -> int:
+    r = conn.execute(
+        "SELECT m.id FROM modules m JOIN courses c ON c.id = m.course_id"
+        " WHERE c.code = ? AND m.canvas_id = ?",
+        (code, canvas_id),
+    ).fetchone()
+    return int(r[0]) if r else canvas_id
+
+
+@dataclass(frozen=True)
+class SearchGroup:
+    label: str
+    hits: list[tuple[repo.SearchHit, CourseView]]
+
+
+SEARCH_GROUPS = (
+    ("item", "Assignments and exams"),
+    ("module", "Modules"),
+    ("post", "Announcements and posts"),
+)
+
+
+def load_search(
+    conn: sqlite3.Connection, config: AppConfig, text: str, course: str | None
+) -> list[SearchGroup]:
+    courses = course_views(config)
+    hits = repo.search(conn, text, course=course)
+    groups = []
+    for kind, label in SEARCH_GROUPS:
+        matched = [
+            (h, courses.get(h.course) or CourseView(h.course, "slate"))
+            for h in hits
+            if h.kind == kind
+        ]
+        if matched:
+            groups.append(SearchGroup(label, matched))
+    return groups

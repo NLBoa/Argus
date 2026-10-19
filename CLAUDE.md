@@ -48,7 +48,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/worker.py`: the every-minute loop (sync, then reminders). `argus/demo.py`: the synthetic seed (demo and e2e).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
   routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
-- `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, repository functions.
+- `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, and repository functions (including search).
 - `argus/cli.py`: the Typer CLI. `deploy/`: systemd units, installer, kiosk. `scripts/`: dev tooling.
 
 ## Data model
@@ -82,6 +82,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 ## Source quirks
 - Canvas iCal times are UTC.
 - Canvas API pagination uses `Link` headers (`rel="next"`). Follow them; do not compute pages.
+- Canvas omits module `items` for large modules and gives `items_url`, which is also Link-paginated. Announcements
+  need `context_codes[]` per course. Only staff can post them.
 - umd.io meeting times are strings like `9:30am`; umd.io `seats` fields are strings.
 - Gradescope may need a password even for SSO users (set one at gradescope.com).
 - `gradescopeapi` and `piazza-api` are unofficial and break without warning. Their versions are pinned exactly.

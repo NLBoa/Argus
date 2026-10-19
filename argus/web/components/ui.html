@@ -52,7 +52,7 @@
       {%- else %}<span tabindex="-1" data-nav-target>{{ v.title }}</span>{% endif %}
     </p>
     <div class="item-row__meta">
-      {{ course_chip(v.course) }}
+      {{ course_chip(v.course, "/courses/" ~ v.course.code) }}
       <span>{{ v.kind_label }}</span>
       {% if v.done or v.status.value == "in_progress" %}<span>{{ v.status_label }}</span>{% endif %}
       {% if v.estimate and v.actionable %}{{ estimate_pill(v.estimate) }}{% endif %}
@@ -86,10 +86,10 @@
 </li>
 {%- endmacro %}
 
-{% macro empty_state(icon_name, title, text, action_href=None, action_label=None) -%}
+{% macro empty_state(icon_name, title, text, action_href=None, action_label=None, level=3) -%}
 <div class="empty-state">
   {{ icon(icon_name) }}
-  <h3>{{ title }}</h3>
+  <h{{ level }} class="empty-state__title">{{ title }}</h{{ level }}>
   <p>{{ text }}</p>
   {% if action_href %}<a class="btn" href="{{ action_href }}">{{ action_label }}</a>{% endif %}
 </div>

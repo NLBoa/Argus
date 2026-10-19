@@ -39,3 +39,13 @@ def test_palette_open_has_no_violations(page: Page, base_url: str, theme: str) -
     page.get_by_role("combobox").wait_for()
     results = Axe().run(page, options=AXE_OPTIONS)
     assert results.violations_count == 0, results.generate_report()
+
+
+@pytest.mark.parametrize("path", ["/today", "/upcoming", "/health"])
+def test_empty_states_have_no_violations(page: Page, fresh_server, theme: str, path: str) -> None:  # type: ignore[no-untyped-def]
+    s = fresh_server(seed=False)
+    page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
+    page.goto(s.url + path)
+    page.wait_for_load_state("networkidle")
+    results = Axe().run(page, options=AXE_OPTIONS)
+    assert results.violations_count == 0, results.generate_report()

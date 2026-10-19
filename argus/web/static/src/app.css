@@ -123,7 +123,7 @@
   }
   .header-tools { margin-left: auto; display: flex; align-items: center; gap: 0.25rem; }
   @media (max-width: 30rem) {
-    .brand span, .nav-link .icon { display: none; }
+    .brand span, .nav-link .icon, .theme-toggle { display: none; }
     .app-header__inner { gap: 0.5rem; }
     .nav-link { padding: 0.5rem; }
   }
@@ -361,7 +361,7 @@
   /* ------------------------------------------------------------ feedback */
   .empty-state { display: grid; justify-items: center; gap: 0.5rem; text-align: center; padding: 2rem 1rem; color: var(--muted); }
   .empty-state .icon { width: 2rem; height: 2rem; color: var(--brand); }
-  .empty-state h3 { color: var(--ink); font-size: var(--text-lg); }
+  .empty-state__title { color: var(--ink); font-size: var(--text-lg); }
   .empty-state p { max-width: 34ch; }
   .skeleton { display: grid; gap: 0.625rem; }
   .skeleton__line {
@@ -443,6 +443,47 @@
     .timer-bar__what { flex-basis: 100%; }
     .timer-bar__elapsed { margin-right: auto; }
   }
+}
+
+@layer components {
+  /* ------------------------------------------------------------ search */
+  .header-search { position: relative; display: none; }
+  @media (min-width: 56rem) { .header-search { display: block; } }
+  .header-search input {
+    width: 15rem; min-height: 2.25rem; padding: 0.375rem 2.25rem 0.375rem 2.125rem;
+    border-radius: var(--radius-control); border: 1px solid var(--control-line); background: var(--surface);
+    color: var(--ink); font: inherit; font-size: 0.9375rem;
+  }
+  .header-search .icon { position: absolute; left: 0.625rem; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .header-search .kbd { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); pointer-events: none; }
+  .header-search-link { display: inline-flex; }
+  @media (min-width: 56rem) { .header-search-link { display: none; } }
+  .search-form {
+    display: flex; align-items: center; gap: 0.625rem; padding: 0.375rem 0.375rem 0.375rem 0.875rem;
+    background: var(--surface); border: 1px solid var(--control-line); border-radius: var(--radius-panel);
+  }
+  .search-form:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .search-form input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 1.0625rem; padding: 0.375rem 0; }
+  .search-form input:focus { outline: none; }
+  .search-hit { padding: 0.875rem 1.125rem; border-bottom: 1px solid var(--line); }
+  .search-hit:last-child { border-bottom: 0; }
+  .search-hit__snippet { margin-top: 0.375rem; color: var(--muted); font-size: 0.9375rem; overflow-wrap: anywhere; }
+  .search-hit__snippet mark { background: var(--brand-soft); color: var(--ink); border-radius: 3px; padding: 0 0.125rem; font-weight: 700; }
+
+  /* ------------------------------------------------------------ modules */
+  .module__summary {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 1rem;
+    padding: 0.75rem 1.125rem; cursor: pointer; list-style: none; min-height: 2.75rem;
+  }
+  .module__summary::-webkit-details-marker { display: none; }
+  .module__summary::before { content: ""; width: 0.5rem; height: 0.5rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); margin-right: 0.25rem; align-self: center; transition: transform var(--dur-fast); }
+  .module[open] > .module__summary::before { transform: rotate(45deg); }
+  .module__summary > span:first-of-type { flex: 1; }
+  .module__digest { margin: 0 1.125rem 0.75rem; padding: 0.625rem 0.75rem; background: var(--surface-2); border-radius: var(--radius-control); font-size: 0.9375rem; }
+  .module__items { margin: 0 0 0.75rem; padding: 0 1.125rem; list-style: none; display: grid; gap: 0.25rem; }
+  .module__item { display: flex; align-items: center; gap: 0.5rem; padding-left: calc(var(--indent, 0) * 1rem); font-size: 0.9375rem; min-height: 1.75rem; }
+  .module__item .icon { color: var(--muted); }
+  .module__header { padding-left: calc(var(--indent, 0) * 1rem); margin-top: 0.375rem; font-size: 0.8125rem; font-weight: 700; color: var(--muted); }
 }
 
 /* ------------------------------------------------------------ kiosk */

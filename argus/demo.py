@@ -14,7 +14,18 @@ from pydantic import SecretStr
 
 from argus.clock import local_datetime, to_local
 from argus.config import AppConfig, Commitment, CourseConfig, ScheduleConfig, Secrets
-from argus.domain.models import ItemKind, MeetingRecord, Source, SourceItem, Weekday
+from argus.domain.models import (
+    AuthorRole,
+    GradeRecord,
+    ItemKind,
+    MeetingRecord,
+    ModuleItemRecord,
+    ModuleRecord,
+    PostRecord,
+    Source,
+    SourceItem,
+    Weekday,
+)
 from argus.store import repo
 from argus.store.db import iso, transaction
 
@@ -45,6 +56,7 @@ DEMO_CONFIG = AppConfig(
 # Fake values: they make sources show as configured; the demo never syncs.
 DEMO_SECRETS = Secrets(
     canvas_ical_url=SecretStr("https://umd.instructure.com/feeds/calendars/user_DEMO.ics"),
+    canvas_token=SecretStr("demo-canvas-token"),
     gradescope_email="demo@example.test",
     gradescope_password=SecretStr("demo-password"),
 )
@@ -254,4 +266,109 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
             repo.finish_notification(
                 conn, nid, ok=True, channel="ntfy", error=None, now=now - timedelta(hours=hours_ago)
             )
+        _seed_tier2(conn, ids, now)
         repo.refresh_statuses(conn, now)
+        repo.rebuild_search_index(conn)
+
+
+def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
+    """Modules, a grade, and staff posts (what a Canvas token and Piazza add)."""
+    files = f"{CANVAS}/1000001/modules/items"
+
+    def item(n: int, title: str, kind: str = "File", indent: int = 1) -> ModuleItemRecord:
+        return ModuleItemRecord(
+            title, kind, f"{files}/{n}" if kind != "SubHeader" else None, indent
+        )
+
+    modules = [
+        ModuleRecord(
+            "CMSC351",
+            301,
+            "Week 1: Asymptotics",
+            1,
+            (
+                item(1, "Lecture 1 slides: big-O, big-Omega, big-Theta"),
+                item(2, "Growth-rate worksheet", "Page"),
+            ),
+            state="completed",
+        ),
+        ModuleRecord(
+            "CMSC351",
+            302,
+            "Week 2: Recurrences and the master theorem",
+            2,
+            (
+                item(10, "Readings", "SubHeader", 0),
+                item(11, "Lecture 4 slides: the master theorem"),
+                item(12, "Recurrence practice (ungraded)", "Quiz"),
+                item(13, "Homework 2", "Assignment"),
+            ),
+            state="completed",
+        ),
+        ModuleRecord(
+            "CMSC351",
+            303,
+            "Week 7: Dynamic programming",
+            7,
+            (
+                item(20, "Lecture 13 slides: memoization"),
+                item(21, "Lecture 14 slides: longest common subsequence"),
+                item(22, "Homework 4", "Assignment"),
+            ),
+            state="started",
+        ),
+        ModuleRecord(
+            "CMSC351",
+            304,
+            "Week 9: Midterm 1 review",
+            9,
+            (item(30, "Practice midterm (from a past term)"),),
+            state="locked",
+        ),
+    ]
+    repo.replace_modules(conn, ids["CMSC351"], modules, now - timedelta(hours=6))
+    repo.set_grade(conn, GradeRecord("CMSC351", 91.5, "A-"), now - timedelta(hours=6))
+    repo.set_grade(conn, GradeRecord("MATH240", 86.25, "B"), now - timedelta(hours=6))
+    posts = [
+        PostRecord(
+            "canvas",
+            "announcement:1",
+            Source.CANVAS_API,
+            "CMSC351",
+            "Midterm 1 is in class on Wednesday, Oct 28",
+            "Midterm 1 covers lectures 1 through 12: asymptotics, recurrences, the master theorem, and sorting. "
+            "One double-sided cheat sheet is allowed.",
+            now - timedelta(days=2),
+            "demo-a1",
+            AuthorRole.INSTRUCTOR,
+            kind="announcement",
+            url=f"{CANVAS}/1000001/discussion_topics/1",
+        ),
+        PostRecord(
+            "piazza",
+            "demo:41",
+            Source.PIAZZA,
+            "CMSC351",
+            "HW3 problem 2 clarification",
+            "You may assume the graph is connected. Homework 3 is still due tonight at 11:59 pm on Gradescope.",
+            now - timedelta(hours=20),
+            "demo-p41",
+            AuthorRole.TA,
+            kind="instructor_answer",
+            url="https://piazza.com/class/demo/post/41",
+        ),
+        PostRecord(
+            "canvas",
+            "announcement:2",
+            Source.CANVAS_API,
+            "MATH240",
+            "Lab 3 room change",
+            "This week's lab meets in MTH B0425 instead of the usual room.",
+            now - timedelta(days=1),
+            "demo-a2",
+            AuthorRole.INSTRUCTOR,
+            kind="announcement",
+            url=f"{CANVAS}/1000002/discussion_topics/2",
+        ),
+    ]
+    repo.upsert_posts(conn, posts, ids, now)

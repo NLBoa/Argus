@@ -137,3 +137,18 @@ or `missed`, so the student can still mark them done. The due-today list exclude
 **Decision.** Read-only suites (a11y, visual, navigation) share one seeded server on a frozen clock.
 Tests that change data get `fresh_server()`, with its own database, so no test can disturb
 another or the snapshots. All of them use the same synthetic seed as `argus serve --demo`.
+
+## D023 — Search: one FTS5 table, rebuilt after each sync (2026-10-18)
+**Decision.** `search_index` is rebuilt from items, modules, and posts at the end of every sync cycle,
+inside the same transaction as the merge. It holds hundreds of rows, so a rebuild takes milliseconds and can't drift the way triggers can.
+User text never reaches FTS syntax: each word is quoted, and the last becomes a prefix (`repo.fts_query`).
+Snippets use control-character sentinels, are HTML-escaped, and only then get `<mark>`.
+
+## D024 — `/` focuses search; ⌘K opens the palette (2026-10-18)
+**Decision.** The spec gives `/` to search, so it focuses the header search box (on phones, it opens `/search`).
+The command palette, which also lists items and courses, stays on ⌘K/Ctrl+K.
+
+## D025 — Tier 2 is hidden, not empty, without a token (2026-10-18)
+**Decision.** Without `ARGUS_CANVAS_TOKEN`, the Course view omits the grade and modules sections entirely, and nothing
+mentions them. Health lists "ELMS (API)" and "ELMS modules" as not set up, with the one-line fix. Search still
+covers items (iCal descriptions) and posts. Both configurations are tested (`test_web_course.py`).

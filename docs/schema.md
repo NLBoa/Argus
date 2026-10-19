@@ -21,9 +21,13 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `notification_keys` | 0002 | The idempotency keys each notification covers (`<item_id>:<rule>:<due_at>`; a batched message covers several). `key` is the primary key, so no key is ever sent twice |
 | `time_logs` | 0002 | Time spent: `source` `timer`/`sms`/`manual`; `ended_at` NULL while a timer runs (at most one, by a partial unique index) |
 | `rule_mutes` | 0002 | Muted reminder rules, optionally until a time |
+| `modules` | 0003 | Canvas modules per course: name, position, student `state`, items as JSON `[{title, type, url, indent}]` (links only; files stay in Canvas), and `digest` (AI study digest, Phase 5) |
+| `courses.grade_*` | 0003 | Current grade from Canvas enrollments (`grade_score`, `grade_letter`, `grade_updated_at`) |
+| `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 
-Later phases add `findings`, `modules`, `concepts`, `practice_items`, `practice_attempts`,
-`exams`, `estimates`, `plan_blocks`, `inbound_messages`, `vault_regions`, and `proposals`,
+Later phases add `findings`, `concepts`, `practice_items`, `practice_attempts`,
+`exams`, `estimates`, `plan_blocks`, `inbound_messages`, `vault_regions`, and `proposals`
+(the `modules` table landed in 0003),
 each in its own migration, documented here when it lands.
 
 ## items

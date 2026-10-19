@@ -14,6 +14,7 @@ from enum import IntEnum, StrEnum
 class Source(StrEnum):
     CANVAS_ICAL = "canvas_ical"
     CANVAS_API = "canvas_api"
+    CANVAS_MODULES = "canvas_modules"
     GRADESCOPE = "gradescope"
     PIAZZA = "piazza"
     PIAZZA_EMAIL = "piazza_email"
@@ -132,6 +133,34 @@ class MeetingRecord:
     end: time
     building: str | None = None
     room: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleItemRecord:
+    title: str
+    type: str  # File | Page | Assignment | Quiz | Discussion | ExternalUrl | SubHeader | ...
+    url: str | None = None
+    indent: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleRecord:
+    """A Canvas module. Files stay in Canvas: items keep links, never content."""
+
+    course_code: str
+    canvas_id: int
+    name: str
+    position: int
+    items: tuple[ModuleItemRecord, ...] = ()
+    unlock_at: datetime | None = None
+    state: str | None = None  # locked | unlocked | started | completed (student view)
+
+
+@dataclass(frozen=True, slots=True)
+class GradeRecord:
+    course_code: str
+    score: float | None
+    letter: str | None
 
 
 @dataclass(frozen=True, slots=True)

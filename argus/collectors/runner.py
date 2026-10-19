@@ -20,6 +20,7 @@ from argus.clock import Clock
 from argus.collectors.base import CollectContext, Collector, CollectResult, RunStatus
 from argus.collectors.canvas_api import CanvasApiCollector
 from argus.collectors.canvas_ical import CanvasIcalCollector
+from argus.collectors.canvas_modules import CanvasModulesCollector
 from argus.collectors.gradescope import GradescopeCollector
 from argus.collectors.http import AuthError, Fetcher
 from argus.collectors.piazza import PiazzaCollector
@@ -41,6 +42,7 @@ def default_collectors() -> list[Collector]:
     return [
         CanvasIcalCollector(),
         CanvasApiCollector(),
+        CanvasModulesCollector(),
         GradescopeCollector(),
         PiazzaCollector(),
         PiazzaEmailCollector(),
@@ -174,6 +176,7 @@ class SyncRunner:
         with transaction(self.conn):
             report.new_items = repo.apply_merge(self.conn, ids, self.clock.now())
             report.status_changes = repo.refresh_statuses(self.conn, self.clock.now())
+            repo.rebuild_search_index(self.conn)
         for r in results:
             log.info(
                 "sync",
@@ -215,6 +218,11 @@ class SyncRunner:
                         repo.replace_meetings(self.conn, ids[code], "umdio", meetings, now)
                 for info in result.courses:
                     repo.update_course_info(self.conn, info, now)
+                for code, modules in result.modules.items():
+                    if code in ids:
+                        repo.replace_modules(self.conn, ids[code], modules, now)
+                for grade in result.grades:
+                    repo.set_grade(self.conn, grade, now)
                 touched = repo.upsert_posts(self.conn, result.posts, ids, now)
                 for key, state in result.state_updates.items():
                     repo.set_source_state(self.conn, result.source.value, key, state, now)

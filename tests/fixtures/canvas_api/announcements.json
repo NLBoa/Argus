@@ -1,0 +1,26 @@
+[
+  {
+    "id": 880101,
+    "title": "Midterm 1 moved to Thursday",
+    "message": "<p>Because of the campus event, <strong>Midterm 1</strong> moves to Thursday, Nov 5, in class.</p><p>It still covers lectures 1&ndash;12.</p>",
+    "posted_at": "2026-10-18T15:00:00Z",
+    "html_url": "https://umd.instructure.com/courses/1234567/discussion_topics/880101",
+    "context_code": "course_1234567",
+    "author": {"display_name": "Synthetic Professor"}
+  },
+  {
+    "id": 880102,
+    "title": "Office hours this week",
+    "message": "<p>Office hours are in IRB 2107 as usual.</p>",
+    "posted_at": "2026-10-16T13:00:00Z",
+    "html_url": "https://umd.instructure.com/courses/1234568/discussion_topics/880102",
+    "context_code": "course_1234568"
+  },
+  {
+    "id": 880103,
+    "title": "From another course",
+    "message": "<p>ignored</p>",
+    "posted_at": "2026-10-16T13:00:00Z",
+    "context_code": "course_9999999"
+  }
+]

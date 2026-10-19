@@ -25,7 +25,15 @@ from argus.store.db import transaction
 
 log = get_logger(__name__)
 BOOTSTRAP_GRACE = timedelta(minutes=10)
-SOURCES = ("canvas_ical", "canvas_api", "gradescope", "piazza", "piazza_email", "umdio")
+SOURCES = (
+    "canvas_ical",
+    "canvas_api",
+    "canvas_modules",
+    "gradescope",
+    "piazza",
+    "piazza_email",
+    "umdio",
+)
 _TAGS = {
     Rule.DUE_3H: ("rotating_light",),
     Rule.DUE_24H: ("alarm_clock",),
