@@ -19,7 +19,15 @@ from pydantic import SecretStr
 from argus.ai.client import TransportError, TransportResponse
 from argus.capabilities import derive
 from argus.clock import local_datetime, to_local
-from argus.config import AppConfig, Commitment, CourseConfig, PathsConfig, ScheduleConfig, Secrets
+from argus.config import (
+    AppConfig,
+    Commitment,
+    CourseConfig,
+    PathsConfig,
+    ScheduleConfig,
+    Secrets,
+    WorkWindowConfig,
+)
 from argus.domain.models import (
     AuthorRole,
     GradeRecord,
@@ -60,7 +68,11 @@ DEMO_CONFIG = AppConfig(
     schedule=ScheduleConfig(
         commitments=[
             Commitment(title="Dining hall shift", days=["Tue", "Thu"], start=time(17), end=time(20))
-        ]
+        ],
+        work_windows=[
+            WorkWindowConfig(days=["Mon", "Tue", "Wed", "Thu"], start=time(19), end=time(23)),
+            WorkWindowConfig(days=["Sun"], start=time(13), end=time(18)),
+        ],
     ),
 )
 # Fake values: they make sources show as configured; the demo never syncs.

@@ -85,17 +85,51 @@ class Commitment(_Strict):
     end: time
 
 
+class WorkWindowConfig(_Strict):
+    """When you usually work, e.g. Mon-Thu 19:00-23:00 (D057). `days` are the days it starts;
+    an `end` at or before `start` runs past midnight. Classes and commitments inside a window
+    are not counted as work time."""
+
+    days: list[Annotated[str, Field(pattern=r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$")]]
+    start: time
+    end: time
+
+    @model_validator(mode="after")
+    def _valid(self) -> Self:
+        if not self.days:
+            raise ValueError("a work window needs at least one day")
+        if self.start == self.end:
+            raise ValueError("start and end must differ")
+        return self
+
+
+MAX_WINDOWS_PER_DAY = 3
+
+
 class ScheduleConfig(_Strict):
     waking_window: TimeWindow = TimeWindow(start=time(8, 0), end=time(23, 0))
     quiet_hours: TimeWindow = TimeWindow(start=time(23, 0), end=time(8, 0))
     walking_buffer_minutes: int = Field(default=15, ge=0, le=60)
     morning_brief: time = time(8, 0)  # when quiet hours end by default
+    # Deprecated (D057): sessions are gone. Still accepted so existing configs load.
     max_session_minutes: int = Field(default=120, ge=15, le=120)
     commitments: list[Commitment] = []
+    # Only seeds the work windows on first run; after that Settings owns them (D057).
+    work_windows: list[WorkWindowConfig] = []
+
+    @model_validator(mode="after")
+    def _few_windows(self) -> Self:
+        for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"):
+            n = sum(day in w.days for w in self.work_windows)
+            if n > MAX_WINDOWS_PER_DAY:
+                raise ValueError(f"{day} has {n} work windows; at most {MAX_WINDOWS_PER_DAY}")
+        return self
 
 
 class NotificationsConfig(_Strict):
     daily_text_cap: int = Field(default=6, ge=0, le=50)
+    # The work-window message goes out this long before each window starts (D061).
+    window_notice_minutes: int = Field(default=20, ge=0, le=120)
     ntfy_server: str = "https://ntfy.sh"
     # Where notification taps should open the dashboard (your Tailscale name), if anywhere.
     dashboard_url: str | None = None
