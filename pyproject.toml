@@ -17,6 +17,7 @@ dependencies = [
   "python-dateutil>=2.9",
   "gradescopeapi==1.8.1",
   "piazza-api==0.16.0",
+  "python-multipart>=0.0.20",
 ]
 
 [project.scripts]
@@ -64,6 +65,9 @@ select = [
 ignore = [
   "PLR0913",  # many-argument functions are fine for pure domain functions
   "PLR2004",  # magic values are clearer than constants in tests and rules
+  "PLR0911",  # early returns are the clearest shape for rule functions
+  "ARG002",   # protocol implementations must accept the full signature
+  "ARG005",   # factory lambdas often ignore their arguments
   "S101",     # assert is used in tests
   "PLC0415",  # lazy imports keep CLI startup fast on the Pi
 ]
@@ -77,7 +81,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "argus/clock.py" = ["TID251"]
-"tests/**" = ["S", "PLR", "ARG", "TID251", "PT012", "PT018"]
+"argus/demo.py" = ["PLR0917"]
+"tests/**" = ["S", "PLR", "ARG", "TID251", "PT012", "PT018", "RUF001"]
 "scripts/**" = ["S", "TID251"]
 
 # ---------------------------------------------------------------- mypy

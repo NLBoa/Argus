@@ -10,7 +10,7 @@ import json
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from argus.config import AppConfig
 from argus.domain.merge import merge_sources, resolve_item
@@ -30,7 +30,7 @@ from argus.domain.models import (
     Weekday,
 )
 from argus.domain.status import StatusFacts, derive_status
-from argus.store.db import iso, iso_or_none, parse_iso, parse_iso_or_none
+from argus.store.db import iso, iso_or_none, parse_iso, parse_iso_or_none, transaction
 
 # ---------------------------------------------------------------- helpers
 
@@ -470,6 +470,7 @@ def _row_to_item(r: sqlite3.Row, links: tuple[ItemLink, ...]) -> Item:
         description=r["description"],
         date_conflict=conflict,
         links=links,
+        created_at=parse_iso(r["created_at"]),
     )
 
 
@@ -678,6 +679,7 @@ class SourceHealth:
     last_status: str | None
     last_error: str | None
     failures: int
+    failing_since: datetime | None = None  # start of the current failure streak
 
 
 def source_health(conn: sqlite3.Connection, sources: Iterable[str]) -> dict[str, SourceHealth]:
@@ -686,12 +688,293 @@ def source_health(conn: sqlite3.Connection, sources: Iterable[str]) -> dict[str,
         runs = recent_sync_runs(conn, s, limit=50)
         ok = next((r for r in runs if r.status in ("ok", "unchanged")), None)
         last = runs[0] if runs else None
+        streak = []
+        for r in runs:
+            if r.status in ("ok", "unchanged"):
+                break
+            if r.status in ("error", "auth_error"):
+                streak.append(r)
         out[s] = SourceHealth(
             source=s,
             last_attempt=last.started_at if last else None,
             last_success=ok.finished_at if ok else None,
             last_status=last.status if last else None,
             last_error=last.error if last else None,
-            failures=consecutive_failures(conn, s),
+            failures=len(streak),
+            failing_since=streak[-1].started_at if streak else None,
         )
     return out
+
+
+# ---------------------------------------------------------------- student actions
+
+
+def set_user_done(conn: sqlite3.Connection, item_id: int, done: bool, now: datetime) -> bool:
+    """Mark (or unmark) an item done by the student. Returns False if no such item."""
+    cur = conn.execute(
+        "UPDATE items SET user_done_at = ?, updated_at = ? WHERE id = ? AND removed_at IS NULL",
+        (iso(now) if done else None, iso(now), item_id),
+    )
+    return cur.rowcount == 1
+
+
+# ---------------------------------------------------------------- time logs
+
+
+@dataclass(frozen=True, slots=True)
+class TimeLog:
+    id: int
+    item_id: int
+    started_at: datetime
+    ended_at: datetime | None
+    source: str
+
+    def hours(self, now: datetime) -> float:
+        end = self.ended_at or now
+        return max(0.0, (end - self.started_at).total_seconds() / 3600)
+
+
+def _row_to_log(r: sqlite3.Row) -> TimeLog:
+    return TimeLog(
+        r["id"],
+        r["item_id"],
+        parse_iso(r["started_at"]),
+        parse_iso_or_none(r["ended_at"]),
+        r["source"],
+    )
+
+
+def running_timer(conn: sqlite3.Connection) -> TimeLog | None:
+    r = conn.execute("SELECT * FROM time_logs WHERE ended_at IS NULL").fetchone()
+    return _row_to_log(r) if r else None
+
+
+def start_timer(conn: sqlite3.Connection, item_id: int, now: datetime) -> TimeLog:
+    """Start timing an item, stopping any other running timer first."""
+    stop_timer(conn, now)
+    conn.execute(
+        "INSERT INTO time_logs (item_id, started_at, source, created_at) VALUES (?, ?, 'timer', ?)",
+        (item_id, iso(now), iso(now)),
+    )
+    conn.execute(
+        "UPDATE items SET started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?",
+        (iso(now), iso(now), item_id),
+    )
+    timer = running_timer(conn)
+    assert timer is not None
+    return timer
+
+
+def stop_timer(conn: sqlite3.Connection, now: datetime) -> TimeLog | None:
+    timer = running_timer(conn)
+    if timer is None:
+        return None
+    conn.execute(
+        "UPDATE time_logs SET ended_at = ? WHERE id = ?",
+        (iso(max(now, timer.started_at)), timer.id),
+    )
+    return TimeLog(
+        timer.id, timer.item_id, timer.started_at, max(now, timer.started_at), timer.source
+    )
+
+
+def log_time(
+    conn: sqlite3.Connection, item_id: int, hours: float, now: datetime, source: str = "manual"
+) -> None:
+    """Record time already spent (e.g. `LOG n h`), ending now."""
+    if not 0 < hours <= 24:
+        raise ValueError("hours must be between 0 and 24")
+    start = now - timedelta(hours=hours)
+    conn.execute(
+        """INSERT INTO time_logs (item_id, started_at, ended_at, source, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (item_id, iso(start), iso(now), source, iso(now)),
+    )
+    conn.execute(
+        "UPDATE items SET started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?",
+        (iso(start), iso(now), item_id),
+    )
+
+
+def time_logs_for(conn: sqlite3.Connection, item_id: int) -> list[TimeLog]:
+    rows = conn.execute(
+        "SELECT * FROM time_logs WHERE item_id = ? ORDER BY started_at", (item_id,)
+    ).fetchall()
+    return [_row_to_log(r) for r in rows]
+
+
+# ---------------------------------------------------------------- notifications
+
+
+@dataclass(frozen=True, slots=True)
+class NotificationRow:
+    id: int
+    key: str
+    rule: str
+    status: str
+    title: str
+    body: str
+    item_ids: tuple[int, ...]
+    priority: int
+    counts_toward_cap: bool
+    attempts: int
+    channel: str | None
+    created_at: datetime
+    sent_at: datetime | None
+    expires_at: datetime | None = None
+    error: str | None = None
+
+
+def _row_to_notification(r: sqlite3.Row) -> NotificationRow:
+    return NotificationRow(
+        id=r["id"],
+        key=r["key"],
+        rule=r["rule"],
+        status=r["status"],
+        title=r["title"],
+        body=r["body"],
+        item_ids=tuple(json.loads(r["item_ids"])),
+        priority=r["priority"],
+        counts_toward_cap=bool(r["counts_toward_cap"]),
+        attempts=r["attempts"],
+        channel=r["channel"],
+        created_at=parse_iso(r["created_at"]),
+        sent_at=parse_iso_or_none(r["sent_at"]),
+        expires_at=parse_iso_or_none(r["expires_at"]),
+        error=r["error"],
+    )
+
+
+def claim_notification(
+    conn: sqlite3.Connection,
+    *,
+    keys: Sequence[str],
+    rule: str,
+    title: str,
+    body: str,
+    item_ids: Sequence[int],
+    priority: int,
+    counts_toward_cap: bool,
+    now: datetime,
+    expires_at: datetime | None = None,
+) -> int | None:
+    """Insert a pending notification covering every key, atomically.
+
+    Returns its id, or None if any key was already claimed (then nothing is written).
+    """
+    if not keys:
+        raise ValueError("a notification needs at least one idempotency key")
+    marks = ",".join("?" * len(keys))
+    taken = conn.execute(
+        f"SELECT 1 FROM notification_keys WHERE key IN ({marks}) LIMIT 1",  # noqa: S608
+        tuple(keys),
+    ).fetchone()
+    if taken:
+        return None
+    with transaction(conn):
+        cur = conn.execute(
+            """INSERT INTO notifications (key, rule, status, title, body, item_ids, priority,
+                 counts_toward_cap, expires_at, created_at)
+               VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                keys[0],
+                rule,
+                title,
+                body,
+                json.dumps(list(item_ids)),
+                priority,
+                int(counts_toward_cap),
+                iso_or_none(expires_at),
+                iso(now),
+            ),
+        )
+        nid = int(cur.lastrowid or 0)
+        conn.executemany(
+            "INSERT INTO notification_keys (key, notification_id) VALUES (?, ?)",
+            [(k, nid) for k in keys],
+        )
+    return nid
+
+
+def finish_notification(
+    conn: sqlite3.Connection,
+    notification_id: int,
+    *,
+    ok: bool,
+    channel: str | None,
+    error: str | None,
+    now: datetime,
+) -> None:
+    conn.execute(
+        """UPDATE notifications SET status = ?, channel = ?, error = ?, attempts = attempts + 1,
+             sent_at = CASE WHEN ? THEN ? ELSE sent_at END
+           WHERE id = ?""",
+        ("sent" if ok else "failed", channel, error, int(ok), iso(now), notification_id),
+    )
+
+
+def notification_keys(conn: sqlite3.Connection) -> set[str]:
+    return {r["key"] for r in conn.execute("SELECT key FROM notification_keys")}
+
+
+def retryable_notifications(
+    conn: sqlite3.Connection, now: datetime, max_attempts: int = 3
+) -> list[NotificationRow]:
+    """Failed (or never-finished) sends that are still relevant."""
+    rows = conn.execute(
+        """SELECT * FROM notifications
+           WHERE status IN ('failed', 'pending') AND attempts < ?
+             AND (expires_at IS NULL OR expires_at > ?)
+           ORDER BY id""",
+        (max_attempts, iso(now)),
+    ).fetchall()
+    return [_row_to_notification(r) for r in rows]
+
+
+def notifications_sent_between(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> list[NotificationRow]:
+    rows = conn.execute(
+        """SELECT * FROM notifications WHERE status = 'sent' AND sent_at >= ? AND sent_at < ?
+           ORDER BY sent_at""",
+        (iso(start), iso(end)),
+    ).fetchall()
+    return [_row_to_notification(r) for r in rows]
+
+
+def recent_notifications(conn: sqlite3.Connection, limit: int = 20) -> list[NotificationRow]:
+    rows = conn.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [_row_to_notification(r) for r in rows]
+
+
+# ---------------------------------------------------------------- rule mutes
+
+
+def set_rule_mute(
+    conn: sqlite3.Connection, rule: str, muted: bool, now: datetime, until: datetime | None = None
+) -> None:
+    if muted:
+        conn.execute(
+            """INSERT INTO rule_mutes (rule, muted_until, created_at) VALUES (?, ?, ?)
+               ON CONFLICT (rule) DO UPDATE SET muted_until = excluded.muted_until""",
+            (rule, iso_or_none(until), iso(now)),
+        )
+    else:
+        conn.execute("DELETE FROM rule_mutes WHERE rule = ?", (rule,))
+
+
+def muted_rules(conn: sqlite3.Connection, now: datetime) -> set[str]:
+    out: set[str] = set()
+    for r in conn.execute("SELECT rule, muted_until FROM rule_mutes"):
+        until = parse_iso_or_none(r["muted_until"])
+        if until is None or until > now:
+            out.add(r["rule"])
+    return out
+
+
+def first_success_at(conn: sqlite3.Connection) -> datetime | None:
+    """When the very first successful sync finished (the end of the initial import)."""
+    r = conn.execute(
+        "SELECT MIN(finished_at) FROM sync_runs WHERE status IN ('ok', 'unchanged')"
+    ).fetchone()
+    return parse_iso_or_none(r[0])

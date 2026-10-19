@@ -1,15 +1,58 @@
+{% from "components/ui.html" import icon, logo, stale_banner, offline_banner %}
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme in ("light", "dark") %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Argus{% endblock %}</title>
-  <link rel="stylesheet" href="/static/dist/app.css">
+  <title>{% block title %}{{ page_title }}{% endblock %} | Argus</title>
+  <meta name="description" content="Argus: your courses, deadlines, and study plan.">
+  <meta name="theme-color" content="#0b636b" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+  <link rel="preload" href="/static/fonts/ahn-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ asset('dist/app.css') }}">
+  <link rel="icon" href="{{ asset('icons/argus.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ asset('icons/argus-192.png') }}">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script src="{{ asset('app.js') }}" defer></script>
+  <script src="{{ asset('vendor/alpine.min.js') }}" defer></script>
+  <script src="{{ asset('vendor/htmx.min.js') }}" defer></script>
+  <style>[x-cloak] { display: none !important; }</style>
 </head>
-<body class="min-h-screen bg-white text-slate-900">
-  <a class="sr-only focus:not-sr-only" href="#main">Skip to content</a>
-  <main id="main" class="mx-auto max-w-3xl p-4">
+<body x-data hx-headers='{"X-Requested-With": "argus"}' @keydown.window="$store.keys.handle($event)">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="progress-bar" aria-hidden="true"></div>
+  <header class="app-header">
+    <div class="app-header__inner">
+      <a class="brand" href="/today" aria-label="Argus, go to Today">{{ logo() }}<span>Argus</span></a>
+      <nav class="nav" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+        {% for href, label, ico in [("/today", "Today", "house"), ("/upcoming", "Upcoming", "calendar-days"), ("/health", "Health", "activity")] %}
+        <a class="nav-link" href="{{ href }}" {% if active == href %}aria-current="page"{% endif %}>{{ icon(ico, "icon-sm") }}{{ label }}</a>
+        {% endfor %}
+      </nav>
+      <div class="header-tools">
+        <button class="btn btn-quiet btn-icon" type="button" @click="$store.palette.show()" aria-label="Open command palette" title="Command palette (Ctrl K)">{{ icon("command") }}</button>
+        <button class="btn btn-quiet btn-icon" type="button" x-data @click="$store.theme.cycle()" :aria-label="$store.theme.label" aria-label="Theme: match system" title="Change theme">
+          <span x-show="$store.theme.mode === 'light'" x-cloak>{{ icon("sun") }}</span>
+          <span x-show="$store.theme.mode === 'dark'" x-cloak>{{ icon("moon") }}</span>
+          <span x-show="$store.theme.mode === 'system'">{{ icon("monitor") }}</span>
+        </button>
+      </div>
+    </div>
+  </header>
+  <main id="main" class="page" tabindex="-1" data-page="{{ active }}">
+    <div class="grid gap-2 mb-4 empty:hidden" id="banners">{{ offline_banner() }}{{ stale_banner(stale, link=active != '/health') }}</div>
     {% block content %}{% endblock %}
   </main>
+  <div class="toast-region" aria-live="polite" aria-atomic="false" x-data>
+    <template x-for="t in $store.toasts.items" :key="t.id">
+      <div class="toast toast-enter" :data-kind="t.kind">
+        <span x-show="t.kind !== 'error'">{{ icon("circle-check") }}</span><span x-show="t.kind === 'error'">{{ icon("circle-alert") }}</span>
+        <span class="flex-1" x-text="t.message"></span>
+        <button class="btn btn-quiet btn-icon btn-sm" type="button" @click="$store.toasts.dismiss(t.id)" aria-label="Dismiss">{{ icon("x", "icon-sm") }}</button>
+      </div>
+    </template>
+  </div>
+  {% include "components/palette.html" %}
+  <script type="application/json" id="argus-boot">{{ boot|tojson }}</script>
 </body>
 </html>

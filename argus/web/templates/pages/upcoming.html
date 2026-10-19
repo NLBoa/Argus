@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, item_row, empty_state, error_banner, course_chip %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Upcoming</h1>
+  <p class="page-sub">Next {{ days }} days</p>
+</div>
+{% if error %}
+  {{ error_banner(error, "/upcoming") }}
+{% else %}
+<nav class="flex flex-wrap gap-2 mb-6" aria-label="Filter by course" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML">
+  <a class="btn btn-sm {{ 'btn-primary' if not course_filter else '' }}" href="/upcoming" {% if not course_filter %}aria-current="page"{% endif %}>All courses</a>
+  {% for c in courses %}<a class="btn btn-sm {{ 'btn-primary' if course_filter == c.code else '' }}" href="/upcoming?course={{ c.code }}" data-accent="{{ c.accent }}" {% if course_filter == c.code %}aria-current="page"{% endif %}>{{ c.code }}</a>{% endfor %}
+</nav>
+{% if groups %}
+  <div class="grid gap-8">
+  {% for group in groups %}
+    <section aria-labelledby="day-{{ loop.index }}">
+      <h2 class="section-title" id="day-{{ loop.index }}">{{ group.label }}{% if group.day and group.label not in ("Today", "Tomorrow") and "," not in group.label %} <span class="section-count">{{ group.day.strftime("%b") }} {{ group.day.day }}</span>{% endif %} <span class="section-count">{{ group.items|length }} item{{ "" if group.items|length == 1 else "s" }}</span></h2>
+      <ul class="item-list m-0 p-0 list-none">{% for v in group.items %}{{ item_row(v) }}{% endfor %}</ul>
+    </section>
+  {% endfor %}
+  </div>
+{% else %}
+  <div class="panel">{{ empty_state("calendar-days", "Nothing due in the next " ~ days ~ " days", "When ELMS or Gradescope lists something new, it shows up here within half an hour.", "/health", "Check sources") }}</div>
+{% endif %}
+{% endif %}
+{% endblock %}

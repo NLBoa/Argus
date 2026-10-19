@@ -1,0 +1,146 @@
+/* Argus design tokens. The one source of truth for color, type, space, radius, elevation, motion.
+   Contrast is enforced by tests/unit/test_tokens_contrast.py: edit values, run the test. */
+
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/static/fonts/ahn-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/static/fonts/ahn-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  color-scheme: light;
+  /* surfaces and ink */
+  --paper: #eef2f5;
+  --surface: #ffffff;
+  --surface-2: #f5f7f9;
+  --ink: #132033;
+  --muted: #4d5a6b;
+  --line: #d5dce4;
+  --control-line: #7b8797;
+  /* brand: peacock teal; needle: bronze "now" */
+  --brand: #0b636b;
+  --brand-hover: #084c52;
+  --brand-ink: #ffffff;
+  --brand-soft: #dceff0;
+  --needle: #9a5d00;
+  --focus: #0b636b;
+  /* risk */
+  --ok: #1d6b45;
+  --ok-bg: #e2f2e9;
+  --watch: #7d5100;
+  --watch-bg: #fbefd6;
+  --at-risk: #a53b0c;
+  --at-risk-bg: #fde6da;
+  --overdue: #9e1230;
+  --overdue-bg: #fae0e6;
+  --overdue-ink: #ffffff;
+  /* course accents: stripe (non-text, 3:1), soft background, ink on soft */
+  --c-indigo: #4a50c8; --c-indigo-bg: #e8e9fb; --c-indigo-ink: #2f3496;
+  --c-teal: #0f7b7b; --c-teal-bg: #dcf1f0; --c-teal-ink: #0a5757;
+  --c-plum: #8a3d8f; --c-plum-bg: #f4e4f5; --c-plum-ink: #6a2b6f;
+  --c-ochre: #996100; --c-ochre-bg: #f8ecd2; --c-ochre-ink: #6b4400;
+  --c-rose: #b8325b; --c-rose-bg: #fbe3ea; --c-rose-ink: #8c2243;
+  --c-sky: #1f6fb2; --c-sky-bg: #e0eefa; --c-sky-ink: #17558a;
+  --c-olive: #5e7316; --c-olive-bg: #ecf2d9; --c-olive-ink: #46560f;
+  --c-slate: #5c6b80; --c-slate-bg: #e6eaf0; --c-slate-ink: #3d4859;
+  /* elevation (overlays only) */
+  --shadow-overlay: 0 12px 32px -8px rgb(19 32 51 / 0.28), 0 2px 6px rgb(19 32 51 / 0.12);
+  /* motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0b1220;
+  --surface: #121b2c;
+  --surface-2: #18233a;
+  --ink: #e6ebf3;
+  --muted: #a3afc0;
+  --line: #27334b;
+  --control-line: #6d7b92;
+  --brand: #56c6cc;
+  --brand-hover: #7fd6da;
+  --brand-ink: #062a2d;
+  --brand-soft: #123a40;
+  --needle: #e2b153;
+  --focus: #7fd6da;
+  --ok: #6fd4a0;
+  --ok-bg: #12352a;
+  --watch: #f0c45c;
+  --watch-bg: #382c10;
+  --at-risk: #ff9a6b;
+  --at-risk-bg: #3d2117;
+  --overdue: #ff8597;
+  --overdue-bg: #3e1621;
+  --overdue-ink: #2a0911;
+  --c-indigo: #8f95f2; --c-indigo-bg: #23264d; --c-indigo-ink: #c5c8fb;
+  --c-teal: #4cc3c0; --c-teal-bg: #113a3b; --c-teal-ink: #a8e6e4;
+  --c-plum: #d38ad8; --c-plum-bg: #3a2140; --c-plum-ink: #efc6f1;
+  --c-ochre: #e0ad4a; --c-ochre-bg: #3a2c12; --c-ochre-ink: #f3d79d;
+  --c-rose: #f28aa8; --c-rose-bg: #40202b; --c-rose-ink: #f9c4d3;
+  --c-sky: #72b3ec; --c-sky-bg: #16304a; --c-sky-ink: #bcdcf7;
+  --c-olive: #b3cc5c; --c-olive-bg: #2a3315; --c-olive-ink: #dbe9a8;
+  --c-slate: #9aa8bd; --c-slate-bg: #253045; --c-slate-ink: #d3dbe7;
+  --shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0b1220;
+    --surface: #121b2c;
+    --surface-2: #18233a;
+    --ink: #e6ebf3;
+    --muted: #a3afc0;
+    --line: #27334b;
+    --control-line: #6d7b92;
+    --brand: #56c6cc;
+    --brand-hover: #7fd6da;
+    --brand-ink: #062a2d;
+    --brand-soft: #123a40;
+    --needle: #e2b153;
+    --focus: #7fd6da;
+    --ok: #6fd4a0;
+    --ok-bg: #12352a;
+    --watch: #f0c45c;
+    --watch-bg: #382c10;
+    --at-risk: #ff9a6b;
+    --at-risk-bg: #3d2117;
+    --overdue: #ff8597;
+    --overdue-bg: #3e1621;
+    --overdue-ink: #2a0911;
+  --overdue-ink: #2a0911;
+    --c-indigo: #8f95f2; --c-indigo-bg: #23264d; --c-indigo-ink: #c5c8fb;
+    --c-teal: #4cc3c0; --c-teal-bg: #113a3b; --c-teal-ink: #a8e6e4;
+    --c-plum: #d38ad8; --c-plum-bg: #3a2140; --c-plum-ink: #efc6f1;
+    --c-ochre: #e0ad4a; --c-ochre-bg: #3a2c12; --c-ochre-ink: #f3d79d;
+    --c-rose: #f28aa8; --c-rose-bg: #40202b; --c-rose-ink: #f9c4d3;
+    --c-sky: #72b3ec; --c-sky-bg: #16304a; --c-sky-ink: #bcdcf7;
+    --c-olive: #b3cc5c; --c-olive-bg: #2a3315; --c-olive-ink: #dbe9a8;
+    --c-slate: #9aa8bd; --c-slate-bg: #253045; --c-slate-ink: #d3dbe7;
+    --shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+  }
+}

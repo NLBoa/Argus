@@ -87,6 +87,8 @@ class ScheduleConfig(_Strict):
 class NotificationsConfig(_Strict):
     daily_text_cap: int = Field(default=6, ge=0, le=50)
     ntfy_server: str = "https://ntfy.sh"
+    # Where notification taps should open the dashboard (your Tailscale name), if anywhere.
+    dashboard_url: str | None = None
 
 
 class AIModels(_Strict):

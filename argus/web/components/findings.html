@@ -1,0 +1,21 @@
+{% from "components/ui.html" import icon, course_chip %}
+{% macro finding_card(f) -%}
+<article class="panel finding-card" data-accent="{{ f.course.accent }}" id="finding-{{ f.id }}" aria-labelledby="finding-{{ f.id }}-title">
+  <div class="finding-card__head">
+    {{ course_chip(f.course) }}
+    <span class="text-sm text-muted">{{ f.kind_label }}</span>
+    {% if f.state == "conflict" %}<span class="tag-conflict">{{ icon("git-compare", "icon-sm") }}Disagrees with {{ f.official_name }}</span>{% endif %}
+    {% if f.state == "applied" %}<span class="tag-announced">{{ icon("megaphone", "icon-sm") }}Applied</span>{% endif %}
+  </div>
+  <h3 class="mt-2 text-lg" id="finding-{{ f.id }}-title">{{ f.title }}</h3>
+  {% if f.date_text %}<p class="text-sm"><strong>{{ f.date_text }}</strong>{% if f.official_text %}, while {{ f.official_name }} says <strong>{{ f.official_text }}</strong>{% endif %}</p>{% endif %}
+  <blockquote>"{{ f.quote }}"</blockquote>
+  <p class="text-sm text-muted">From <a href="{{ f.source_url }}" rel="noopener" target="_blank">{{ f.source_name }}<span class="visually-hidden"> (opens in a new tab)</span></a>, {{ f.posted_text }}</p>
+  {% if f.state in ("pending", "conflict") %}
+  <div class="finding-card__actions">
+    <button class="btn btn-primary btn-sm" type="button" hx-post="/findings/{{ f.id }}/confirm" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML">{{ icon("check", "icon-sm") }}{{ f.confirm_label }}</button>
+    <button class="btn btn-sm" type="button" hx-post="/findings/{{ f.id }}/dismiss" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML">{{ icon("x", "icon-sm") }}Dismiss</button>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}

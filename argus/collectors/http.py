@@ -93,6 +93,7 @@ class Fetcher:
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
         data: Mapping[str, str] | None = None,
+        json_body: Mapping[str, Any] | None = None,
         etag: str | None = None,
         last_modified: str | None = None,
         auth_statuses: frozenset[int] = frozenset({401, 403}),
@@ -106,7 +107,14 @@ class Fetcher:
         for attempt in range(self.max_attempts):
             retry_after: str | None = None
             try:
-                r = await self._client.request(method, url, params=params, headers=hdrs, data=data)
+                r = await self._client.request(
+                    method,
+                    url,
+                    params=params,
+                    headers=hdrs,
+                    data=data,
+                    json=dict(json_body) if json_body is not None else None,
+                )
             except httpx.TransportError as e:
                 last_error = f"{type(e).__name__}"
             else:
@@ -125,6 +133,9 @@ class Fetcher:
         raise FetchError(
             f"{method} {_redacted(url)} failed after {self.max_attempts} attempts: {last_error}"
         )
+
+    async def post_json(self, url: str, payload: Mapping[str, Any]) -> Response:
+        return await self.request("POST", url, json_body=payload)
 
     async def get(self, url: str, **kw: Any) -> Response:
         return await self.request("GET", url, **kw)

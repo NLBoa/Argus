@@ -12,7 +12,7 @@ from argus.collectors.umdio import API as UMDIO
 from argus.config import load_config
 from argus.domain.models import ItemKind, Source, SourceItem
 from argus.store import repo
-from argus.store.db import open_db, transaction
+from argus.store.db import available_migrations, open_db, transaction
 from tests.conftest import FIXTURES
 from tests.integration.conftest import fixture_bytes
 
@@ -34,7 +34,8 @@ def config_path(tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatc
 def test_db_migrate(config_path: Path) -> None:
     result = runner.invoke(cli.app, ["db", "migrate", "-c", str(config_path)])
     assert result.exit_code == 0, result.output
-    assert "schema version 1 (applied 1)" in result.output
+    n = len(available_migrations())
+    assert f"schema version {n} (applied {n})" in result.output
     again = runner.invoke(cli.app, ["db", "migrate", "-c", str(config_path)])
     assert "(applied 0)" in again.output
 

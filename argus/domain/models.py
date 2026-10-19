@@ -203,6 +203,7 @@ class Item:
     description: str | None = None
     date_conflict: tuple[tuple[Source, datetime], ...] = ()
     links: tuple[ItemLink, ...] = ()
+    created_at: datetime | None = None
 
     @property
     def announced(self) -> bool:

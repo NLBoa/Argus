@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, item_row, empty_state, error_banner %}
+{% from "components/timeline.html" import day_rail %}
+{% block content %}
+{% if error %}
+  <div class="page-head"><h1 class="page-title">Today</h1></div>
+  {{ error_banner(error, "/today") }}
+{% else %}
+<div class="page-head">
+  <h1 class="page-title">{{ data.date_text }}</h1>
+  <p class="page-sub">{{ data.summary }}</p>
+</div>
+{% if data.timer %}
+<section class="timer-bar mb-6" aria-label="Running timer" x-data="timer({{ data.timer.elapsed_seconds|int }})">
+  {{ icon("timer", "icon-lg") }}
+  <p class="timer-bar__what"><span class="block text-sm text-muted">Working on</span><strong>{{ data.timer.item.title }}</strong> <span class="text-muted">({{ data.timer.item.course.code }})</span></p>
+  <span class="timer-bar__elapsed" x-text="text" aria-label="Elapsed time">{{ data.timer.elapsed_seconds|elapsed }}</span>
+  <form method="post" action="/timer/stop" hx-post="/timer/stop" hx-target="main" hx-select="main" hx-swap="outerHTML">
+    <button class="btn btn-primary" type="submit">{{ icon("square", "icon-sm") }}Stop timer</button>
+  </form>
+</section>
+{% endif %}
+<div class="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+  <section class="order-2 lg:order-1" aria-labelledby="day-heading">
+    <h2 class="section-title" id="day-heading">Your day</h2>
+    <div class="panel panel-pad">
+      {% if data.timeline.empty %}
+        {{ empty_state("calendar-clock", "No classes today", "Your schedule is open. Planned work sessions will show here once estimates exist.") }}
+      {% else %}
+        {{ day_rail(data.timeline) }}
+      {% endif %}
+    </div>
+  </section>
+  <div class="order-1 lg:order-2 grid gap-8 content-start">
+    {% for group in data.groups %}
+    <section aria-labelledby="g-{{ loop.index }}">
+      <h2 class="section-title" id="g-{{ loop.index }}">{{ group.label }} <span class="section-count">{{ group.items|length }}</span></h2>
+      {% if group.items %}
+        <ul class="item-list m-0 p-0 list-none">{% for v in group.items %}{{ item_row(v) }}{% endfor %}</ul>
+      {% else %}
+        <div class="panel">{{ empty_state(group.empty_icon, group.empty_title, group.empty_text) }}</div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

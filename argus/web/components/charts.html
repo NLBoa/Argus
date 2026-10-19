@@ -1,0 +1,42 @@
+{#- Hand-built SVG charts. Each has a text equivalent for assistive tech. -#}
+{% macro workload_chart(days, title="Hours needed against free hours") -%}
+{%- set width = 640 -%}{%- set height = 220 -%}{%- set pad_l = 32 -%}{%- set pad_b = 28 -%}
+{%- set top = [((days|map(attribute="free_hours")|max) if days else 0), ((days|map(attribute="need_hours")|max) if days else 0), 4]|max -%}
+{%- set scale = (height - pad_b - 8) / top -%}
+{%- set slot = (width - pad_l) / ([days|length, 1]|max) -%}
+<figure class="m-0">
+  <svg class="workload" viewBox="0 0 {{ width }} {{ height }}" role="img" aria-labelledby="wl-title">
+    <title id="wl-title">{{ title }}</title>
+    {% for tick in range(0, (top|round(0, 'ceil')|int) + 1, ((top / 4)|round(0, 'ceil')|int) or 1) %}
+      {%- set y = height - pad_b - tick * scale -%}
+      <line class="grid" x1="{{ pad_l }}" x2="{{ width }}" y1="{{ y }}" y2="{{ y }}"/>
+      <text class="axis" x="{{ pad_l - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ tick }}</text>
+    {% endfor %}
+    {% for d in days %}
+      {%- set x = pad_l + loop.index0 * slot + slot * 0.18 -%}
+      {%- set w = slot * 0.64 -%}
+      <rect class="bar-free" x="{{ x }}" y="{{ height - pad_b - d.free_hours * scale }}" width="{{ w }}" height="{{ d.free_hours * scale }}" rx="3"/>
+      <rect class="bar-need" data-over="{{ 'true' if d.need_hours > d.free_hours else 'false' }}" x="{{ x + w * 0.2 }}" y="{{ height - pad_b - d.need_hours * scale }}" width="{{ w * 0.6 }}" height="{{ d.need_hours * scale }}" rx="2"/>
+      <text class="axis" x="{{ x + w / 2 }}" y="{{ height - 8 }}" text-anchor="middle">{{ d.short_label }}</text>
+    {% endfor %}
+  </svg>
+  <figcaption class="legend mt-2"><span><i style="background: var(--brand)"></i>Hours needed</span><span><i style="background: var(--at-risk)"></i>More than free time</span><span><i style="background: var(--surface-2); border: 1px solid var(--control-line)"></i>Free hours</span></figcaption>
+  <table class="visually-hidden">
+    <caption>{{ title }}</caption>
+    <tr><th scope="col">Day</th><th scope="col">Needed</th><th scope="col">Free</th></tr>
+    {% for d in days %}<tr><th scope="row">{{ d.label }}</th><td>{{ d.need_hours|hours }}</td><td>{{ d.free_hours|hours }}</td></tr>{% endfor %}
+  </table>
+</figure>
+{%- endmacro %}
+
+{% macro readiness_meter(solid, shaky, untested, label="Readiness") -%}
+{%- set total = [solid + shaky + untested, 1]|max -%}
+<div class="readiness">
+  <div class="readiness__bar" role="img" aria-label="{{ label }}: {{ solid }} solid, {{ shaky }} shaky, {{ untested }} untested">
+    <span class="readiness__seg--solid" style="width: {{ (solid / total * 100)|round(2) }}%"></span>
+    <span class="readiness__seg--shaky" style="width: {{ (shaky / total * 100)|round(2) }}%"></span>
+    <span class="readiness__seg--untested" style="width: {{ (untested / total * 100)|round(2) }}%"></span>
+  </div>
+  <p class="readiness__legend" aria-hidden="true"><span><strong class="tnum">{{ solid }}</strong> solid</span><span><strong class="tnum">{{ shaky }}</strong> shaky</span><span><strong class="tnum">{{ untested }}</strong> untested</span></p>
+</div>
+{%- endmacro %}

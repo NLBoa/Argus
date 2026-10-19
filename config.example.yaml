@@ -33,6 +33,7 @@ schedule:
 notifications:
   daily_text_cap: 6          # at-risk and 3-hour warnings are not counted
   ntfy_server: "https://ntfy.sh"
+  dashboard_url: "https://argus-pi.example-tailnet.ts.net"  # opened when you tap a push
 
 ai:
   models:

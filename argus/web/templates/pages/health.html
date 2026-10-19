@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, empty_state, error_banner %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Health</h1>
+  <p class="page-sub">What Argus is watching, and whether it can reach you</p>
+</div>
+{% if error %}
+  {{ error_banner(error, "/health") }}
+{% else %}
+<section aria-label="Summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+  <div class="panel panel-pad stat"><span class="stat__value">{{ data.texts_today }}<span class="text-muted text-lg"> / {{ data.text_cap }}</span></span><span class="stat__label">Texts sent today</span></div>
+  <div class="panel panel-pad stat"><span class="stat__value">{{ data.channel or "None" }}</span><span class="stat__label">{{ "Reminder channel" if data.channel else "No reminder channel set up" }}</span></div>
+  <div class="panel panel-pad stat"><span class="stat__value">{{ data.ai_spend }}</span><span class="stat__label">AI spend this month</span></div>
+  <div class="panel panel-pad stat"><span class="stat__value">{{ data.last_sync or "Never" }}</span><span class="stat__label">Last successful sync</span></div>
+</section>
+
+<section aria-labelledby="sources-heading" class="mb-8">
+  <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+    <h2 class="section-title m-0" id="sources-heading">Sources</h2>
+    <form method="post" action="/sync" hx-post="/sync" hx-swap="none">
+      <button class="btn btn-primary" type="submit">{{ icon("refresh-cw", "icon-sm") }}Sync now</button>
+    </form>
+  </div>
+  <div class="panel overflow-x-auto" tabindex="0" role="region" aria-label="Sources table">
+    <table class="data-table">
+      <thead><tr><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Last synced</th><th scope="col">Details</th></tr></thead>
+      <tbody>
+      {% for s in data.sources %}
+        <tr>
+          <th scope="row" class="font-bold text-left">{{ s.name }}</th>
+          <td><span class="status-dot" data-state="{{ s.state }}">{{ s.state_label }}</span></td>
+          <td class="tnum">{{ s.last_success or "-" }}</td>
+          <td class="text-sm {{ 'text-muted' if not s.error else '' }}">{{ s.error or s.hint or ("Last tried " ~ s.last_attempt if s.last_attempt else "") }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section aria-labelledby="rules-heading" class="mb-8">
+  <h2 class="section-title" id="rules-heading">Reminder rules</h2>
+  <p class="text-muted text-sm mb-3">Muted rules send nothing. The 3-hour warning ignores quiet hours, so mute it only if you are sure.</p>
+  <ul class="panel m-0 p-0 list-none">
+    {% for r in data.rules %}
+    <li class="flex items-center justify-between gap-4 px-4 py-2 border-b border-line last:border-b-0" id="rule-{{ r.rule }}">
+      <span>{{ r.label }}{% if not r.active %} <span class="text-muted text-sm">(arrives in a later update)</span>{% endif %}</span>
+      <form method="post" action="/rules/{{ r.rule }}/mute" hx-post="/rules/{{ r.rule }}/mute" hx-target="#rule-{{ r.rule }}" hx-select="#rule-{{ r.rule }}" hx-swap="outerHTML">
+        <input type="hidden" name="muted" value="{{ '0' if r.muted else '1' }}">
+        <button class="switch btn-quiet" type="submit" role="switch" aria-checked="{{ 'false' if r.muted else 'true' }}" aria-label="{{ r.label }} {{ 'muted' if r.muted else 'on' }}">
+          <span class="text-sm text-muted">{{ "Muted" if r.muted else "On" }}</span><span class="switch__track" aria-hidden="true"></span>
+        </button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section aria-labelledby="sent-heading">
+  <h2 class="section-title" id="sent-heading">Recent reminders</h2>
+  {% if data.notifications %}
+  <div class="panel overflow-x-auto" tabindex="0" role="region" aria-label="Recent reminders table">
+    <table class="data-table">
+      <thead><tr><th scope="col">When</th><th scope="col">Message</th><th scope="col">Channel</th><th scope="col">Result</th></tr></thead>
+      <tbody>
+      {% for n in data.notifications %}
+        <tr><td class="tnum whitespace-nowrap">{{ n.when }}</td><td><strong>{{ n.title }}</strong> <span class="text-muted">{{ n.body }}</span></td><td>{{ n.channel or "-" }}</td><td><span class="status-dot" data-state="{{ 'ok' if n.status == 'sent' else 'failing' if n.status == 'failed' else 'never' }}">{{ n.status|capitalize }}</span></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="panel">{{ empty_state("bell", "No reminders yet", "Deadline reminders go out 24 hours and 3 hours before anything you haven't submitted.") }}</div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

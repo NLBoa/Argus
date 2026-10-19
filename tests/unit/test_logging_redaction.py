@@ -104,8 +104,11 @@ def test_ordinary_numbers_survive(capture: tuple[logging.Logger, io.StringIO]) -
 def test_configure_logging_installs_redacting_json_handler(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level)
     configure_logging("INFO", secrets=["configured-secret"])
     logging.getLogger("argus.x").info("using configured-secret")
     out = capsys.readouterr().out
+    root.handlers, root.level = saved[0], saved[1]
     assert "configured-secret" not in out
     assert json.loads(out.splitlines()[-1])["msg"] == f"using {REDACTED}"

@@ -1,0 +1,28 @@
+{% from "components/ui.html" import course_chip, risk_badge %}
+{% from "components/timeline.html" import day_rail %}
+<section aria-label="Clock">
+  <p class="kiosk__clock" id="kiosk-clock" data-clock>{{ k.time_text }}</p>
+  <h1 class="kiosk__date">{{ k.date_text }}</h1>
+  {% if k.next_up %}
+  <div class="kiosk__next"><span class="kiosk__next-label">{{ k.next_up.label }}</span><span class="kiosk__next-title">{{ k.next_up.title }}</span><span class="kiosk__next-sub">{{ k.next_up.detail }}</span></div>
+  {% endif %}
+  {% for n in k.notices %}<p class="kiosk__notice banner banner--stale">{{ n.text }}</p>{% endfor %}
+  {% if k.offline %}<p class="kiosk__notice banner banner--offline">Showing data from {{ k.offline }}</p>{% endif %}
+</section>
+<section aria-labelledby="kiosk-day">
+  <h2 class="kiosk__heading" id="kiosk-day">Today</h2>
+  {% if k.timeline.empty %}<p class="text-2xl text-muted">No classes today.</p>{% else %}{{ day_rail(k.timeline, "Today") }}{% endif %}
+</section>
+<section aria-labelledby="kiosk-next">
+  <h2 class="kiosk__heading" id="kiosk-next">Next deadlines</h2>
+  {% for v in k.deadlines %}
+  <div class="kiosk__deadline" data-accent="{{ v.course.accent }}">
+    <span class="kiosk__deadline-title">{{ v.title }}</span>
+    <span class="kiosk__deadline-when">{{ v.due_relative }}</span>
+    <span class="kiosk__deadline-meta">{{ course_chip(v.course) }}{{ v.due_text }}</span>
+    <span class="text-right">{% if v.risk.slug != "ok" %}{{ risk_badge(v.risk) }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="text-2xl text-muted">Nothing due in the next week.</p>
+  {% endfor %}
+</section>

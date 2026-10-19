@@ -93,3 +93,47 @@ Piazza API is unconfigured or its latest run failed. Posts dedupe with the API b
 No credentials were available when Phase 1 finished, so `tests/integration/test_live_smoke.py`
 (opt-in via `ARGUS_LIVE=1`) has not run against real ELMS, Gradescope, Piazza, or umd.io yet.
 Run it once credentials exist. Its first run is also the check on the Piazza email format.
+
+## D015 — Interim risk until the planner exists (2026-10-18)
+**Decision.** `planner/risk.py:assess` implements the spec rule (at risk when the free hours before the due time are fewer than
+the remaining p80) once the planner supplies those numbers (Phase 4). Until then, an open item past due is
+overdue, a missed item is overdue, and an item due within 24 hours that hasn't been started is "watch". The signature is already final.
+
+## D016 — Same-origin guard on every state-changing request (2026-10-18)
+**Context.** The dashboard is reachable only over Tailscale, but a malicious page open in the same browser
+could still POST to it (CSRF).
+**Decision.** Middleware refuses any non-GET request whose `Origin` (or `Referer`) host differs from
+`Host`. `/webhooks/*` is exempt, because Twilio signs its requests (Phase 6). This needs no tokens in forms
+and works for HTMX and no-JS posts alike.
+
+## D017 — Alpine's standard build; no CSP header yet (2026-10-18)
+**Decision.** Alpine's standard build needs `unsafe-eval`, so no Content-Security-Policy is sent in Phase 2.
+Revisit in Phase 6 hardening: either switch to `@alpinejs/csp`, or set a CSP allowing `'unsafe-eval'` for the
+same origin only.
+
+## D018 — Loading state = progress bar plus dimmed content during HTMX navigation (2026-10-18)
+**Context.** Pages are server-rendered, and on the LAN a full render takes milliseconds. Skeleton-first loading
+would add a round trip to every view.
+**Decision.** First paint is complete HTML. While an HTMX navigation or refresh is in flight, `body.is-loading`
+shows a top progress bar and dims `main`. The skeleton component exists for lazily loaded regions in later
+views and appears on `/styleguide`.
+
+## D019 — One hyperlegible typeface (2026-10-18)
+**Decision.** Atkinson Hyperlegible Next instead of Inter. It serves both AA readability and the room-distance kiosk, and
+gives Argus a voice that isn't the default dashboard look. See `docs/design.md`.
+
+## D020 — Batched messages claim one key per item (2026-10-18)
+**Context.** "New item" reminders are batched, but idempotency must be per item, rule, and due time.
+**Decision.** A `notification_keys` table maps every covered key to its notification. A claim inserts the
+notification and all of its keys atomically, or nothing. Rules skip keys already recorded, so later
+batches never repeat an item. The first import is never reported as "new" (items created within 10 minutes of the first
+successful sync are excluded).
+
+## D021 — Today's "Past due" group (2026-10-18)
+**Decision.** Today lists assignments and quizzes from the last 3 days that are past due and either still open
+or `missed`, so the student can still mark them done. The due-today list excludes them.
+
+## D022 — Browser tests use a fresh server per mutating test (2026-10-18)
+**Decision.** Read-only suites (a11y, visual, navigation) share one seeded server on a frozen clock.
+Tests that change data get `fresh_server()`, with its own database, so no test can disturb
+another or the snapshots. All of them use the same synthetic seed as `argus serve --demo`.

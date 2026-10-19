@@ -1,0 +1,211 @@
+"""Reminder rules (pure): what should be said, to whom it refers, and how urgent it is.
+
+Rules never decide *when* a message goes out. Guards do that (`guards.py`). Every reminder
+carries idempotency keys of the form `<item_id>:<rule>:<due_at>`, so a moved due date re-arms
+it. The engine records keys, and rules skip anything already sent.
+Deadline rules are deterministic and never depend on the AI.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import StrEnum
+
+from argus.domain.models import Item
+from argus.reminders.text import fit, short, when
+from argus.store.db import iso
+
+NEW_ITEM_HORIZON = timedelta(days=7)
+NEW_ITEM_LOOKBACK = timedelta(hours=24)
+DUE_SOON = timedelta(hours=24)
+DUE_NOW = timedelta(hours=3)
+ALERT_AFTER_FAILURES = 3
+
+
+class Rule(StrEnum):
+    START_NUDGE = "start_nudge"
+    AT_RISK = "at_risk"
+    DUE_24H = "due_24h"
+    DUE_3H = "due_3h"
+    NEW_ITEM = "new_item"
+    ANNOUNCED = "announced"
+    EXAM_COUNTDOWN = "exam_countdown"
+    MORNING_BRIEF = "morning_brief"
+    SYSTEM_ALERT = "system_alert"
+
+    @property
+    def label(self) -> str:
+        return {
+            "start_nudge": "Start nudges",
+            "at_risk": "At-risk alerts",
+            "due_24h": "Due in 24 hours",
+            "due_3h": "Due in 3 hours",
+            "new_item": "New items",
+            "announced": "Announced quizzes and exams",
+            "exam_countdown": "Exam countdowns",
+            "morning_brief": "Morning brief",
+            "system_alert": "System alerts",
+        }[self.value]
+
+
+@dataclass(frozen=True, slots=True)
+class Reminder:
+    rule: Rule
+    keys: tuple[str, ...]
+    title: str
+    body: str
+    item_ids: tuple[int, ...] = ()
+    priority: int = 3  # ntfy scale: 1 min .. 5 urgent
+    bypass_quiet: bool = False  # ignores quiet hours and class time
+    counts_toward_cap: bool = True
+    expires_at: datetime | None = None  # after this, drop rather than defer
+
+    @property
+    def sms(self) -> str:
+        return fit(f"{self.title}: {self.body}")
+
+
+@dataclass(frozen=True, slots=True)
+class SourceAlertState:
+    source: str
+    failures: int
+    failing_since: datetime | None
+    last_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    now: datetime
+    items: Sequence[Item]
+    sent_keys: frozenset[str] = frozenset()
+    sources: Mapping[str, SourceAlertState] | None = None
+    # Items created before this belong to the first import and never count as "new".
+    bootstrap_until: datetime | None = None
+
+
+def item_key(item: Item, rule: Rule) -> str:
+    due = iso(item.due_at) if item.due_at else "none"
+    return f"{item.id}:{rule.value}:{due}"
+
+
+def _deadline_candidates(items: Iterable[Item]) -> list[Item]:
+    return [i for i in items if i.status.is_open and i.due_at and i.kind.takes_submission]
+
+
+def due_soon(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for it in _deadline_candidates(snap.items):
+        assert it.due_at is not None
+        left = it.due_at - snap.now
+        if DUE_NOW < left <= DUE_SOON and item_key(it, Rule.DUE_24H) not in snap.sent_keys:
+            out.append(
+                Reminder(
+                    rule=Rule.DUE_24H,
+                    keys=(item_key(it, Rule.DUE_24H),),
+                    title="Due tomorrow" if left > timedelta(hours=12) else "Due today",
+                    body=f"[1] {it.course_code} {short(it.title, 70)}, {when(it.due_at)}. "
+                    "Reply DONE 1 when submitted.",
+                    item_ids=(it.id,),
+                    priority=4,
+                    expires_at=it.due_at - DUE_NOW,
+                )
+            )
+    return out
+
+
+def due_now(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for it in _deadline_candidates(snap.items):
+        assert it.due_at is not None
+        left = it.due_at - snap.now
+        if timedelta(0) < left <= DUE_NOW and item_key(it, Rule.DUE_3H) not in snap.sent_keys:
+            hours = max(1, round(left.total_seconds() / 3600))
+            out.append(
+                Reminder(
+                    rule=Rule.DUE_3H,
+                    keys=(item_key(it, Rule.DUE_3H),),
+                    title=f"Due in {hours}h"
+                    if left >= timedelta(minutes=50)
+                    else "Due within the hour",
+                    body=f"[1] {it.course_code} {short(it.title, 70)}, {when(it.due_at)}. "
+                    "Not submitted yet.",
+                    item_ids=(it.id,),
+                    priority=5,
+                    bypass_quiet=True,
+                    counts_toward_cap=False,
+                    expires_at=it.due_at,
+                )
+            )
+    return out
+
+
+def new_items(snap: Snapshot) -> list[Reminder]:
+    fresh = [
+        it
+        for it in _deadline_candidates(snap.items)
+        if it.created_at is not None
+        and snap.now - it.created_at <= NEW_ITEM_LOOKBACK
+        and (snap.bootstrap_until is None or it.created_at > snap.bootstrap_until)
+        and it.due_at is not None
+        and snap.now < it.due_at <= snap.now + NEW_ITEM_HORIZON
+        and item_key(it, Rule.NEW_ITEM) not in snap.sent_keys
+    ]
+    if not fresh:
+        return []
+    fresh.sort(key=lambda i: (i.due_at, i.id))
+    parts = []
+    for n, it in enumerate(fresh[:3], start=1):
+        assert it.due_at is not None
+        parts.append(f"[{n}] {it.course_code} {short(it.title, 34)} ({when(it.due_at)})")
+    more = f" +{len(fresh) - 3} more" if len(fresh) > 3 else ""
+    return [
+        Reminder(
+            rule=Rule.NEW_ITEM,
+            keys=tuple(item_key(i, Rule.NEW_ITEM) for i in fresh),
+            title="New item" if len(fresh) == 1 else f"{len(fresh)} new items",
+            body="; ".join(parts) + more,
+            item_ids=tuple(i.id for i in fresh[:3]),
+            priority=3,
+            expires_at=min(i.due_at for i in fresh if i.due_at),
+        )
+    ]
+
+
+SOURCE_NAMES = {
+    "canvas_ical": "ELMS calendar",
+    "canvas_api": "ELMS",
+    "gradescope": "Gradescope",
+    "piazza": "Piazza",
+    "piazza_email": "Piazza email",
+    "umdio": "umd.io",
+}
+
+
+def system_alerts(snap: Snapshot) -> list[Reminder]:
+    out = []
+    for state in (snap.sources or {}).values():
+        if state.failures < ALERT_AFTER_FAILURES or state.failing_since is None:
+            continue
+        key = f"system:collector:{state.source}:{iso(state.failing_since)}"
+        if key in snap.sent_keys:
+            continue
+        name = SOURCE_NAMES.get(state.source, state.source)
+        out.append(
+            Reminder(
+                rule=Rule.SYSTEM_ALERT,
+                keys=(key,),
+                title=f"{name} sync failing",
+                body=f"{state.failures} failed syncs in a row since {when(state.failing_since)}. "
+                "Deadlines from it may be stale; check Health.",
+                priority=4,
+            )
+        )
+    return out
+
+
+def candidates(snap: Snapshot) -> list[Reminder]:
+    """Everything that could be sent now, most urgent first."""
+    found = due_now(snap) + due_soon(snap) + new_items(snap) + system_alerts(snap)
+    return sorted(found, key=lambda r: (-r.priority, r.keys))

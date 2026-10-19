@@ -1,0 +1,24 @@
+{% from "components/ui.html" import icon %}
+{#- Command palette (combobox + listbox). Opened with Cmd/Ctrl+K or "/"; Esc closes and restores focus. -#}
+<template x-if="$store.palette.open">
+<div class="palette-backdrop" x-data="palette" @keydown.escape.prevent="close()" @click.self="close()">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette__input-row">
+      {{ icon("search") }}
+      <input class="palette__input" type="text" x-ref="input" x-model="query" placeholder="Go to, sync, or find an item" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" :aria-activedescendant="activeId"
+             aria-label="Search commands and items"
+             @keydown.down.prevent="move(1)" @keydown.up.prevent="move(-1)" @keydown.enter.prevent="run(active)" @keydown.tab.prevent>
+      <span class="kbd">Esc</span>
+    </div>
+    <ul class="palette__list" id="palette-list" role="listbox" aria-label="Results">
+      <template x-for="(opt, i) in results" :key="opt.id">
+        <li class="palette__option" role="option" :id="'palette-opt-' + i" :aria-selected="i === index ? 'true' : 'false'" @click="run(opt)" @mousemove="index = i">
+          <span x-text="opt.label"></span><span class="hint" x-text="opt.hint"></span>
+        </li>
+      </template>
+      <li class="palette__empty" role="option" aria-disabled="true" x-show="results.length === 0">No matches. Try "today" or an assignment name.</li>
+    </ul>
+  </div>
+</div>
+</template>

@@ -20,6 +20,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 |---|---|
 | First-time setup (deps, Chromium, Tailwind CLI, hooks) | `make setup` (needs `uv`, `gitleaks`) |
 | Run dashboard locally with reload | `make dev` → http://127.0.0.1:8000 |
+| Preview with synthetic data (no credentials) | `uv run argus serve --demo` |
+| Always-on loop (sync + reminders) / test a push | `uv run argus worker` / `uv run argus notify-test` |
 | Build CSS (minified) / watch | `make css` / `make css-watch` |
 | Lint + format check / auto-fix | `make lint` / `make fmt` |
 | Types | `make types` (mypy --strict on `argus/`) |
@@ -43,7 +45,9 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: Obsidian layout, argus regions, ownership decisions, proposals, git sync.
 - `argus/notify/`: Twilio SMS, ntfy, and the router that picks a channel and records the result.
-- `argus/web/`: FastAPI app factory, routes per view, Jinja templates, component macros, static assets.
+- `argus/worker.py`: the every-minute loop (sync, then reminders). `argus/demo.py`: the synthetic seed (demo and e2e).
+- `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
+  routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
 - `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, repository functions.
 - `argus/cli.py`: the Typer CLI. `deploy/`: systemd units, installer, kiosk. `scripts/`: dev tooling.
 
@@ -112,6 +116,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   variant for every animation, and targets of at least 24×24px. Nothing loads from a CDN (the Pi may be offline).
 - Budgets: under 150 KB gzipped JS+CSS per page, median server time under 150 ms, no layout shift on HTMX swaps.
 - Add every new page to `tests/e2e/pages.py`, so it gets axe and visual coverage automatically.
+- Every state-changing route works with and without JS: HTMX gets a fragment plus an `HX-Trigger` toast; a plain
+  form gets a 303 back. Cross-origin POSTs are refused (D016). Design reference: `docs/design.md`.
 
 ## Testing rules
 - **Unit** (`tests/unit`): pure logic, property tests (hypothesis), and DST/time tests with `FakeClock`.
@@ -119,6 +125,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   the webhook (TestClient), and the simulated-week pipeline.
 - **E2E / a11y** (`tests/e2e`) and **visual** (`tests/visual`): a live server with a fake clock, driven by Playwright.
   These run in their own pytest process (the `make` targets do this). Plain `pytest` runs unit and integration only.
+  Tests that mutate data use `fresh_server()`. Shared servers stay read-only (D022).
 - **Evals** (`tests/evals`, marker `evals`): the real API. Run only with `make evals`.
 - **LLM calls are mocked** at the `argus.ai.client` boundary with recorded responses from
   `tests/fixtures/ai/`. No test outside evals touches the network.

@@ -1,0 +1,20 @@
+{% from "components/ui.html" import icon, course_chip %}
+{% macro practice_card(q) -%}
+<article class="panel practice-card" id="practice-{{ q.id }}" {% if q.result %}data-result="{{ q.result }}"{% endif %} aria-labelledby="practice-{{ q.id }}-q">
+  <div class="flex flex-wrap items-center gap-2 text-sm text-muted">{{ course_chip(q.course) }}<span>{{ q.concept }}</span></div>
+  <p class="practice-card__q mt-2" id="practice-{{ q.id }}-q">{{ q.question }}</p>
+  <details>
+    <summary>Show answer</summary>
+    <p class="mt-2">{{ q.answer }}</p>
+    <p class="mt-1 text-sm text-muted">Source: {{ q.source_ref }}</p>
+    {% if q.result is none %}
+    <div class="practice-card__grade" role="group" aria-label="How did you do?">
+      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "correct"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("circle-check", "icon-sm") }}Got it</button>
+      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "shaky"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("circle-help", "icon-sm") }}Shaky</button>
+      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "incorrect"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("x", "icon-sm") }}Missed it</button>
+    </div>
+    {% endif %}
+  </details>
+  {% if q.result %}<p class="mt-3 text-sm font-bold" role="status">{{ {"correct": "Marked as got it.", "shaky": "Marked as shaky; it will come back sooner.", "incorrect": "Marked as missed; it will come back tomorrow."}[q.result] }}</p>{% endif %}
+</article>
+{%- endmacro %}

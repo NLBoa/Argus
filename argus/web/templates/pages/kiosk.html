@@ -1,0 +1,19 @@
+{% from "components/ui.html" import course_chip, risk_badge %}
+{% from "components/timeline.html" import day_rail %}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kiosk | Argus</title>
+  <link rel="preload" href="/static/fonts/ahn-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ asset('dist/app.css') }}">
+  <link rel="icon" href="{{ asset('icons/argus.svg') }}" type="image/svg+xml">
+  <script src="{{ asset('kiosk.js') }}" defer></script>
+</head>
+<body>
+<main class="kiosk" id="kiosk" data-server-now="{{ now_iso }}" data-stream="/kiosk/stream">
+  {% include "partials/kiosk_body.html" %}
+</main>
+</body>
+</html>

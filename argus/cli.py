@@ -139,17 +139,84 @@ def list_cmd(
 
 
 @app.command()
+def worker(config: ConfigOpt = DEFAULT_CONFIG) -> None:  # pragma: no cover - runs forever
+    """Run the always-on loop: sync on schedule and send reminders (systemd runs this)."""
+    import signal
+
+    from argus.collectors.http import make_client
+    from argus.store.db import open_db
+    from argus.worker import Worker
+
+    cfg, secrets = _setup(config)
+    configure_logging("INFO", secrets=secrets.secret_values())
+    clock = make_clock()
+    conn = open_db(cfg.paths.db_path, clock)
+
+    async def go() -> None:
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stop.set)
+        async with make_client() as client:
+            await Worker(conn, cfg, secrets, clock, client).run(stop)
+
+    asyncio.run(go())
+
+
+@app.command("notify-test")
+def notify_test(config: ConfigOpt = DEFAULT_CONFIG) -> None:
+    """Send a test notification through the configured channels."""
+    from argus.collectors.http import Fetcher, make_client
+    from argus.notify.channels import OutboundMessage
+    from argus.worker import build_router
+
+    cfg, secrets = _setup(config)
+
+    async def go() -> tuple[bool, str]:
+        async with make_client() as client:
+            router = build_router(cfg, secrets, Fetcher(client))
+            msg = "If you can read this, Argus can reach you."
+            d = await router.send(OutboundMessage("Argus test", msg, f"Argus test: {msg}"))
+            return d.ok, d.channel or d.error or "unknown"
+
+    ok, detail = asyncio.run(go())
+    typer.echo(f"sent via {detail}" if ok else f"not sent: {detail}")
+    if not ok:
+        raise typer.Exit(1)
+
+
+@app.command()
 def serve(
     config: ConfigOpt = DEFAULT_CONFIG,
     host: str = "127.0.0.1",
     port: int = 8000,
     reload: bool = False,
+    demo: Annotated[bool, typer.Option(help="Serve synthetic demo data (no credentials).")] = False,
 ) -> None:
     """Run the dashboard."""
     import uvicorn
 
     from argus.web.app import create_app
 
+    if demo:  # pragma: no cover - interactive
+        from argus.demo import DEMO_CONFIG, DEMO_SECRETS, seed_demo
+        from argus.store.db import open_db
+        from argus.web.deps import OfflineRunner
+
+        db = Path("var/demo.db")
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{db}{suffix}").unlink(missing_ok=True)
+        clock = make_clock()
+        seed_demo(open_db(db, clock), clock.now())
+        demo_app = create_app(
+            DEMO_CONFIG,
+            DEMO_SECRETS,
+            clock,
+            db_path=db,
+            runner_factory=lambda c, f: OfflineRunner(),
+        )
+        uvicorn.run(demo_app, host=host, port=port)
+        return
     secrets = load_secrets()
     configure_logging(secrets=secrets.secret_values())
     if reload:

@@ -17,10 +17,14 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `posts` | 0001 | Piazza posts, instructor answers, Canvas announcements. `UNIQUE(platform, external_id)`, so the API and email agree |
 | `sync_runs` | 0001 | One row per collector run: status, redacted error, record count, duration |
 | `source_state` | 0001 | Per (source, key): last payload hash, ETag, Last-Modified, and source-specific JSON `data` |
+| `notifications` | 0002 | Every reminder Argus tried to send: rule, text, `item_ids` (JSON; message number n maps to element n-1), status `pending`/`sent`/`failed`, channel, attempts, `expires_at` (when retries stop) |
+| `notification_keys` | 0002 | The idempotency keys each notification covers (`<item_id>:<rule>:<due_at>`; a batched message covers several). `key` is the primary key, so no key is ever sent twice |
+| `time_logs` | 0002 | Time spent: `source` `timer`/`sms`/`manual`; `ended_at` NULL while a timer runs (at most one, by a partial unique index) |
+| `rule_mutes` | 0002 | Muted reminder rules, optionally until a time |
 
 Later phases add `findings`, `modules`, `concepts`, `practice_items`, `practice_attempts`,
-`exams`, `estimates`, `time_logs`, `plan_blocks`, `notifications`, `inbound_messages`,
-`vault_regions`, and `proposals`, each in its own migration, documented here when it lands.
+`exams`, `estimates`, `plan_blocks`, `inbound_messages`, `vault_regions`, and `proposals`,
+each in its own migration, documented here when it lands.
 
 ## items
 | Column | Notes |

@@ -1,0 +1,19 @@
+{#- Side-by-side diff on wide screens, inline on narrow. +/- markers carry meaning, not color alone. -#}
+{% macro diff_viewer(d) -%}
+<div class="diff">
+  <div class="diff__split" role="group" aria-label="Changes to {{ d.path }}, side by side">
+    <div class="diff__col">
+      <div class="diff__head">{{ d.before_label }}</div>
+      {% for row in d.rows %}<div class="diff__line" data-op="{{ 'del' if row.op in ('del', 'change') else 'same' if row.op == 'same' else 'pad' }}"><span class="diff__mark" aria-hidden="true">{{ '-' if row.op in ('del', 'change') else '' }}</span><span>{% if row.op in ('del', 'change') %}<span class="visually-hidden">Removed: </span>{% endif %}{{ row.left or "" }}</span></div>{% endfor %}
+    </div>
+    <div class="diff__col">
+      <div class="diff__head">{{ d.after_label }}</div>
+      {% for row in d.rows %}<div class="diff__line" data-op="{{ 'add' if row.op in ('add', 'change') else 'same' if row.op == 'same' else 'pad' }}"><span class="diff__mark" aria-hidden="true">{{ '+' if row.op in ('add', 'change') else '' }}</span><span>{% if row.op in ('add', 'change') %}<span class="visually-hidden">Added: </span>{% endif %}{{ row.right or "" }}</span></div>{% endfor %}
+    </div>
+  </div>
+  <div class="diff__inline" role="group" aria-label="Changes to {{ d.path }}">
+    <div class="diff__head">{{ d.path }}</div>
+    {% for line in d.inline %}<div class="diff__line" data-op="{{ line.op }}"><span class="diff__mark" aria-hidden="true">{{ {'add': '+', 'del': '-'}.get(line.op, '') }}</span><span>{% if line.op == 'add' %}<span class="visually-hidden">Added: </span>{% elif line.op == 'del' %}<span class="visually-hidden">Removed: </span>{% endif %}{{ line.text }}</span></div>{% endfor %}
+  </div>
+</div>
+{%- endmacro %}
