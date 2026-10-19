@@ -130,6 +130,8 @@ class Snapshot:
     brief: Brief | None = None  # today's morning brief, once its time has come
     countdowns: Sequence[Countdown] = ()
     announced: Sequence[Announced] = ()
+    # Items no enabled source reports submissions for (D056): same timing, different wording.
+    untracked: frozenset[int] = frozenset()
 
 
 def item_key(item: Item, rule: Rule) -> str:
@@ -182,7 +184,11 @@ def due_now(snap: Snapshot) -> list[Reminder]:
                     if left >= timedelta(minutes=50)
                     else "Due within the hour",
                     body=f"[1] {it.course_code} {short(it.title, 70)}, {when(it.due_at)}. "
-                    "Not submitted yet.",
+                    + (
+                        "Reply DONE 1 once submitted."
+                        if it.id in snap.untracked
+                        else "Not submitted yet."
+                    ),
                     item_ids=(it.id,),
                     priority=5,
                     bypass_quiet=True,

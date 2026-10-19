@@ -18,7 +18,7 @@
           <div class="stat"><span class="stat__value">{{ data.estimate.p80|hours }}</span><span class="stat__label">Planned for (p80)</span></div>
           {% if not data.estimate.overridden %}<div class="stat"><span class="stat__value text-muted">{{ data.estimate.raw_p50|hours }}</span><span class="stat__label">{{ "Typical default" if data.estimate_source == "default" else "AI estimate" }} before calibration</span></div>{% endif %}
         </div>
-        {% if data.estimate.overridden %}<p class="text-sm"><strong>You set this estimate.</strong> It wins over the AI estimate until you remove it.</p>{% endif %}
+        {% if data.estimate.overridden %}<p class="text-sm"><strong>You set this estimate.</strong> It wins over Argus's estimate until you remove it.</p>{% endif %}
         {% if data.factor_text %}<p class="text-sm text-muted">{{ data.factor_text }}</p>{% endif %}
         {% else %}
         <p class="text-muted">No estimate yet. Argus estimates new work within a few minutes.</p>
@@ -46,7 +46,7 @@
           <button class="btn btn-primary" type="submit">Use my estimate</button>
         </form>
         <div class="flex flex-wrap gap-2">
-          <form method="post" action="/items/{{ v.id }}/estimate/rerun"><button class="btn" type="submit">{{ icon("refresh-cw", "icon-sm") }}Re-run AI estimate</button></form>
+          {% if caps.ai_calls_left %}<form method="post" action="/items/{{ v.id }}/estimate/rerun" data-requires="ai"><button class="btn" type="submit">{{ icon("refresh-cw", "icon-sm") }}Re-run AI estimate</button></form>{% endif %}
           {% if data.estimate and data.estimate.overridden %}<form method="post" action="/items/{{ v.id }}/estimate/clear"><button class="btn btn-quiet" type="submit">Remove my estimate</button></form>{% endif %}
         </div>
       </div>

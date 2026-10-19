@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from argus.ai.budget import budget_hit_this_month, month_key
+from argus.capabilities import Capabilities
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import ItemKind
@@ -75,16 +76,26 @@ class TickOutcome:
 
 
 class ReminderEngine:
-    def __init__(self, conn: sqlite3.Connection, config: AppConfig, clock: Clock, router: Router):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        config: AppConfig,
+        clock: Clock,
+        router: Router,
+        *,
+        caps: Capabilities,
+    ):
         self.conn = conn
         self.config = config
+        self.caps = caps
         self.clock = clock
         self.router = router
 
     def snapshot(self, now: datetime) -> Snapshot:
         health = repo.source_health(self.conn, SOURCES)
         first = repo.first_success_at(self.conn)
-        risk = risk_map(self.conn, self.config, now)
+        tracking = self.caps.tracking_sources
+        risk = risk_map(self.conn, self.config, now, tracking_sources=tracking)
         sessions = [
             SessionRef(
                 b.item_id, b.start, b.end, (b.label or "Review") if b.kind == "review" else None
@@ -102,12 +113,14 @@ class ReminderEngine:
         sources["vault"] = SourceAlertState(
             "vault", vault.failures, vault.failing_since, vault.last_error
         )
+        items = repo.list_items(self.conn)
         return Snapshot(
             at_risk=frozenset(i for i, r in risk.items() if r.level is RiskLevel.AT_RISK),
             sessions=sessions,
             ai_budget_month=month_key(now) if budget_hit_this_month(self.conn, now) else None,
             now=now,
-            items=repo.list_items(self.conn),
+            items=items,
+            untracked=frozenset(i.id for i in items if not i.tracked_by(tracking)),
             sent_keys=frozenset(repo.notification_keys(self.conn)),
             sources=sources,
             brief=self._brief(now),

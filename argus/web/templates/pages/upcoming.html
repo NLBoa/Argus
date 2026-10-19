@@ -22,7 +22,7 @@
   {% endfor %}
   </div>
 {% else %}
-  <div class="panel">{{ empty_state("calendar-days", "Nothing due in the next " ~ days ~ " days", "When ELMS or Gradescope lists something new, it shows up here within half an hour.", "/health", "Check sources", level=2) }}</div>
+  <div class="panel">{{ empty_state("calendar-days", "Nothing due in the next " ~ days ~ " days", "When " ~ caps.deadline_sources() ~ " lists something new, it shows up here within half an hour.", "/health", "Check sources", level=2) }}</div>
 {% endif %}
 {% endif %}
 {% endblock %}

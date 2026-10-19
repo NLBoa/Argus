@@ -323,33 +323,45 @@ def restore(
 
 @app.command()
 def serve(
+    *,
     config: ConfigOpt = DEFAULT_CONFIG,
     host: str = "127.0.0.1",
     port: int = 8000,
     reload: bool = False,
     demo: Annotated[bool, typer.Option(help="Serve synthetic demo data (no credentials).")] = False,
+    no_canvas_token: Annotated[
+        bool,
+        typer.Option(
+            "--no-canvas-token",
+            help="With --demo: imitate a setup without ARGUS_CANVAS_TOKEN (calendar feed only).",
+        ),
+    ] = False,
 ) -> None:
     """Run the dashboard."""
     import uvicorn
 
     from argus.web.app import create_app
 
+    if no_canvas_token and not demo:
+        raise typer.BadParameter("--no-canvas-token only applies with --demo")
     if demo:  # pragma: no cover - interactive
-        from argus.demo import DEMO_CONFIG, DEMO_SECRETS, seed_demo
+        from argus.demo import DEMO_CONFIG, DemoProfile, DemoTransport, demo_secrets, seed_demo
         from argus.store.db import open_db
         from argus.web.deps import OfflineRunner
 
-        db = Path("var/demo.db")
+        profile = DemoProfile.NO_CANVAS_TOKEN if no_canvas_token else DemoProfile.FULL
+        db = Path("var/demo-notoken.db" if no_canvas_token else "var/demo.db")
         for suffix in ("", "-wal", "-shm"):
             Path(f"{db}{suffix}").unlink(missing_ok=True)
         clock = make_clock()
-        seed_demo(open_db(db, clock), clock.now())
+        seed_demo(open_db(db, clock), clock.now(), profile)
         demo_app = create_app(
             DEMO_CONFIG,
-            DEMO_SECRETS,
+            demo_secrets(profile),
             clock,
             db_path=db,
             runner_factory=lambda c, f: OfflineRunner(),
+            ai_transport=DemoTransport(),
         )
         uvicorn.run(demo_app, host=host, port=port, log_config=None)
         return

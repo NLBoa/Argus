@@ -22,9 +22,10 @@ from argus.collectors.base import CollectContext
 from argus.collectors.http import Fetcher
 from argus.collectors.runner import default_collectors
 from argus.config import AppConfig, Secrets
+from argus.domain.models import SUBMISSION_SOURCES
 
 AI = "ai"  # pseudo-source: an Anthropic key (or an injected transport in tests and the demo)
-TRACKING = frozenset({"canvas_api", "gradescope"})  # sources that report submission state
+TRACKING = SUBMISSION_SOURCES  # sources that report submission state (D056)
 
 
 class Feature(StrEnum):
@@ -93,6 +94,36 @@ class Capabilities:
     def tracking_sources(self) -> frozenset[str]:
         """The enabled sources that report submissions (D056)."""
         return frozenset(s for s in TRACKING if self.sources.get(s))
+
+    def shows_post(self, *, platform: str, kind: str, course: str) -> bool:
+        """Whether a stored post may be shown: its source must still be set up for the course
+        (D055). The syllabus comes from the modules sync, announcements from the ELMS API."""
+        c = self.course(course)
+        if kind == "syllabus":
+            return c.modules
+        if platform == "canvas":
+            return c.canvas_api
+        if platform == "piazza":
+            return c.piazza
+        return False
+
+    def deadline_sources(self) -> str:
+        """Where deadlines come from, for copy: "ELMS or Gradescope"."""
+        names = []
+        if self.sources.get("canvas_ical") or self.sources.get("canvas_api"):
+            names.append("ELMS")
+        if self.sources.get("gradescope"):
+            names.append("Gradescope")
+        return " or ".join(names) or "your course sites"
+
+    def post_sources(self) -> str:
+        """Where staff posts come from, for copy: "ELMS and Piazza"."""
+        names = []
+        if self.has(Feature.CANVAS_ANNOUNCEMENTS):
+            names.append("ELMS")
+        if self.has(Feature.PIAZZA):
+            names.append("Piazza")
+        return " and ".join(names) or "your course sites"
 
     def with_budget(self, *, spent: float, cap: float) -> Capabilities:
         """The budget hides only affordances that make new AI calls (Re-run AI estimate).

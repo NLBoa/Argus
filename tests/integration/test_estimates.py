@@ -21,6 +21,7 @@ from argus.estimates import (
 from argus.store import repo
 from argus.store.db import transaction
 from tests.ai_fakes import FakeTransport, ok, recorded
+from tests.caps import EVERY_SOURCE
 
 
 @pytest.fixture
@@ -85,7 +86,7 @@ def items(db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock) -> di
             now,
         )
         repo.apply_merge(db, ids, now)
-        repo.refresh_statuses(db, now)
+        repo.refresh_statuses(db, now, tracking_sources=EVERY_SOURCE)
     return {i.title: i for i in repo.list_items(db)}
 
 

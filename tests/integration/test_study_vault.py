@@ -35,6 +35,7 @@ from argus.vault import layout
 from argus.vault import service as vault
 from argus.vault.regions import parse, replace_region
 from tests.ai_fakes import FakeTransport, ok
+from tests.caps import EVERY_SOURCE, tracked_caps
 
 SLIDE_3 = "The master theorem solves recurrences of the form T(n) = aT(n/b) + f(n)."
 SLIDE_4 = "Example: T(n) = 2T(n/2) + n gives Theta(n log n), case 2."
@@ -165,7 +166,7 @@ def world(db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock) -> di
             now,
         )
         repo.apply_merge(db, ids, now)
-        repo.refresh_statuses(db, now)
+        repo.refresh_statuses(db, now, tracking_sources=EVERY_SOURCE)
     return {i.title: i.id for i in repo.list_items(db)}
 
 
@@ -275,7 +276,7 @@ async def test_self_grading_updates_readiness_and_review_nudges(
         "SELECT start_at FROM plan_blocks WHERE kind = 'review' ORDER BY start_at"
     ).fetchone()[0]
     clock.set(repo.parse_iso(first) + timedelta(minutes=2))
-    engine = ReminderEngine(db, app_config, clock, Router([]))
+    engine = ReminderEngine(db, app_config, clock, Router([]), caps=tracked_caps(app_config))
     [nudge] = start_nudges(engine.snapshot(clock.now()))
     assert nudge.title == "Time to review" and "Review: Master theorem" in nudge.body
     assert any(r.rule is Rule.START_NUDGE for r in candidates(engine.snapshot(clock.now())))
@@ -434,7 +435,7 @@ def test_three_failed_cycles_raise_a_system_alert(
     broken = app_config.model_copy(
         update={"paths": app_config.paths.model_copy(update={"vault_dir": blocker / "vault"})}
     )
-    engine = ReminderEngine(db, broken, clock, Router([]))
+    engine = ReminderEngine(db, broken, clock, Router([]), caps=tracked_caps(broken))
     for n in range(3):
         assert vault.run_cycle(db, broken, clock).status == "error"
         alerts = [

@@ -61,10 +61,37 @@ def test_overdue_beats_plan() -> None:
 
 
 def test_levels_have_labels_and_order() -> None:
-    assert [lvl.label for lvl in RiskLevel] == ["On track", "Watch", "At risk", "Overdue"]
+    assert [lvl.label for lvl in RiskLevel] == [
+        "On track",
+        "Watch",
+        "Did you submit?",
+        "At risk",
+        "Overdue",
+    ]
     assert (
         RiskLevel.OVERDUE.severity
         > RiskLevel.AT_RISK.severity
         > RiskLevel.WATCH.severity
         > RiskLevel.OK.severity
     )
+
+
+# ---------------------------------------------------------------- untracked submissions (D056)
+
+
+def test_untracked_past_due_is_unconfirmed_not_overdue() -> None:
+    it = item(timedelta(hours=-1))
+    assert assess(it, NOW, tracked=False) == RiskLevel.UNCONFIRMED
+    assert assess(it, NOW, tracked=True) == RiskLevel.OVERDUE
+    assert assess(it, NOW) == RiskLevel.OVERDUE  # tracked unless told otherwise
+    # Not yet due: the usual rules apply.
+    assert assess(item(timedelta(hours=20)), NOW, tracked=False) == RiskLevel.WATCH
+    assert assess(item(timedelta(hours=-1), ItemStatus.SUBMITTED), NOW, tracked=False) == (
+        RiskLevel.OK
+    )
+
+
+def test_unconfirmed_label() -> None:
+    assert RiskLevel.UNCONFIRMED.label == "Did you submit?"
+    assert RiskLevel.UNCONFIRMED.slug == "unconfirmed"
+    assert RiskLevel.OK.severity < RiskLevel.UNCONFIRMED.severity < RiskLevel.AT_RISK.severity

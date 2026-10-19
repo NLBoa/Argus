@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from argus.clock import Clock, local_datetime, to_local
-from argus.collectors.base import CollectContext
-from argus.collectors.http import Fetcher
-from argus.collectors.runner import default_collectors
-from argus.config import AppConfig, Secrets
+from argus.capabilities import Capabilities, Feature
+from argus.clock import local_datetime, to_local
+from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.estimates import effective_estimates, estimate_sources
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import Busy, busy_on
+from argus.planner.risk import RiskLevel
 from argus.planning import blocks_between, explanation, risk_map, workload
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
@@ -44,37 +44,35 @@ from argus.web.viewmodels import (
 )
 
 PAST_DUE_WINDOW = timedelta(days=3)
-ACTIVE_RULES = set(Rule)  # every rule is live as of Phase 6
-
-
-def configured_sources(
-    config: AppConfig, secrets: Secrets, fetcher: Fetcher, clock: Clock
-) -> dict[str, bool]:
-    ctx = CollectContext(config=config, secrets=secrets, clock=clock, fetcher=fetcher)
-    return {c.source.value: c.enabled(ctx) for c in default_collectors()}
+CONFIRM_WINDOW = timedelta(days=7)  # "Did you submit?" stays on Today this long (D056)
 
 
 def source_statuses(
-    conn: sqlite3.Connection, configured: dict[str, bool], now: datetime
+    conn: sqlite3.Connection, configured: Mapping[str, bool], now: datetime
 ) -> list[SourceStatusView]:
     health = repo.source_health(conn, SOURCES)
     return [source_status(s, health.get(s), configured.get(s, False), now) for s in SOURCES]
 
 
 def notices(
-    conn: sqlite3.Connection, configured: dict[str, bool], now: datetime
+    conn: sqlite3.Connection, configured: Mapping[str, bool], now: datetime
 ) -> list[StaleNotice]:
     return stale_notices(source_statuses(conn, configured, now))
 
 
 def _views(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, **filters: object
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    *,
+    caps: Capabilities,
+    **filters: object,
 ) -> list[ItemView]:
     courses = course_views(config)
     timer = repo.running_timer(conn)
     running = timer.item_id if timer else None
     estimates = estimate_views(conn, now)
-    risk = risk_map(conn, config, now)
+    risk = risk_map(conn, config, now, tracking_sources=caps.tracking_sources)
     return [
         item_view(
             i,
@@ -118,7 +116,9 @@ class TodayData:
     timer: TimerView | None
 
 
-def load_today(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> TodayData:
+def load_today(
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
+) -> TodayData:
     today = to_local(now).date()
     start = local_datetime(today, 0)
     tomorrow = local_datetime(today + timedelta(days=1), 0)
@@ -127,25 +127,35 @@ def load_today(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> To
         conn,
         config,
         now,
+        caps=caps,
         due_after=now - timedelta(days=14),
         due_before=after,
         include_undated=False,
     )
     recent = now - PAST_DUE_WINDOW
+    # D056: past-due work no source can report a submission for asks, it doesn't accuse.
+    unconfirmed = [
+        v
+        for v in views
+        if v.risk is RiskLevel.UNCONFIRMED and v.due_at and now - CONFIRM_WINDOW <= v.due_at < now
+    ]
     overdue = [
         v
         for v in views
         if v.due_at
         and recent <= v.due_at < now
+        and v.risk is not RiskLevel.UNCONFIRMED
         and (v.status.is_open or v.status == ItemStatus.MISSED)
         and v.kind.takes_submission
     ]
-    overdue_ids = {v.id for v in overdue}
+    past_ids = {v.id for v in overdue} | {v.id for v in unconfirmed}
     due_today = [
-        v for v in views if v.due_at and start <= v.due_at < tomorrow and v.id not in overdue_ids
+        v for v in views if v.due_at and start <= v.due_at < tomorrow and v.id not in past_ids
     ]
     due_tomorrow = [v for v in views if v.due_at and tomorrow <= v.due_at < after]
     groups: list[TodayGroup] = []
+    if unconfirmed:
+        groups.append(TodayGroup(None, "Did you submit?", tuple(unconfirmed)))
     if overdue:
         groups.append(TodayGroup(None, "Past due", tuple(overdue)))
     groups.append(
@@ -174,6 +184,8 @@ def load_today(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> To
         parts.append(f"{len(due_tomorrow)} tomorrow")
     if overdue:
         parts.append(f"{len(overdue)} past due")
+    if unconfirmed:
+        parts.append(f"{len(unconfirmed)} to confirm")
     busy = busy_on(today, repo.list_meetings(conn), config.schedule.commitments)
     busy += _sessions(conn, today)
     by_id = {v.id: v for v in views}
@@ -227,9 +239,17 @@ def _running_extra(
 
 
 def load_upcoming(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, days: int, course: str | None
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    caps: Capabilities,
+    now: datetime,
+    *,
+    days: int,
+    course: str | None,
 ) -> list[DayGroup]:
-    views = _views(conn, config, now, due_after=now, due_before=now + timedelta(days=days))
+    views = _views(
+        conn, config, now, caps=caps, due_after=now, due_before=now + timedelta(days=days)
+    )
     if course:
         views = [v for v in views if v.course.code == course]
     return group_by_day(views, to_local(now).date())
@@ -240,7 +260,13 @@ class RuleRow:
     rule: str
     label: str
     muted: bool
-    active: bool
+    note: str | None  # why the rule cannot fire with the current setup (Health only, D055)
+
+
+def rule_note(rule: Rule, caps: Capabilities) -> str | None:
+    if rule is Rule.ANNOUNCED and not (caps.has(Feature.STAFF_POSTS) and caps.has(Feature.AI)):
+        return "needs staff posts (ELMS API or Piazza) and AI"
+    return None
 
 
 @dataclass(frozen=True)
@@ -300,7 +326,7 @@ def vault_status(conn: sqlite3.Connection, now: datetime) -> VaultStatus:
 def load_health(
     conn: sqlite3.Connection,
     config: AppConfig,
-    configured: dict[str, bool],
+    caps: Capabilities,
     channels: list[str],
     now: datetime,
 ) -> HealthData:
@@ -308,7 +334,7 @@ def load_health(
     sent = repo.notifications_sent_between(
         conn, local_datetime(today, 0), local_datetime(today + timedelta(days=1), 0)
     )
-    statuses = source_statuses(conn, configured, now)
+    statuses = source_statuses(conn, caps.sources, now)
     health = repo.source_health(conn, SOURCES)
     successes = [h.last_success for h in health.values() if h.last_success]
     muted = repo.muted_rules(conn, now)
@@ -319,7 +345,7 @@ def load_health(
         channel=channels[0] if channels else None,
         ai_spend=ai_spend(conn, config, now),
         last_sync=relative(max(successes), now) if successes else None,
-        rules=[RuleRow(r.value, r.label, r.value in muted, r in ACTIVE_RULES) for r in Rule],
+        rules=[RuleRow(r.value, r.label, r.value in muted, rule_note(r, caps)) for r in Rule],
         vault=vault_status(conn, now),
         notifications=[
             NotificationLine(
@@ -353,13 +379,14 @@ class KioskData:
 
 
 def load_kiosk(
-    conn: sqlite3.Connection, config: AppConfig, configured: dict[str, bool], now: datetime
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> KioskData:
     today = to_local(now).date()
     views = _views(
         conn,
         config,
         now,
+        caps=caps,
         due_after=now,
         due_before=now + timedelta(days=7),
         open_only=True,
@@ -380,17 +407,18 @@ def load_kiosk(
         date_text=long_date(today),
         timeline=timeline(today, busy, now, config=config, courses=course_views(config)),
         deadlines=views[:6],
-        notices=notices(conn, configured, now),
+        notices=notices(conn, caps.sources, now),
     )
 
 
 def palette_items(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> list[dict[str, str]]:
     views = _views(
         conn,
         config,
         now,
+        caps=caps,
         due_after=now - timedelta(days=1),
         due_before=now + timedelta(days=30),
         open_only=True,
@@ -441,7 +469,6 @@ class ModuleView:
     name: str
     state: str | None
     items: list[ModuleItemView]
-    digest: str | None
 
 
 @dataclass(frozen=True)
@@ -457,7 +484,10 @@ class CourseData:
     section: str
     instructors: tuple[str, ...]
     meetings: list[MeetingLine]
-    tier2: bool  # Canvas token configured: grade and modules exist as concepts
+    show_modules: bool  # the modules sync is set up for this course (D025, D055)
+    show_grade: bool
+    show_posts: bool  # some staff-post source is set up for this course
+    post_sources: str  # "ELMS and Piazza", for the empty state
     grade: str | None
     grade_updated: str | None
     modules: list[ModuleView]
@@ -499,7 +529,7 @@ _POST_KINDS = {
 def load_course(
     conn: sqlite3.Connection,
     config: AppConfig,
-    configured: dict[str, bool],
+    caps: Capabilities,
     now: datetime,
     code: str,
 ) -> CourseData | None:
@@ -518,9 +548,9 @@ def load_course(
         for m in repo.list_meetings(conn)
         if m.course_code == code
     ]
-    tier2 = configured.get("canvas_modules", False)
+    course_caps = caps.course(code)
     modules = []
-    if tier2:
+    if course_caps.modules:
         for sm in repo.list_modules(conn, code):
             modules.append(
                 ModuleView(
@@ -538,7 +568,6 @@ def load_course(
                         )
                         for i in sm.record.items
                     ],
-                    digest=sm.digest,
                 )
             )
     views = [
@@ -547,6 +576,7 @@ def load_course(
             conn,
             config,
             now,
+            caps=caps,
             due_after=now - timedelta(days=14),
             due_before=now + timedelta(days=60),
         )
@@ -568,7 +598,9 @@ def load_course(
             staff=p.author_role.is_staff,
         )
         for p in repo.list_posts(conn, code)
-        if p.author_role.is_staff and p.kind != "syllabus"
+        if p.author_role.is_staff
+        and p.kind != "syllabus"
+        and caps.shows_post(platform=p.platform, kind=p.kind, course=code)
     ][:8]
     base = config.canvas.base_url.rstrip("/")
     links = []
@@ -581,7 +613,7 @@ def load_course(
     if cfg.piazza_network_id:
         links.append(CourseLink("Piazza", f"https://piazza.com/class/{cfg.piazza_network_id}"))
     grade = None
-    if row.grade_score is not None:
+    if course_caps.modules and row.grade_score is not None:
         grade = f"{row.grade_score:g}%" + (f" ({row.grade_letter})" if row.grade_letter else "")
     return CourseData(
         course=courses[code],
@@ -589,7 +621,10 @@ def load_course(
         section=row.section,
         instructors=row.instructors,
         meetings=meetings,
-        tier2=tier2,
+        show_modules=course_caps.modules,
+        show_grade=course_caps.modules,
+        show_posts=course_caps.canvas_api or course_caps.piazza,
+        post_sources=caps.post_sources(),
         grade=grade,
         grade_updated=relative(row.grade_updated_at, now) if row.grade_updated_at else None,
         modules=modules,
@@ -629,10 +664,14 @@ SEARCH_GROUPS = (
 
 
 def load_search(
-    conn: sqlite3.Connection, config: AppConfig, text: str, course: str | None
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    caps: Capabilities,
+    text: str,
+    course: str | None,
 ) -> list[SearchGroup]:
     courses = course_views(config)
-    hits = repo.search(conn, text, course=course)
+    hits = [h for h in repo.search(conn, text, course=course) if _searchable(conn, caps, h)]
     groups = []
     for kind, label in SEARCH_GROUPS:
         matched = [
@@ -643,6 +682,44 @@ def load_search(
         if matched:
             groups.append(SearchGroup(label, matched))
     return groups
+
+
+def _searchable(conn: sqlite3.Connection, caps: Capabilities, hit: repo.SearchHit) -> bool:
+    """Hits from a source that is no longer set up are not shown (D055)."""
+    if hit.kind == "module":
+        return caps.course(hit.course).modules
+    if hit.kind == "post":
+        row = conn.execute(
+            "SELECT platform, kind FROM posts WHERE id = ?", (int(hit.ref_id),)
+        ).fetchone()
+        return row is not None and caps.shows_post(
+            platform=row["platform"], kind=row["kind"], course=hit.course
+        )
+    return True
+
+
+def search_scope(caps: Capabilities) -> tuple[str, str]:
+    """(placeholder, empty-state text) naming only what search can find with this setup."""
+    things = ["assignments"]
+    covers = ["Assignment instructions"]
+    if caps.has(Feature.MODULES):
+        things.append("modules")
+        covers.append("module titles")
+    if caps.has(Feature.CANVAS_ANNOUNCEMENTS):
+        covers.append("ELMS announcements")
+    if caps.has(Feature.PIAZZA):
+        covers.append("Piazza posts")
+    if caps.has(Feature.STAFF_POSTS):
+        things.append("posts")
+    placeholder = "Search " + (
+        ", ".join(things[:-1]) + ", and " + things[-1] if len(things) > 2 else " and ".join(things)
+    )
+    text = (
+        (", ".join(covers[:-1]) + ", and " + covers[-1])
+        if len(covers) > 2
+        else " and ".join(covers)
+    )
+    return placeholder, text + "."
 
 
 # ---------------------------------------------------------------- estimate detail
@@ -693,12 +770,12 @@ class ItemDetail:
 
 
 def load_item(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, item_id: int
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime, item_id: int
 ) -> ItemDetail | None:
     item = repo.get_item(conn, item_id)
     if item is None:
         return None
-    views = {v.id: v for v in _views(conn, config, now)}
+    views = {v.id: v for v in _views(conn, config, now, caps=caps)}
     view = views.get(item.id) or item_view(item, now, course_views(config))
     eff = effective_estimates(conn, now).get(item.id)
     history = repo.estimates_for(conn, item.id)
@@ -732,7 +809,7 @@ def load_item(
                 log.ended_at is None,
             )
         )
-    risk = risk_map(conn, config, now).get(item.id)
+    risk = risk_map(conn, config, now, tracking_sources=caps.tracking_sources).get(item.id)
     row = conn.execute("SELECT scope, logistics FROM items WHERE id = ?", (item.id,)).fetchone()
     return ItemDetail(
         obsidian=obsidian_link(config, item_note_path(item)),
@@ -785,7 +862,9 @@ class WorkloadData:
     total_free: float
 
 
-def load_workload(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> WorkloadData:
+def load_workload(
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
+) -> WorkloadData:
     rows = workload(conn, config, now)
     today = to_local(now).date()
     days = [
@@ -799,7 +878,7 @@ def load_workload(conn: sqlite3.Connection, config: AppConfig, now: datetime) ->
     ]
     risky = [
         v
-        for v in _views(conn, config, now, open_only=True)
+        for v in _views(conn, config, now, caps=caps, open_only=True)
         if v.risk.slug in ("at-risk", "watch", "overdue")
     ]
     risky.sort(key=lambda v: (-v.risk.severity, v.due_at or now))
@@ -887,13 +966,29 @@ def finding_view(
 
 
 def load_announcements(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> list[CourseAnnouncements]:
     from argus.announcements import worth_analyzing
 
     courses = course_views(config)
-    findings = repo.list_findings(conn)
-    pending_posts = [p for p in repo.posts_to_scan(conn, limit=200) if worth_analyzing(p)]
+
+    def shown(post_id: int) -> bool:
+        stored = repo.get_post(conn, post_id)
+        return stored is not None and caps.shows_post(
+            platform=stored.record.platform,
+            kind=stored.record.kind,
+            course=stored.record.course_code,
+        )
+
+    findings = [f for f in repo.list_findings(conn) if shown(f.post_id)]
+    pending_posts = [
+        p
+        for p in repo.posts_to_scan(conn, limit=200)
+        if worth_analyzing(p)
+        and caps.shows_post(
+            platform=p.record.platform, kind=p.record.kind, course=p.record.course_code
+        )
+    ]
     out = []
     for code, course in courses.items():
         mine = [f for f in findings if f.course_code == code]

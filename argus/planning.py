@@ -296,9 +296,16 @@ class RiskView:
     free_before_due: float | None
 
 
-def risk_map(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> dict[int, RiskView]:
+def risk_map(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    *,
+    tracking_sources: frozenset[str],
+) -> dict[int, RiskView]:
     """The spec rule for every open item: at risk when free hours before due < remaining p80.
-    Items the plan cannot fully fit (earlier deadlines take the time) are at least Watch."""
+    Items the plan cannot fully fit (earlier deadlines take the time) are at least Watch.
+    Past-due items no enabled source reports submissions for are UNCONFIRMED (D056)."""
     inputs = gather(conn, config, now)
     squeezed = schedule(inputs.items, inputs.free).unscheduled
     out: dict[int, RiskView] = {}
@@ -309,8 +316,18 @@ def risk_map(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> dict
             if item.due_at and remaining is not None
             else None
         )
-        level = assess(item, now, remaining_p80_hours=remaining, free_hours_before_due=free)
-        if item.id in squeezed and level.severity < RiskLevel.WATCH.severity:
+        level = assess(
+            item,
+            now,
+            remaining_p80_hours=remaining,
+            free_hours_before_due=free,
+            tracked=item.tracked_by(tracking_sources),
+        )
+        if (
+            item.id in squeezed
+            and level.severity < RiskLevel.WATCH.severity
+            and level is not RiskLevel.UNCONFIRMED
+        ):
             level = RiskLevel.WATCH
         out[item.id] = RiskView(level, remaining, free)
     return out

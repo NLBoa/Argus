@@ -18,7 +18,7 @@
 {%- else %}<span class="course-chip" data-accent="{{ course.accent }}">{{ course.code }}</span>{% endif %}
 {%- endmacro %}
 
-{% set RISK_ICONS = {"ok": "circle-check", "watch": "clock", "at-risk": "triangle-alert", "overdue": "octagon-alert"} %}
+{% set RISK_ICONS = {"ok": "circle-check", "watch": "clock", "unconfirmed": "circle-help", "at-risk": "triangle-alert", "overdue": "octagon-alert"} %}
 {% macro risk_badge(risk) -%}
 <span class="risk-badge" data-risk="{{ risk.slug }}">{{ icon(RISK_ICONS[risk.slug], "icon-sm") }}{{ risk.label }}</span>
 {%- endmacro %}

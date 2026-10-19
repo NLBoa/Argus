@@ -9,6 +9,8 @@
   const readBoot = () => {
     try { return JSON.parse($("#argus-boot")?.textContent || "{}"); } catch { return {}; }
   };
+  // Pages the setup cannot support (e.g. Announcements with no staff-post source): skip them.
+  const hiddenPages = () => new Set(readBoot().pages || []);
   const setCookie = (name, value) => {
     document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   };
@@ -99,7 +101,7 @@
         if (palette.open || typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
         if (this.pending === "g") {
           this.pending = null;
-          if (GO[e.key]) { e.preventDefault(); navigate(GO[e.key]); }
+          if (GO[e.key] && !hiddenPages().has(GO[e.key])) { e.preventDefault(); navigate(GO[e.key]); }
           return;
         }
         if (e.key === "g") { this.pending = "g"; setTimeout(() => { this.pending = null; }, 1200); return; }
@@ -138,7 +140,8 @@
       },
       get results() {
         const q = this.query.trim().toLowerCase();
-        const all = [...COMMANDS, ...this.items];
+        const hidden = hiddenPages();
+        const all = [...COMMANDS.filter((c) => !hidden.has(c.href)), ...this.items];
         if (!q) return all.slice(0, 12);
         const words = q.split(/\s+/);
         return all.filter((o) => words.every((w) => `${o.label} ${o.hint}`.toLowerCase().includes(w))).slice(0, 20);

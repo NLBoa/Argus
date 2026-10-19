@@ -29,7 +29,7 @@ from argus.collectors.piazza_email import PiazzaEmailCollector
 from argus.collectors.schedule import POLICIES, is_due
 from argus.collectors.umdio import UmdioCollector
 from argus.config import AppConfig, Secrets
-from argus.domain.models import Source
+from argus.domain.models import SUBMISSION_SOURCES, Source
 from argus.logging import get_logger, redactor
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
@@ -101,6 +101,15 @@ class SyncRunner:
         self.fetcher = fetcher
         self.collectors = list(collectors) if collectors is not None else default_collectors()
         self.timeout = timeout
+
+    def tracking_sources(self, ctx: CollectContext) -> frozenset[str]:
+        """This runner's enabled collectors that report submissions (D056). Same rule as
+        `Capabilities.tracking_sources`, computed from the collectors actually in use."""
+        return frozenset(
+            c.source.value
+            for c in self.collectors
+            if c.source.value in SUBMISSION_SOURCES and c.enabled(ctx)
+        )
 
     def _context(self) -> CollectContext:
         return CollectContext(
@@ -178,7 +187,9 @@ class SyncRunner:
         with transaction(self.conn):
             attach_official(self.conn)  # official records take over announced items
             report.new_items = repo.apply_merge(self.conn, ids, self.clock.now())
-            report.status_changes = repo.refresh_statuses(self.conn, self.clock.now())
+            report.status_changes = repo.refresh_statuses(
+                self.conn, self.clock.now(), tracking_sources=self.tracking_sources(ctx)
+            )
             repo.rebuild_search_index(self.conn)
         for r in results:
             log.info(

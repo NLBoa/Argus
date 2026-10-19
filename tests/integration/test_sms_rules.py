@@ -22,6 +22,7 @@ from argus.reminders.guards import Verdict
 from argus.reminders.rules import Rule
 from argus.store.db import iso, open_db
 from argus.worker import build_router
+from tests.caps import tracked_caps
 
 SID = "AC00000000000000000000000000000000"
 MSG = OutboundMessage("Due today", "[1] HW 3", "Due today: [1] HW 3")
@@ -107,7 +108,9 @@ def engine(conn: sqlite3.Connection, clock: FakeClock) -> tuple[ReminderEngine, 
     from argus.notify.router import Router
 
     cap = Capture()
-    return ReminderEngine(conn, DEMO_CONFIG, clock, Router([cap])), cap
+    return ReminderEngine(
+        conn, DEMO_CONFIG, clock, Router([cap]), caps=tracked_caps(DEMO_CONFIG)
+    ), cap
 
 
 async def test_morning_brief_countdown_and_announced(

@@ -13,8 +13,8 @@
   <p class="text-sm text-muted">From <a href="{{ f.source_url }}" rel="noopener" target="_blank">{{ f.source_name }}<span class="visually-hidden"> (opens in a new tab)</span></a>, {{ f.posted_text }}</p>
   {% if f.state in ("pending", "conflict") %}
   <div class="finding-card__actions">
-    <button class="btn btn-primary btn-sm" type="button" hx-post="/findings/{{ f.id }}/confirm" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML">{{ icon("check", "icon-sm") }}{{ f.confirm_label }}</button>
-    <button class="btn btn-sm" type="button" hx-post="/findings/{{ f.id }}/dismiss" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML">{{ icon("x", "icon-sm") }}Dismiss</button>
+    <form method="post" action="/findings/{{ f.id }}/confirm" hx-post="/findings/{{ f.id }}/confirm" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML"><button class="btn btn-primary btn-sm" type="submit">{{ icon("check", "icon-sm") }}{{ f.confirm_label }}</button></form>
+    <form method="post" action="/findings/{{ f.id }}/dismiss" hx-post="/findings/{{ f.id }}/dismiss" hx-target="#finding-{{ f.id }}" hx-swap="outerHTML"><button class="btn btn-sm" type="submit">{{ icon("x", "icon-sm") }}Dismiss</button></form>
   </div>
   {% endif %}
 </article>

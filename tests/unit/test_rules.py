@@ -244,3 +244,22 @@ def test_ai_budget_alert_once_per_month() -> None:
     [r] = candidates(snap(ai_budget_month="2026-10"))
     assert r.rule == Rule.SYSTEM_ALERT and r.keys == ("system:ai_budget:2026-10",)
     assert candidates(snap(ai_budget_month="2026-10", sent=set(r.keys))) == []
+
+
+# ---------------------------------------------------------------- untracked submissions (D056)
+
+
+@pytest.mark.parametrize("due", [timedelta(hours=20), timedelta(hours=2)])
+def test_untracked_items_same_timing_and_keys_new_wording(due: timedelta) -> None:
+    it = item(1, due)
+    [tracked] = candidates(snap(it))
+    [untracked] = candidates(snap(it, untracked=frozenset({1})))
+    for field in ("rule", "keys", "title", "item_ids", "priority", "bypass_quiet"):
+        assert getattr(tracked, field) == getattr(untracked, field), field
+    assert tracked.counts_toward_cap == untracked.counts_toward_cap
+    assert tracked.expires_at == untracked.expires_at
+    assert "Not submitted" not in untracked.body  # Argus can't see submissions for it
+    if tracked.rule is Rule.DUE_3H:
+        assert "Not submitted yet." in tracked.body
+        assert "Reply DONE 1 once submitted." in untracked.body
+    assert gsm_length(untracked.sms) <= SEGMENT

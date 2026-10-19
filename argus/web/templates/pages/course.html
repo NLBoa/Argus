@@ -21,8 +21,8 @@
       {% endif %}
     </section>
 
-    {% if data.tier2 %}
-    <section aria-labelledby="modules-heading">
+    {% if data.show_modules %}
+    <section aria-labelledby="modules-heading" data-requires="modules">
       <h2 class="section-title" id="modules-heading">Modules <span class="section-count">{{ data.modules|length }}</span></h2>
       {% if data.modules %}
       <div class="panel">
@@ -32,7 +32,6 @@
             <span class="font-bold">{{ m.name }}</span>
             {% set n = m.items|rejectattr("is_header")|list|length %}<span class="text-sm text-muted">{{ n }} item{{ "" if n == 1 else "s" }}{% if m.state == "completed" %}, completed{% elif m.state == "locked" %}, locked{% endif %}</span>
           </summary>
-          {% if m.digest %}<p class="module__digest">{{ m.digest }}</p>{% endif %}
           <ul class="module__items">
             {% for i in m.items %}
               {% if i.is_header %}<li class="module__header" style="--indent: {{ i.indent }}">{{ i.title }}</li>
@@ -57,8 +56,8 @@
   </div>
 
   <aside class="grid gap-6 content-start" aria-label="Course details">
-    {% if data.tier2 %}
-    <section class="panel panel-pad" aria-labelledby="grade-heading">
+    {% if data.show_grade %}
+    <section class="panel panel-pad" aria-labelledby="grade-heading" data-requires="grade">
       <h2 class="section-title" id="grade-heading">Current grade</h2>
       {% if data.grade %}<p class="stat__value">{{ data.grade }}</p><p class="text-sm text-muted">From ELMS, updated {{ data.grade_updated }}</p>
       {% else %}<p class="text-muted">ELMS hasn't published a grade yet.</p>{% endif %}
@@ -78,7 +77,8 @@
       <p class="flex flex-wrap gap-2">{% for l in data.links %}<a class="btn btn-sm" href="{{ l.url }}" rel="noopener" target="_blank">{{ l.label }}{{ icon("external-link", "icon-sm") }}<span class="visually-hidden"> (opens in a new tab)</span></a>{% endfor %}</p>
     </section>
     {% endif %}
-    <section aria-labelledby="posts-heading">
+    {% if data.show_posts %}
+    <section aria-labelledby="posts-heading" data-requires="staff_posts">
       <h2 class="section-title" id="posts-heading">From the instructors</h2>
       {% if data.posts %}
       <ul class="panel m-0 p-0 list-none">
@@ -91,9 +91,10 @@
         {% endfor %}
       </ul>
       {% else %}
-        <div class="panel">{{ empty_state("megaphone", "No announcements yet", "Staff posts from ELMS and Piazza appear here.") }}</div>
+        <div class="panel">{{ empty_state("megaphone", "No announcements yet", "Staff posts from " ~ data.post_sources ~ " appear here.") }}</div>
       {% endif %}
     </section>
+    {% endif %}
   </aside>
 </div>
 {% endif %}

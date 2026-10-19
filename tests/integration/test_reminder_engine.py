@@ -19,6 +19,7 @@ from argus.reminders.guards import Verdict
 from argus.reminders.rules import Rule
 from argus.store import repo
 from argus.store.db import transaction
+from tests.caps import EVERY_SOURCE, tracked_caps
 
 NTFY = "https://ntfy.example.test/"
 
@@ -37,7 +38,9 @@ def engine(
     router = Router([NtfyChannel(fetcher(), "https://ntfy.example.test", topic)])
     # These tests are about deadline rules; the morning brief has its own tests (test_sms_rules.py).
     late = cfg.schedule.model_copy(update={"morning_brief": time(23, 59)})
-    return ReminderEngine(db, cfg.model_copy(update={"schedule": late}), clock, router)
+    return ReminderEngine(
+        db, cfg.model_copy(update={"schedule": late}), clock, router, caps=tracked_caps(cfg)
+    )
 
 
 def seed(
@@ -70,7 +73,7 @@ def seed(
             "UPDATE items SET created_at = ?",
             ((now - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),),
         )
-        repo.refresh_statuses(db, now)
+        repo.refresh_statuses(db, now, tracking_sources=EVERY_SOURCE)
     return {i.title: i.id for i in repo.list_items(db)}
 
 
@@ -98,7 +101,8 @@ async def test_sends_once_with_ntfy_payload(
     assert first == {
         "topic": "argus-topic",
         "title": "Due in 2h",
-        "message": "[1] CMSC351 Homework 3, Mon 2pm. Not submitted yet.",
+        # iCal-only items: no source reports submissions, so Argus asks instead (D056).
+        "message": "[1] CMSC351 Homework 3, Mon 2pm. Reply DONE 1 once submitted.",
         "priority": 5,
         "tags": ["rotating_light"],
     }

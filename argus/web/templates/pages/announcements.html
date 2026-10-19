@@ -23,7 +23,7 @@
       <div class="grid gap-4 md:grid-cols-2 mb-6">{% for f in c.recent %}{{ finding_card(f) }}{% endfor %}</div>
     {% endif %}
     {% if c.unanalyzed %}
-      <h3 class="font-bold mb-2">Not analyzed yet</h3>
+      <h3 class="font-bold mb-2">{{ "Not analyzed yet" if caps.has("ai") else "Staff posts" }}</h3>
       <ul class="panel m-0 p-0 list-none mb-6">
         {% for p in c.unanalyzed %}
         <li class="px-4 py-3 border-b border-line last:border-b-0">

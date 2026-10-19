@@ -27,6 +27,7 @@ from argus.store.db import (
     schema_version,
     transaction,
 )
+from tests.caps import EVERY_SOURCE
 
 T0 = datetime(2026, 10, 23, 3, 59, tzinfo=UTC)
 
@@ -274,8 +275,10 @@ def test_statuses_and_list_filters(
             now,
         )
         repo.apply_merge(db, ids, now)
-        assert repo.refresh_statuses(db, now) == 2  # past -> missed, done -> submitted
-        assert repo.refresh_statuses(db, now) == 0
+        assert (
+            repo.refresh_statuses(db, now, tracking_sources=EVERY_SOURCE) == 2
+        )  # past -> missed, done -> submitted
+        assert repo.refresh_statuses(db, now, tracking_sources=EVERY_SOURCE) == 0
     status = {i.title: i.status for i in repo.list_items(db)}
     assert status == {
         "HW 1": ItemStatus.MISSED,

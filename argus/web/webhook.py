@@ -27,6 +27,7 @@ from fastapi.responses import PlainTextResponse, Response
 
 from argus import __version__
 from argus.ai.client import AIClient, build_transport
+from argus.capabilities import derive
 from argus.clock import Clock, SystemClock
 from argus.config import AppConfig, Secrets
 from argus.logging import get_logger
@@ -89,6 +90,7 @@ def create_webhook_app(
 ) -> FastAPI:
     clk = clock or SystemClock()
     path = db_path or config.paths.db_path
+    caps = derive(config, secrets, ai=ai_transport is not None)
     lock = asyncio.Lock()
     app = FastAPI(
         title="Argus webhook", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
@@ -124,7 +126,7 @@ def create_webhook_app(
                 )
                 transport = ai_transport if ai_transport is not None else build_transport(key)
                 ai = AIClient(conn, config.ai, clk, transport)
-                reply = await Inbox(conn, config, clk, ai).handle(sid, body)
+                reply = await Inbox(conn, config, clk, ai, caps=caps).handle(sid, body)
             finally:
                 conn.close()
         return Response(twiml(reply), media_type="application/xml")

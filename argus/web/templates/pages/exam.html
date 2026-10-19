@@ -14,7 +14,7 @@
     <p class="text-muted mb-4">Answer each one on paper before you open the answer, then say how it went. Your weakest concepts come first.</p>
     <div class="grid gap-4">{% for q in data.practice %}{{ practice_card(q) }}{% endfor %}</div>
     {% else %}
-    <div class="panel">{{ empty_state("notebook-pen", "No practice questions yet", "Questions appear once concept notes for this course are generated and verified.") }}</div>
+    {% if caps.has("study_generation") %}<div class="panel">{{ empty_state("notebook-pen", "No practice questions yet", "Questions appear once concept notes for this course are generated and verified.") }}</div>{% endif %}
     {% endif %}
   </section>
   <aside class="grid gap-6 content-start" aria-label="Exam details">

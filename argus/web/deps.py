@@ -14,6 +14,7 @@ from fastapi import Depends, Request
 from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 
+from argus.capabilities import Capabilities, derive
 from argus.clock import Clock
 from argus.collectors.http import Fetcher
 from argus.config import AppConfig, Secrets
@@ -48,6 +49,10 @@ class AppState:
     fetcher: Fetcher | None = None
     sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    caps: Capabilities = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.caps = derive(self.config, self.secrets, ai=self.ai_transport is not None)
 
 
 class Assets:

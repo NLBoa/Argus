@@ -16,6 +16,7 @@ from argus.domain.models import AuthorRole, ItemKind, PostRecord, Source, Source
 from argus.store import repo
 from argus.store.db import transaction
 from tests.ai_fakes import FakeTransport, ok, recorded
+from tests.caps import EVERY_SOURCE
 
 FRI_NOON = datetime(2026, 10, 23, 16, tzinfo=UTC)  # Fri Oct 23 12:00 EDT
 MIDTERM = datetime(2026, 11, 3, 14, 30, tzinfo=UTC)  # Tue Nov 3 9:30 EST
@@ -105,7 +106,9 @@ async def test_staff_announcement_creates_announced_item_then_official_takes_ove
         ),
     )
     t = FakeTransport(responder=responder_for({"Quiz 3 will be": "extract_quiz3_new"}))
-    report = await scan_posts(db, ai(db, clock, t), app_config, clock)
+    report = await scan_posts(
+        db, ai(db, clock, t), app_config, clock, tracking_sources=EVERY_SOURCE
+    )
     assert (report.analyzed, report.findings, report.applied) == (1, 1, 1)
     quiz = by_title(db)["Quiz 3"]
     assert quiz.announced
@@ -148,18 +151,20 @@ async def test_date_change_of_official_item_waits_then_confirm_overrides(
         post("2", "Midterm moved", "Because of the event, Midterm 1 moves to Thursday, Nov 5."),
     )
     t = FakeTransport(responder=responder_for({"Midterm 1 moves": "extract_midterm_moved"}))
-    report = await scan_posts(db, ai(db, clock, t), app_config, clock)
+    report = await scan_posts(
+        db, ai(db, clock, t), app_config, clock, tracking_sources=EVERY_SOURCE
+    )
     assert report.waiting == 1
     midterm = by_title(db)["Midterm 1"]
     assert midterm.due_at == MIDTERM  # unchanged until the student decides
     [f] = repo.list_findings(db, ["conflict"])
-    message = confirm(db, f.id, clock.now())
+    message = confirm(db, f.id, clock.now(), tracking_sources=EVERY_SOURCE)
     assert message == "Using the announced date for Midterm 1: Thu 9:30am"
     midterm = by_title(db)["Midterm 1"]
     assert midterm.due_at == datetime(2026, 11, 5, 14, 30, tzinfo=UTC)  # same 9:30 am, new day
     assert midterm.due_source == Source.MANUAL
     with pytest.raises(LookupError):
-        confirm(db, f.id, clock.now())
+        confirm(db, f.id, clock.now(), tracking_sources=EVERY_SOURCE)
 
     # Review R1: when an official source later changes the date, the student's override yields.
     with transaction(db):
@@ -237,6 +242,7 @@ async def test_dismiss_keeps_official_date(
         ),
         app_config,
         clock,
+        tracking_sources=EVERY_SOURCE,
     )
     [f] = repo.list_findings(db, ["conflict"])
     assert dismiss(db, f.id, clock.now()) == "Kept the official date for Midterm 1"
@@ -259,10 +265,13 @@ async def test_cancellation_needs_confirmation(
         ),
         app_config,
         clock,
+        tracking_sources=EVERY_SOURCE,
     )
     assert "Quiz 2" in by_title(db)
     [f] = repo.list_findings(db, ["pending"])
-    assert confirm(db, f.id, clock.now()) == "Quiz 2 marked cancelled"
+    assert (
+        confirm(db, f.id, clock.now(), tracking_sources=EVERY_SOURCE) == "Quiz 2 marked cancelled"
+    )
     assert "Quiz 2" not in by_title(db)
 
 
@@ -285,6 +294,7 @@ async def test_invented_date_is_dropped_and_scope_applied(
         ),
         app_config,
         clock,
+        tracking_sources=EVERY_SOURCE,
     )
     [f] = repo.list_findings(db)
     assert f.date is None  # the post states no date, so none is kept
@@ -303,6 +313,7 @@ async def test_ungrounded_quote_is_discarded(
         ai(db, clock, FakeTransport(responder=responder_for({"Remember": "extract_ungrounded"}))),
         app_config,
         clock,
+        tracking_sources=EVERY_SOURCE,
     )
     assert repo.list_findings(db) == []
     assert "Quiz 9" not in by_title(db)
@@ -325,12 +336,12 @@ async def test_student_posts_are_held_and_chatter_is_skipped(
         post("7", "Study group", "Anyone want to meet tonight?", role=AuthorRole.STUDENT),
     )
     t = FakeTransport(responder=responder_for({"Quiz 3 will be": "extract_quiz3_new"}))
-    await scan_posts(db, ai(db, clock, t), app_config, clock)
+    await scan_posts(db, ai(db, clock, t), app_config, clock, tracking_sources=EVERY_SOURCE)
     assert len(t.calls) == 1  # the study-group post never reaches the model
     [f] = repo.list_findings(db)
     assert f.status == "pending"
     assert "Quiz 3" not in by_title(db)
-    assert confirm(db, f.id, clock.now()) == "Added Quiz 3"
+    assert confirm(db, f.id, clock.now(), tracking_sources=EVERY_SOURCE) == "Added Quiz 3"
     assert by_title(db)["Quiz 3"].announced
 
 
@@ -339,7 +350,9 @@ async def test_without_ai_posts_wait_and_are_retried(
 ) -> None:
     db, ids = setup
     add_posts(db, ids, clock, post("8", "Quiz 3", "Quiz 3 will be on Friday, Oct 23."))
-    report = await scan_posts(db, ai(db, clock, None), app_config, clock)
+    report = await scan_posts(
+        db, ai(db, clock, None), app_config, clock, tracking_sources=EVERY_SOURCE
+    )
     assert report.deferred == 1
     assert len(repo.posts_to_scan(db)) == 1
     later = await scan_posts(
@@ -351,6 +364,7 @@ async def test_without_ai_posts_wait_and_are_retried(
         ),
         app_config,
         clock,
+        tracking_sources=EVERY_SOURCE,
     )
     assert later.applied == 1
     assert repo.posts_to_scan(db) == []
@@ -367,7 +381,7 @@ async def test_edited_post_supersedes_open_findings(
         post("2", "Midterm moved", "Because of the event, Midterm 1 moves to Thursday, Nov 5."),
     )
     t = FakeTransport(responder=responder_for({"Midterm 1 moves": "extract_midterm_moved"}))
-    await scan_posts(db, ai(db, clock, t), app_config, clock)
+    await scan_posts(db, ai(db, clock, t), app_config, clock, tracking_sources=EVERY_SOURCE)
     add_posts(
         db,
         ids,
@@ -379,7 +393,7 @@ async def test_edited_post_supersedes_open_findings(
             h="edited",
         ),
     )
-    await scan_posts(db, ai(db, clock, t), app_config, clock)
+    await scan_posts(db, ai(db, clock, t), app_config, clock, tracking_sources=EVERY_SOURCE)
     statuses = sorted(f.status for f in repo.list_findings(db))
     assert statuses == ["conflict", "superseded"]
 
@@ -391,6 +405,12 @@ async def test_refusal_marks_post_scanned_without_findings(
 
     db, ids = setup
     add_posts(db, ids, clock, post("9", "Quiz", "Quiz 3 will be on Friday, Oct 23."))
-    await scan_posts(db, ai(db, clock, FakeTransport([refused()])), app_config, clock)
+    await scan_posts(
+        db,
+        ai(db, clock, FakeTransport([refused()])),
+        app_config,
+        clock,
+        tracking_sources=EVERY_SOURCE,
+    )
     assert repo.list_findings(db) == []
     assert repo.posts_to_scan(db) == []

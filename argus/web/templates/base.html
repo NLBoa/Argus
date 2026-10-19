@@ -1,6 +1,9 @@
 {% from "components/ui.html" import icon, logo, stale_banner, offline_banner, proposals_banner %}
-{% set NAV = [("/today", "Today", "Today", "house"), ("/upcoming", "Upcoming", "Upcoming", "calendar-days"), ("/announcements", "Announcements", "Posts", "megaphone"), ("/workload", "Workload", "Workload", "chart-column"), ("/health", "Health", "Health", "activity")] %}
-{% set DESKTOP_NAV = NAV[:4] + [("/exams", "Exam prep", "Exams", "graduation-cap")] + NAV[4:] %}
+{#- Nav entries: (href, label, short label, icon, required feature). A page the setup can't
+    support is left out, never shown empty (D055). -#}
+{% set ALL_NAV = [("/today", "Today", "Today", "house", None), ("/upcoming", "Upcoming", "Upcoming", "calendar-days", None), ("/announcements", "Announcements", "Posts", "megaphone", "staff_posts"), ("/workload", "Workload", "Workload", "chart-column", None), ("/health", "Health", "Health", "activity", None)] %}
+{% set NAV = [] %}{% for n in ALL_NAV %}{% if n[4] is none or caps.has(n[4]) %}{% set _ = NAV.append(n) %}{% endif %}{% endfor %}
+{% set DESKTOP_NAV = NAV[:-1] + [("/exams", "Exam prep", "Exams", "graduation-cap", None)] + NAV[-1:] %}
 <!doctype html>
 <html lang="en"{% if theme in ("light", "dark") %} data-theme="{{ theme }}"{% endif %}>
 <head>
@@ -27,8 +30,8 @@
     <div class="app-header__inner">
       <a class="brand" href="/today" aria-label="Argus, go to Today">{{ logo() }}<span>Argus</span></a>
       <nav class="nav" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
-        {% for href, label, short, ico in DESKTOP_NAV %}
-        <a class="nav-link" href="{{ href }}" {% if active == href %}aria-current="page"{% endif %}>{{ icon(ico, "icon-sm") }}{{ label }}</a>
+        {% for href, label, short, ico, needs in DESKTOP_NAV %}
+        <a class="nav-link" href="{{ href }}" {% if needs %}data-requires="{{ needs }}" {% endif %}{% if active == href %}aria-current="page"{% endif %}>{{ icon(ico, "icon-sm") }}{{ label }}</a>
         {% endfor %}
       </nav>
       <div class="header-tools">
@@ -53,8 +56,8 @@
     {% block content %}{% endblock %}
   </main>
   <nav class="tabbar" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
-    {% for href, label, short, ico in NAV %}
-    <a class="tabbar__link" href="{{ href }}" {% if active == href %}aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ short }}</span></a>
+    {% for href, label, short, ico, needs in NAV %}
+    <a class="tabbar__link" href="{{ href }}" {% if needs %}data-requires="{{ needs }}" {% endif %}{% if active == href %}aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ short }}</span></a>
     {% endfor %}
   </nav>
   <div class="toast-region" aria-live="polite" aria-atomic="false" x-data>

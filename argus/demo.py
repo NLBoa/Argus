@@ -10,11 +10,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, time, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import SecretStr
 
+from argus.ai.client import TransportError, TransportResponse
+from argus.capabilities import derive
 from argus.clock import local_datetime, to_local
 from argus.config import AppConfig, Commitment, CourseConfig, PathsConfig, ScheduleConfig, Secrets
 from argus.domain.models import (
@@ -39,6 +42,7 @@ DEMO_CONFIG = AppConfig(
             section="0101",
             canvas_id=1000001,
             gradescope_id="2000001",
+            piazza_network_id="demo351",
             accent="indigo",
         ),
         CourseConfig(
@@ -46,6 +50,7 @@ DEMO_CONFIG = AppConfig(
             section="0201",
             canvas_id=1000002,
             gradescope_id="2000002",
+            piazza_network_id="demo240",
             accent="teal",
         ),
         CourseConfig(code="ENGL393", section="0301", canvas_id=1000003, accent="plum"),
@@ -64,7 +69,40 @@ DEMO_SECRETS = Secrets(
     canvas_token=SecretStr("demo-canvas-token"),
     gradescope_email="demo@example.test",
     gradescope_password=SecretStr("demo-password"),
+    piazza_email="demo@example.test",
+    piazza_password=SecretStr("demo-password"),
 )
+
+
+class DemoProfile(StrEnum):
+    """Which setup the demo imitates, so both can be viewed and tested (D054)."""
+
+    FULL = "full"  # every source, including the ELMS API token
+    NO_CANVAS_TOKEN = "no_canvas_token"  # noqa: S105 - a profile name: the feed, no token
+
+
+def demo_secrets(profile: DemoProfile = DemoProfile.FULL) -> Secrets:
+    if profile is DemoProfile.NO_CANVAS_TOKEN:
+        return DEMO_SECRETS.model_copy(update={"canvas_token": None})
+    return DEMO_SECRETS
+
+
+class DemoTransport:
+    """AI that is "set up" but never answers: the demo shows AI affordances, every call takes
+    its non-AI fallback, and nothing touches the network."""
+
+    async def create(
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+        effort: str,
+    ) -> TransportResponse:
+        raise TransportError("demo mode: AI calls are offline")
+
 
 CANVAS = "https://umd.instructure.com/courses"
 GRADESCOPE = "https://www.gradescope.com/courses"
@@ -74,8 +112,11 @@ def _at(now: datetime, days: int, hour: int, minute: int = 0) -> datetime:
     return local_datetime(to_local(now).date() + timedelta(days=days), hour, minute)
 
 
-def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
+def seed_demo(
+    conn: sqlite3.Connection, now: datetime, profile: DemoProfile = DemoProfile.FULL
+) -> None:
     cfg = DEMO_CONFIG
+    token = profile is DemoProfile.FULL
     with transaction(conn):
         ids = repo.sync_courses(conn, cfg, now - timedelta(days=30))
 
@@ -88,8 +129,10 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
             due: datetime | None,
             **kw: object,
         ) -> SourceItem:
+            if not token:  # the calendar feed never says whether work was submitted
+                kw = {k: v for k, v in kw.items() if k not in ("submitted", "graded")}
             return SourceItem(
-                source=Source.CANVAS_ICAL,
+                source=Source.CANVAS_API if token else Source.CANVAS_ICAL,
                 external_id=ext,
                 course_code=course,
                 title=title,
@@ -220,6 +263,10 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
         for m in (240, 190, 130):
             run("canvas_ical", m, "ok")
         run("canvas_ical", 10, "unchanged")
+        if token:
+            run("canvas_api", 12, "ok")
+            run("canvas_modules", 60 * 6, "ok")
+        run("piazza", 25, "ok")
         run("gradescope", 186, "ok")
         for m in (126, 96, 66, 36):
             run(
@@ -271,12 +318,14 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
             repo.finish_notification(
                 conn, nid, ok=True, channel="ntfy", error=None, now=now - timedelta(hours=hours_ago)
             )
-        _seed_tier2(conn, ids, now)
+        _seed_tier2(conn, ids, now, token=token)
         _seed_findings(conn, ids, now)
         repo.apply_merge(conn, ids, now)
-        repo.refresh_statuses(conn, now)
+        repo.refresh_statuses(
+            conn, now, tracking_sources=derive(cfg, demo_secrets(profile)).tracking_sources
+        )
         _seed_estimates(conn, now)
-        _seed_study(conn, ids, now)
+        _seed_study(conn, ids, now, concepts=token)
         repo.rebuild_search_index(conn)
     from argus.clock import FakeClock
     from argus.planning import replan
@@ -284,8 +333,11 @@ def seed_demo(conn: sqlite3.Connection, now: datetime) -> None:
     replan(conn, DEMO_CONFIG, FakeClock(now), force=True)
 
 
-def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
-    """Modules, a grade, and staff posts (what a Canvas token and Piazza add)."""
+def _seed_tier2(
+    conn: sqlite3.Connection, ids: dict[str, int], now: datetime, *, token: bool
+) -> None:
+    """Modules, a grade, and staff posts (what a Canvas token and Piazza add). Without the
+    token only the Piazza posts exist."""
     files = f"{CANVAS}/1000001/modules/items"
 
     def item(n: int, title: str, kind: str = "File", indent: int = 1) -> ModuleItemRecord:
@@ -339,9 +391,10 @@ def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
             state="locked",
         ),
     ]
-    repo.replace_modules(conn, ids["CMSC351"], modules, now - timedelta(hours=6))
-    repo.set_grade(conn, GradeRecord("CMSC351", 91.5, "A-"), now - timedelta(hours=6))
-    repo.set_grade(conn, GradeRecord("MATH240", 86.25, "B"), now - timedelta(hours=6))
+    if token:
+        repo.replace_modules(conn, ids["CMSC351"], modules, now - timedelta(hours=6))
+        repo.set_grade(conn, GradeRecord("CMSC351", 91.5, "A-"), now - timedelta(hours=6))
+        repo.set_grade(conn, GradeRecord("MATH240", 86.25, "B"), now - timedelta(hours=6))
     posts = [
         PostRecord(
             "canvas",
@@ -384,6 +437,8 @@ def _seed_tier2(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
             url=f"{CANVAS}/1000002/discussion_topics/2",
         ),
     ]
+    if not token:  # Canvas announcements come from the ELMS API
+        posts = [p for p in posts if p.platform != "canvas"]
     repo.upsert_posts(conn, posts, ids, now)
 
 
@@ -495,13 +550,16 @@ DEMO_CONCEPTS: list[tuple[int, str, str, dict[str, Any], list[tuple[str, str, st
 ]
 
 
-def _seed_study(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:
-    """Verified concept notes, practice with some attempts, exam prep, and one vault proposal."""
+def _seed_study(
+    conn: sqlite3.Connection, ids: dict[str, int], now: datetime, *, concepts: bool
+) -> None:
+    """Verified concept notes, practice with some attempts, exam prep, and one vault proposal.
+    Concepts come from course files, which need the Canvas token (`concepts=False` without)."""
     from argus.exams import sync_exams
     from argus.vault.proposals import unified_diff
 
     course = ids["CMSC351"]
-    for module_id, name, deck, body, practice in DEMO_CONCEPTS:
+    for module_id, name, deck, body, practice in DEMO_CONCEPTS if concepts else ():
         cur = conn.execute(
             """INSERT INTO concepts (course_id, module_id, slug, name, summary, sources, body, input_hash, model,
                                      prompt_version, generated_at, verified_at)

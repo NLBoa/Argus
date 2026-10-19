@@ -44,7 +44,7 @@ def _row(request: Request, state: AppState, conn: sqlite3.Connection, item_id: i
 
 
 def _refresh_status(conn: sqlite3.Connection, state: AppState) -> None:
-    repo.refresh_statuses(conn, state.clock.now())
+    repo.refresh_statuses(conn, state.clock.now(), tracking_sources=state.caps.tracking_sources)
 
 
 @router.post("/items/{item_id}/done")
@@ -186,7 +186,12 @@ def decide_finding(
         raise HTTPException(404, "Unknown decision")
     try:
         if decision == "confirm":
-            message = announcements.confirm(conn, finding_id, state.clock.now())
+            message = announcements.confirm(
+                conn,
+                finding_id,
+                state.clock.now(),
+                tracking_sources=state.caps.tracking_sources,
+            )
         else:
             message = announcements.dismiss(conn, finding_id, state.clock.now())
     except LookupError as e:
@@ -248,7 +253,7 @@ def log_hours(
     try:
         with transaction(conn):
             repo.log_time(conn, item_id, hours, now)
-            repo.refresh_statuses(conn, now)
+            repo.refresh_statuses(conn, now, tracking_sources=state.caps.tracking_sources)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     replan(conn, state.config, state.clock, force=True)

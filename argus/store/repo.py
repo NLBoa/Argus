@@ -474,12 +474,23 @@ def apply_merge(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
     return created
 
 
-def refresh_statuses(conn: sqlite3.Connection, now: datetime) -> int:
-    """Recompute every live item's status. Returns how many changed."""
+def refresh_statuses(
+    conn: sqlite3.Connection, now: datetime, *, tracking_sources: frozenset[str]
+) -> int:
+    """Recompute every live item's status. Returns how many changed.
+
+    `tracking_sources` are the enabled sources that report submissions
+    (`Capabilities.tracking_sources`). An item with no present record from one of them is
+    never MISSED (D056)."""
     changed = 0
+    marks = ",".join("?" * len(tracking_sources)) or "NULL"
     rows = conn.execute(
-        """SELECT id, kind, due_at, late_due_at, submitted, graded, user_done_at, started_at,
-                  status FROM items WHERE removed_at IS NULL"""
+        f"""SELECT i.id, i.kind, i.due_at, i.late_due_at, i.submitted, i.graded, i.user_done_at,
+                   i.started_at, i.status,
+                   EXISTS (SELECT 1 FROM item_sources s WHERE s.item_id = i.id AND s.present = 1
+                           AND s.source IN ({marks})) AS tracked
+              FROM items i WHERE i.removed_at IS NULL""",  # noqa: S608 - placeholders only
+        tuple(sorted(tracking_sources)),
     ).fetchall()
     for r in rows:
         status = derive_status(
@@ -491,6 +502,7 @@ def refresh_statuses(conn: sqlite3.Connection, now: datetime) -> int:
                 graded=_ob(r["graded"]),
                 user_done=r["user_done_at"] is not None,
                 started=r["started_at"] is not None,
+                tracked=bool(r["tracked"]),
             ),
             now,
         )

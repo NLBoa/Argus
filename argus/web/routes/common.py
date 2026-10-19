@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from argus.ai.budget import spent_this_month
 from argus.ai.client import AIClient, build_transport
+from argus.capabilities import Capabilities, Feature
 from argus.logging import get_logger
-from argus.web.data import configured_sources, notices
+from argus.web.data import notices
 from argus.web.deps import THEME_COOKIE, AppState
 from argus.web.study_data import open_proposal_count
 
@@ -25,11 +28,6 @@ LOAD_ERROR = (
 def templates(request: Request) -> Jinja2Templates:
     t: Jinja2Templates = request.app.state.templates
     return t
-
-
-def configured(state: AppState) -> dict[str, bool]:
-    assert state.fetcher is not None
-    return configured_sources(state.config, state.secrets, state.fetcher, state.clock)
 
 
 def render(
@@ -48,20 +46,38 @@ def render(
     proposals = 0
     if conn is not None:
         try:
-            stale = notices(conn, configured(state), now)
+            stale = notices(conn, state.caps.sources, now)
             proposals = open_proposal_count(conn)
         except sqlite3.Error:
             log.exception("could not load source health for banners")
     ctx = {
+        "caps": page_caps(state, conn, now),
         "page_title": title,
         "active": active,
         "theme": request.cookies.get(THEME_COOKIE, "system"),
         "stale": stale,
         "open_proposals": proposals,
-        "boot": {"now": now.isoformat(), "page": active},
+        "boot": {"now": now.isoformat(), "page": active, "pages": hidden_pages(state.caps)},
         **context,
     }
     return templates(request).TemplateResponse(request, template, ctx, status_code=status_code)
+
+
+def page_caps(state: AppState, conn: sqlite3.Connection | None, now: datetime) -> Capabilities:
+    """The app's capabilities plus this month's AI budget (it hides only new-call buttons)."""
+    if conn is None:
+        return state.caps.with_budget(spent=0.0, cap=0.0)
+    try:
+        spent = spent_this_month(conn, now)
+    except sqlite3.Error:
+        log.exception("could not read AI spend")
+        spent = state.config.ai.monthly_budget_usd
+    return state.caps.with_budget(spent=spent, cap=state.config.ai.monthly_budget_usd)
+
+
+def hidden_pages(caps: Capabilities) -> list[str]:
+    """Pages the setup cannot support, so the palette and shortcuts skip them (D055)."""
+    return [] if caps.has(Feature.STAFF_POSTS) else ["/announcements"]
 
 
 def is_htmx(request: Request) -> bool:

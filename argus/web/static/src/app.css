@@ -218,6 +218,7 @@
   }
   .risk-badge[data-risk="ok"]      { color: var(--ok);      background: var(--ok-bg); }
   .risk-badge[data-risk="watch"]   { color: var(--watch);   background: var(--watch-bg); }
+  .risk-badge[data-risk="unconfirmed"] { color: var(--ink); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--control-line); }
   .risk-badge[data-risk="at-risk"] { color: var(--at-risk); background: var(--at-risk-bg); }
   .risk-badge[data-risk="overdue"] { color: var(--overdue); background: var(--overdue-bg); }
 
@@ -500,7 +501,6 @@
   .module__summary::before { content: ""; width: 0.5rem; height: 0.5rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); margin-right: 0.25rem; align-self: center; transition: transform var(--dur-fast); }
   .module[open] > .module__summary::before { transform: rotate(45deg); }
   .module__summary > span:first-of-type { flex: 1; }
-  .module__digest { margin: 0 1.125rem 0.75rem; padding: 0.625rem 0.75rem; background: var(--surface-2); border-radius: var(--radius-control); font-size: 0.9375rem; }
   .module__items { margin: 0 0 0.75rem; padding: 0 1.125rem; list-style: none; display: grid; gap: 0.25rem; }
   .module__item { display: flex; align-items: center; gap: 0.5rem; padding-left: calc(var(--indent, 0) * 1rem); font-size: 0.9375rem; min-height: 1.75rem; }
   .module__item .icon { color: var(--muted); }

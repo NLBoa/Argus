@@ -18,6 +18,7 @@ from argus import announcements, estimates
 from argus.ai import prompts
 from argus.ai.client import AIClient, Tier
 from argus.ai.schemas import CommandOut
+from argus.capabilities import Capabilities
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item
@@ -84,10 +85,17 @@ def numbered(conn: sqlite3.Connection) -> Context:
 
 class Inbox:
     def __init__(
-        self, conn: sqlite3.Connection, config: AppConfig, clock: Clock, ai: AIClient
+        self,
+        conn: sqlite3.Connection,
+        config: AppConfig,
+        clock: Clock,
+        ai: AIClient,
+        *,
+        caps: Capabilities,
     ) -> None:
         self.conn = conn
         self.config = config
+        self.caps = caps
         self.clock = clock
         self.ai = ai
 
@@ -226,14 +234,14 @@ class Inbox:
                 timer = repo.running_timer(self.conn)
                 if timer and timer.item_id == item.id:
                     repo.stop_timer(self.conn, now)
-                repo.refresh_statuses(self.conn, now)
+                repo.refresh_statuses(self.conn, now, tracking_sources=self.caps.tracking_sources)
             replan(self.conn, self.config, self.clock, force=True)
             return f"Marked {label} done. No more reminders for it.", ()
         if cmd.verb is Verb.LOG:
             assert cmd.hours is not None
             with transaction(self.conn):
                 repo.log_time(self.conn, item.id, cmd.hours, now, source="sms")
-                repo.refresh_statuses(self.conn, now)
+                repo.refresh_statuses(self.conn, now, tracking_sources=self.caps.tracking_sources)
             total = sum(log.hours(now) for log in repo.time_logs_for(self.conn, item.id))
             replan(self.conn, self.config, self.clock, force=True)
             return f"Logged {cmd.hours:g}h on {label} ({total:g}h so far). Plan updated.", ()
@@ -279,7 +287,9 @@ class Inbox:
         f = chosen[0]
         now = self.clock.now()
         if cmd.verb is Verb.YES:
-            message = announcements.confirm(self.conn, f.id, now)
+            message = announcements.confirm(
+                self.conn, f.id, now, tracking_sources=self.caps.tracking_sources
+            )
         else:
             message = announcements.dismiss(self.conn, f.id, now)
         replan(self.conn, self.config, self.clock, force=True)

@@ -3,6 +3,9 @@
 An item is AT RISK when the free hours left before its due time are fewer than its remaining p80
 hours (the spec rule). Those inputs come from the planner (Phase 4). Without them, risk uses only
 time and status: open and past due is OVERDUE, and due within 24 hours but not started is WATCH.
+
+An item no enabled source can report a submission for (D056) is never OVERDUE: once its deadline
+passes it is UNCONFIRMED ("Did you submit?") until the student marks it done.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 
 from argus.domain.models import Item, ItemStatus
+from argus.domain.status import awaiting_confirmation
 
 WATCH_WINDOW = timedelta(hours=24)
 WATCH_MARGIN = 1.5  # free time under 1.5x the remaining work: watch
@@ -19,8 +23,9 @@ WATCH_MARGIN = 1.5  # free time under 1.5x the remaining work: watch
 class RiskLevel(Enum):
     OK = ("ok", "On track", 0)
     WATCH = ("watch", "Watch", 1)
-    AT_RISK = ("at-risk", "At risk", 2)
-    OVERDUE = ("overdue", "Overdue", 3)
+    UNCONFIRMED = ("unconfirmed", "Did you submit?", 2)
+    AT_RISK = ("at-risk", "At risk", 3)
+    OVERDUE = ("overdue", "Overdue", 4)
 
     def __init__(self, slug: str, label: str, severity: int) -> None:
         self.slug = slug
@@ -34,7 +39,10 @@ def assess(
     *,
     remaining_p80_hours: float | None = None,
     free_hours_before_due: float | None = None,
+    tracked: bool = True,
 ) -> RiskLevel:
+    if awaiting_confirmation(item, now, tracked=tracked):
+        return RiskLevel.UNCONFIRMED
     if item.status == ItemStatus.MISSED:
         return RiskLevel.OVERDUE
     if not item.status.is_open or item.due_at is None or not item.kind.takes_submission:

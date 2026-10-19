@@ -37,6 +37,10 @@ class Source(StrEnum):
         return self in (Source.CANVAS_ICAL, Source.CANVAS_API, Source.GRADESCOPE)
 
 
+# Sources that report whether work was submitted (D056). Without one, nothing is ever "missed".
+SUBMISSION_SOURCES = frozenset({Source.CANVAS_API.value, Source.GRADESCOPE.value})
+
+
 class ItemKind(StrEnum):
     ASSIGNMENT = "assignment"
     QUIZ = "quiz"
@@ -253,6 +257,11 @@ class Item:
     date_conflict: tuple[tuple[Source, datetime], ...] = ()
     links: tuple[ItemLink, ...] = ()
     created_at: datetime | None = None
+
+    def tracked_by(self, sources: frozenset[str]) -> bool:
+        """True if a present source record comes from one of `sources` (the enabled
+        sources that report submissions: Capabilities.tracking_sources)."""
+        return any(link.source.value in sources for link in self.links)
 
     @property
     def announced(self) -> bool:

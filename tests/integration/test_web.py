@@ -97,7 +97,7 @@ def test_health_with_data(client: TestClient) -> None:
     html = client.get("/health").text
     assert "Failing (4 in a row)" in html
     assert "Gradescope page format changed" in html
-    assert "Set ARGUS_PIAZZA_EMAIL" in html  # unconfigured hint
+    assert "set ARGUS_GMAIL_TOKEN_PATH" in html  # unconfigured hint
     assert "Gradescope sync failing" in html  # recent reminder
     assert 'href="/health">Check health' not in html  # no self-link on Health
 

@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from argus.ai.client import AIClient, Transport, build_transport
 from argus.announcements import scan_posts
+from argus.capabilities import derive
 from argus.clock import Clock
 from argus.collectors.http import AuthError, Fetcher, FetchError
 from argus.collectors.runner import SyncRunner
@@ -72,6 +73,7 @@ class Worker:
         self.conn = conn
         self.config = config
         self.clock = clock
+        self.caps = derive(config, secrets, ai=transport is not None)
         key = secrets.anthropic_api_key.get_secret_value() if secrets.anthropic_api_key else None
         self.ai = AIClient(
             conn, config.ai, clock, transport if transport is not None else build_transport(key)
@@ -81,7 +83,9 @@ class Worker:
             if runner_factory
             else SyncRunner(conn, config, secrets, clock, fetcher)
         )
-        self.engine = ReminderEngine(conn, config, clock, build_router(config, secrets, fetcher))
+        self.engine = ReminderEngine(
+            conn, config, clock, build_router(config, secrets, fetcher), caps=self.caps
+        )
         self._ping_url = (
             secrets.healthchecks_url.get_secret_value() if secrets.healthchecks_url else None
         )
@@ -98,7 +102,13 @@ class Worker:
             ("sync", self.runner.run_cycle, SYNC_BUDGET),
             (
                 "announcements",
-                lambda: scan_posts(self.conn, self.ai, self.config, self.clock),
+                lambda: scan_posts(
+                    self.conn,
+                    self.ai,
+                    self.config,
+                    self.clock,
+                    tracking_sources=self.caps.tracking_sources,
+                ),
                 AI_BUDGET,
             ),
             (

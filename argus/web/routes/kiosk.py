@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from argus.store.db import connect
 from argus.web.data import load_kiosk
 from argus.web.deps import AppState, get_state
-from argus.web.routes.common import configured, templates
+from argus.web.routes.common import templates
 
 router = APIRouter()
 State = Annotated[AppState, Depends(get_state)]
@@ -23,7 +23,7 @@ State = Annotated[AppState, Depends(get_state)]
 def _body(request: Request, state: AppState) -> str:
     conn = connect(state.db_path)
     try:
-        k = load_kiosk(conn, state.config, configured(state), state.clock.now())
+        k = load_kiosk(conn, state.config, state.caps, state.clock.now())
     finally:
         conn.close()
     return (
@@ -37,7 +37,7 @@ def _body(request: Request, state: AppState) -> str:
 def kiosk(request: Request, state: State) -> HTMLResponse:
     conn = connect(state.db_path)
     try:
-        k = load_kiosk(conn, state.config, configured(state), state.clock.now())
+        k = load_kiosk(conn, state.config, state.caps, state.clock.now())
     finally:
         conn.close()
     return templates(request).TemplateResponse(

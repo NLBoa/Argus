@@ -93,7 +93,13 @@ def _apply(
 
 
 async def scan_posts(
-    conn: sqlite3.Connection, ai: AIClient, config: AppConfig, clock: Clock, *, limit: int = 20
+    conn: sqlite3.Connection,
+    ai: AIClient,
+    config: AppConfig,
+    clock: Clock,
+    *,
+    tracking_sources: frozenset[str],
+    limit: int = 20,
 ) -> ScanReport:
     report = ScanReport()
     courses = [c.code for c in config.courses]
@@ -156,7 +162,7 @@ async def scan_posts(
             ids = repo.course_ids(conn)
             repo.apply_merge(conn, ids, now)
             _link_finding_items(conn)
-            repo.refresh_statuses(conn, now)
+            repo.refresh_statuses(conn, now, tracking_sources=tracking_sources)
     return report
 
 
@@ -177,7 +183,9 @@ def attach_official(conn: sqlite3.Connection) -> int:
     return len(links)
 
 
-def confirm(conn: sqlite3.Connection, finding_id: int, now: datetime) -> str:
+def confirm(
+    conn: sqlite3.Connection, finding_id: int, now: datetime, *, tracking_sources: frozenset[str]
+) -> str:
     """The student says the announcement is right. Returns a message for the toast."""
     f = repo.get_finding(conn, finding_id)
     if f is None or f.status not in ("pending", "conflict"):
@@ -236,7 +244,7 @@ def confirm(conn: sqlite3.Connection, finding_id: int, now: datetime) -> str:
         ids = repo.course_ids(conn)
         repo.apply_merge(conn, ids, now)
         _link_finding_items(conn)
-        repo.refresh_statuses(conn, now)
+        repo.refresh_statuses(conn, now, tracking_sources=tracking_sources)
         repo.rebuild_search_index(conn)
     return message
 

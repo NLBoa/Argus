@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from argus.capabilities import Feature
 from argus.web.data import (
     load_announcements,
     load_course,
@@ -18,9 +19,10 @@ from argus.web.data import (
     load_upcoming,
     load_workload,
     palette_items,
+    search_scope,
 )
 from argus.web.deps import AppState, get_conn, get_state
-from argus.web.routes.common import LOAD_ERROR, configured, log, render
+from argus.web.routes.common import LOAD_ERROR, log, render
 from argus.web.samples import icon_names, styleguide_samples
 from argus.web.study_data import load_exam, load_exams, load_proposals
 from argus.web.viewmodels import ACCENTS, course_views
@@ -38,7 +40,7 @@ def root() -> RedirectResponse:
 @router.get("/today", response_class=HTMLResponse)
 def today(request: Request, state: State, conn: Conn) -> HTMLResponse:
     try:
-        data = load_today(conn, state.config, state.clock.now())
+        data = load_today(conn, state.config, state.caps, state.clock.now())
     except sqlite3.Error:
         log.exception("today failed")
         return render(
@@ -79,7 +81,9 @@ def upcoming(
         "error": None,
     }
     try:
-        ctx["groups"] = load_upcoming(conn, state.config, state.clock.now(), days, course_filter)
+        ctx["groups"] = load_upcoming(
+            conn, state.config, state.caps, state.clock.now(), days=days, course=course_filter
+        )
     except sqlite3.Error:
         log.exception("upcoming failed")
         ctx |= {"groups": [], "error": LOAD_ERROR}
@@ -105,7 +109,7 @@ def health(request: Request, state: State, conn: Conn) -> HTMLResponse:
     assert state.fetcher is not None
     channels = build_router(state.config, state.secrets, state.fetcher).available()
     try:
-        data = load_health(conn, state.config, configured(state), channels, state.clock.now())
+        data = load_health(conn, state.config, state.caps, channels, state.clock.now())
     except sqlite3.Error:
         log.exception("health failed")
         return render(
@@ -126,7 +130,6 @@ def health(request: Request, state: State, conn: Conn) -> HTMLResponse:
         {
             "data": data,
             "error": None,
-            "ai_on": state.secrets.anthropic_api_key is not None or state.ai_transport is not None,
         },
         active="/health",
         title="Health",
@@ -147,14 +150,14 @@ def styleguide(request: Request, state: State) -> HTMLResponse:
 
 @router.get("/palette.json")
 def palette(state: State, conn: Conn) -> JSONResponse:
-    return JSONResponse({"items": palette_items(conn, state.config, state.clock.now())})
+    return JSONResponse({"items": palette_items(conn, state.config, state.caps, state.clock.now())})
 
 
 @router.get("/courses/{code}", response_class=HTMLResponse)
 def course(request: Request, state: State, conn: Conn, code: str) -> HTMLResponse:
     code = code.upper()
     try:
-        data = load_course(conn, state.config, configured(state), state.clock.now(), code)
+        data = load_course(conn, state.config, state.caps, state.clock.now(), code)
     except sqlite3.Error:
         log.exception("course failed")
         return render(
@@ -196,10 +199,11 @@ def search_view(
         "course_filter": course_filter,
         "groups": [],
         "error": None,
+        "scope": search_scope(state.caps),
     }
     if q.strip():
         try:
-            ctx["groups"] = load_search(conn, state.config, q, course_filter)
+            ctx["groups"] = load_search(conn, state.config, state.caps, q, course_filter)
         except sqlite3.Error:
             log.exception("search failed")
             ctx["error"] = LOAD_ERROR
@@ -226,7 +230,7 @@ def search_view(
 
 @router.get("/items/{item_id}", response_class=HTMLResponse)
 def item_detail(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
-    data = load_item(conn, state.config, state.clock.now(), item_id)
+    data = load_item(conn, state.config, state.caps, state.clock.now(), item_id)
     if data is None:
         raise HTTPException(404, "No such item")
     return render(
@@ -243,7 +247,7 @@ def item_detail(request: Request, state: State, conn: Conn, item_id: int) -> HTM
 @router.get("/workload", response_class=HTMLResponse)
 def workload_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
     try:
-        data = load_workload(conn, state.config, state.clock.now())
+        data = load_workload(conn, state.config, state.caps, state.clock.now())
     except sqlite3.Error:
         log.exception("workload failed")
         return render(
@@ -267,10 +271,15 @@ def workload_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
     )
 
 
-@router.get("/announcements", response_class=HTMLResponse)
-def announcements_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+@router.get("/announcements", response_class=HTMLResponse, response_model=None)
+def announcements_view(
+    request: Request, state: State, conn: Conn
+) -> HTMLResponse | RedirectResponse:
+    if not state.caps.has(Feature.STAFF_POSTS):
+        # No source of staff posts is set up: the page would always be empty (D055).
+        return RedirectResponse("/today", status_code=307)
     try:
-        courses = load_announcements(conn, state.config, state.clock.now())
+        courses = load_announcements(conn, state.config, state.caps, state.clock.now())
     except sqlite3.Error:
         log.exception("announcements failed")
         return render(

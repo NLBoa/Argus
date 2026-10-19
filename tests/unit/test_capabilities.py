@@ -165,3 +165,28 @@ def test_capabilities_are_frozen() -> None:
     assert isinstance(caps, Capabilities)
     with pytest.raises(AttributeError):
         caps.features = frozenset()  # type: ignore[misc]
+
+
+def test_shows_post_follows_the_source() -> None:
+    full = derive(CONFIG, secrets(token=True, piazza=True))
+    none = derive(CONFIG, secrets(ical=True))
+    assert full.shows_post(platform="canvas", kind="announcement", course="CMSC351")
+    assert full.shows_post(platform="canvas", kind="syllabus", course="MATH240")
+    assert full.shows_post(platform="piazza", kind="note", course="CMSC351")
+    assert not full.shows_post(platform="piazza", kind="note", course="MATH240")  # no network id
+    assert not full.shows_post(platform="canvas", kind="announcement", course="ENGL393")
+    assert not full.shows_post(platform="email", kind="note", course="CMSC351")
+    for kind in ("announcement", "syllabus"):
+        assert not none.shows_post(platform="canvas", kind=kind, course="CMSC351")
+    assert not none.shows_post(platform="piazza", kind="note", course="CMSC351")
+
+
+def test_source_names_for_copy() -> None:
+    assert derive(CONFIG, secrets(ical=True, gradescope=True)).deadline_sources() == (
+        "ELMS or Gradescope"
+    )
+    assert derive(CONFIG, secrets(gradescope=True)).deadline_sources() == "Gradescope"
+    assert derive(CONFIG, Secrets()).deadline_sources() == "your course sites"
+    assert derive(CONFIG, secrets(token=True, piazza=True)).post_sources() == "ELMS and Piazza"
+    assert derive(CONFIG, secrets(piazza=True)).post_sources() == "Piazza"
+    assert derive(CONFIG, secrets(ical=True)).post_sources() == "your course sites"
