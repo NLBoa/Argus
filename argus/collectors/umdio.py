@@ -12,6 +12,7 @@ from datetime import time
 from typing import Any
 
 from argus.collectors.base import CollectContext, CollectResult, RunStatus
+from argus.collectors.http import FetchError
 from argus.domain.models import CourseInfo, MeetingRecord, Source, Weekday
 from argus.store.repo import SourceState, sha256
 
@@ -86,27 +87,36 @@ class UmdioCollector:
         return bool(ctx.config.courses)
 
     async def collect(self, ctx: CollectContext) -> CollectResult:
+        """Each course on its own: a wrong section in config.yaml fails that course (named in
+        the error), and the other courses still get their class times."""
         params = {"semester": ctx.config.term} if ctx.config.term else None
         meetings: dict[str, tuple[MeetingRecord, ...]] = {}
         infos: list[CourseInfo] = []
         updates: dict[str, SourceState] = {}
+        failed: list[str] = []
         for course in ctx.config.courses:
-            sec_resp = await ctx.fetcher.get(
-                f"{API}/courses/{course.code}/sections/{course.section}", params=params
-            )
-            course_resp = await ctx.fetcher.get(f"{API}/courses/{course.code}", params=params)
             key = f"{course.code}-{course.section}"
-            digest = sha256(sec_resp.body + b"\0" + course_resp.body)
-            if digest == ctx.state(self.source, key).payload_hash:
+            try:
+                sec_resp = await ctx.fetcher.get(
+                    f"{API}/courses/{course.code}/sections/{course.section}", params=params
+                )
+                course_resp = await ctx.fetcher.get(f"{API}/courses/{course.code}", params=params)
+                digest = sha256(sec_resp.body + b"\0" + course_resp.body)
+                if digest == ctx.state(self.source, key).payload_hash:
+                    continue
+                sections = sec_resp.json()
+                if not isinstance(sections, list):
+                    raise ValueError(f"umd.io returned a non-list for {key}")
+                section = next(
+                    (s for s in sections if str(s.get("number")) == course.section), None
+                )
+                if section is None:
+                    raise ValueError(f"umd.io has no section {key}")
+                course_data = course_resp.json()
+            except (FetchError, ValueError) as e:
+                failed.append(f"{e}" if key in str(e) else f"{key}: {e}")
                 continue
-            sections = sec_resp.json()
-            if not isinstance(sections, list):
-                raise ValueError(f"umd.io returned a non-list for {key}")
-            section = next((s for s in sections if str(s.get("number")) == course.section), None)
-            if section is None:
-                raise ValueError(f"umd.io has no section {key}")
             meetings[course.code] = tuple(parse_meetings(section, course.code))
-            course_data = course_resp.json()
             title = None
             if isinstance(course_data, list) and course_data:
                 title = course_data[0].get("name")
@@ -118,6 +128,14 @@ class UmdioCollector:
                 )
             )
             updates[key] = SourceState(payload_hash=digest)
+        if failed:
+            return CollectResult(
+                self.source,
+                RunStatus.ERROR,
+                meetings=meetings,
+                courses=tuple(infos),
+                error="; ".join(failed) + " (check the section in config.yaml against Testudo)",
+            )
         status = RunStatus.OK if meetings else RunStatus.UNCHANGED
         return CollectResult(
             self.source, status, meetings=meetings, courses=tuple(infos), state_updates=updates

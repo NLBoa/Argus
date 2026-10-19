@@ -245,7 +245,8 @@ class SyncRunner:
         now = self.clock.now()
         touched: list[int] = []
         with transaction(self.conn):
-            if result.status in (RunStatus.OK, RunStatus.UNCHANGED):
+            # An error result may still carry what did work (umd.io's other courses).
+            if result.status in (RunStatus.OK, RunStatus.UNCHANGED, RunStatus.ERROR):
                 repo.upsert_source_items(self.conn, result.items, ids, now)
                 for code, window_start in result.complete_scopes.items():
                     if code not in ids:

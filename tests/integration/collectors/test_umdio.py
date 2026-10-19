@@ -61,19 +61,32 @@ async def test_semester_param_and_unchanged(
 
 
 @respx.mock
-async def test_missing_section_is_error(make_ctx: Callable[..., CollectContext]) -> None:
-    respx.get(f"{API}/courses/CMSC351/sections/0101").respond(200, json=[])
-    respx.get(f"{API}/courses/CMSC351").respond(200, json=[])
-    with pytest.raises(ValueError, match="no section CMSC351-0101"):
-        await UmdioCollector().collect(make_ctx())
+async def test_a_wrong_section_fails_only_that_course(
+    make_ctx: Callable[..., CollectContext],
+) -> None:
+    mock_umdio()
+    respx.get(f"{API}/courses/MATH240/sections/0201").respond(404)  # replaces the good route
+    result = await UmdioCollector().collect(make_ctx())
+    assert result.status == RunStatus.ERROR
+    assert set(result.meetings) == {"CMSC351"}  # the other course still gets its class times
+    assert result.error is not None
+    assert "MATH240-0201" in result.error and "section" in result.error
+    assert "CMSC351" not in result.error
 
 
 @respx.mock
-async def test_malformed_payload_is_error(make_ctx: Callable[..., CollectContext]) -> None:
-    respx.get(f"{API}/courses/CMSC351/sections/0101").respond(200, json={"error_code": 404})
-    respx.get(f"{API}/courses/CMSC351").respond(200, json=[])
-    with pytest.raises(ValueError, match="non-list"):
-        await UmdioCollector().collect(make_ctx())
+@pytest.mark.parametrize(
+    ("body", "why"), [([], "no section CMSC351-0101"), ({"error_code": 404}, "non-list")]
+)
+async def test_missing_or_malformed_section_is_error(
+    make_ctx: Callable[..., CollectContext], body: object, why: str
+) -> None:
+    mock_umdio()
+    respx.get(f"{API}/courses/CMSC351/sections/0101").respond(200, json=body)
+    result = await UmdioCollector().collect(make_ctx())
+    assert result.status == RunStatus.ERROR
+    assert result.error is not None and why in result.error
+    assert set(result.meetings) == {"MATH240"}
 
 
 @pytest.mark.parametrize(

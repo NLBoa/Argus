@@ -245,6 +245,20 @@ async def test_failing_collector_does_not_block_others(
 
 
 @respx.mock
+async def test_one_wrong_section_keeps_the_other_class_times(
+    runner: SyncRunner, db: sqlite3.Connection
+) -> None:
+    mock_sources(fixture_bytes("canvas_ical", "feed.ics"))
+    respx.get(f"{UMDIO}/courses/MATH240/sections/0201").respond(404)  # replaces the good route
+    report = await runner.run_cycle()
+    result = report.result(Source.UMDIO)
+    assert result is not None and result.status == RunStatus.ERROR
+    assert {m.course_code for m in repo.list_meetings(db)} == {"CMSC351"}
+    stored = repo.source_health(db, ["umdio"])["umdio"]
+    assert stored.last_error is not None and "MATH240-0201" in stored.last_error
+
+
+@respx.mock
 async def test_assignment_removed_from_canvas_disappears(
     runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
 ) -> None:
