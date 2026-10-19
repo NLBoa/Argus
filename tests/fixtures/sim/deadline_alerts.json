@@ -1,0 +1,58 @@
+[
+  {
+    "rule": "due_24h",
+    "item": "Lab E",
+    "due_at": "2026-10-20T12:30:00Z",
+    "key_due": "2026-10-20T12:30:00Z",
+    "title": "Due tomorrow",
+    "sent_at": "2026-10-19T12:30:00Z"
+  },
+  {
+    "rule": "due_3h",
+    "item": "Lab E",
+    "due_at": "2026-10-20T12:30:00Z",
+    "key_due": "2026-10-20T12:30:00Z",
+    "title": "Due in 3h",
+    "sent_at": "2026-10-20T09:30:00Z"
+  },
+  {
+    "rule": "due_24h",
+    "item": "Homework A",
+    "due_at": "2026-10-22T03:59:00Z",
+    "key_due": "2026-10-22T03:59:00Z",
+    "title": "Due today",
+    "sent_at": "2026-10-21T12:00:00Z"
+  },
+  {
+    "rule": "due_24h",
+    "item": "Problem Set C",
+    "due_at": "2026-10-23T03:30:00Z",
+    "key_due": "2026-10-23T03:30:00Z",
+    "title": "Due today",
+    "sent_at": "2026-10-22T12:00:00Z"
+  },
+  {
+    "rule": "due_24h",
+    "item": "Quiz B",
+    "due_at": "2026-10-23T14:00:00Z",
+    "key_due": "2026-10-23T14:00:00Z",
+    "title": "Due tomorrow",
+    "sent_at": "2026-10-22T14:45:00Z"
+  },
+  {
+    "rule": "due_3h",
+    "item": "Problem Set C",
+    "due_at": "2026-10-23T03:30:00Z",
+    "key_due": "2026-10-23T03:30:00Z",
+    "title": "Due in 3h",
+    "sent_at": "2026-10-23T00:30:00Z"
+  },
+  {
+    "rule": "due_3h",
+    "item": "Quiz B",
+    "due_at": "2026-10-23T14:00:00Z",
+    "key_due": "2026-10-23T14:00:00Z",
+    "title": "Due in 3h",
+    "sent_at": "2026-10-23T11:00:00Z"
+  }
+]
