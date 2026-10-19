@@ -1,0 +1,14 @@
+[
+  {
+    "course": "MATH240",
+    "section_id": "MATH240-0201",
+    "semester": "202608",
+    "number": "0201",
+    "seats": "30",
+    "instructors": ["Synthetic Lecturer"],
+    "meetings": [
+      {"days": "MWF", "room": "0201", "building": "KEY", "classtype": "", "start_time": "11:00am", "end_time": "11:50am"},
+      {"days": "Tu", "room": "B0425", "building": "MTH", "classtype": "Lab", "start_time": "8:00am", "end_time": "8:50am"}
+    ]
+  }
+]

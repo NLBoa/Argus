@@ -50,3 +50,46 @@ use the locked versions. gitleaks runs as the system binary (pinned to 8.30.1 in
 **Decision.** `scripts/fetch_tailwind.sh` downloads Tailwind v4.3.3 for the host platform
 (including linux-arm64 for the Pi) and verifies it against the release's `sha256sums.txt`.
 The built CSS is not committed; `make css` runs before every browser test and on deploy.
+
+## D008 — Merge links are sticky; auto-merge never fuses existing items (2026-10-18)
+**Context.** The spec's rule is to merge a Gradescope item and a Canvas item when the course and normalized
+title match and the due times are within 60 minutes. Dates move after items are created.
+**Decision.** Once a source record is linked to an item, it stays linked even if its date moves away.
+A disagreement becomes a flagged conflict instead of a split. Auto-merge only attaches *unlinked*
+records. It never fuses two existing items, which could duplicate reminders or orphan time logs.
+Canvas iCal and Canvas API records with the same assignment id always join. Fuzzy matching is
+greedy by smallest gap with total-order tie-breaks, so it is order-independent. That property is tested.
+**Rejected.** Re-clustering from scratch every cycle, which would let item ids churn.
+
+## D009 — Earliest official due date wins; disagreements over 5 minutes are flagged (2026-10-18)
+**Decision.** Among Canvas and Gradescope, the earliest due date drives the item, so a reminder is
+never late. Manual dates rank below official ones, and dates found in posts rank lowest
+(the non-negotiable). Any other date that differs by more than 5 minutes sets `date_conflict` until the student resolves it.
+
+## D010 — Status semantics (2026-10-18)
+**Decision.** Exams and events take no submission, so they become `submitted` ("done") once they start.
+An assignment or quiz is `missed` from its effective deadline on: the late-due time if later,
+otherwise the due time, and the due instant itself counts as too late. Unknown submission state counts as not
+submitted, so deadline alerts err toward firing. Between the due time and the late-due time, the item stays
+open (the UI shows it as overdue).
+
+## D011 — Unofficial libraries sit behind adapters and run in threads (2026-10-18)
+**Decision.** `gradescopeapi` and `piazza-api` are pinned exactly. Each is wrapped in a small adapter
+(`LibGradescopeClient`, `LibPiazzaClient`) that converts library errors into `AuthError` or `FetchError`
+("page format changed") and runs in a worker thread. Contract tests drive the real adapters through
+`responses` against synthetic HTML and JSON. Pipeline tests inject fake clients.
+
+## D012 — Canvas iCal lookback window protects old items (2026-10-18)
+**Context.** The feed keeps only about 30 days of history. A complete fetch would otherwise mark older items absent.
+**Decision.** `complete_scopes` carries a window start (now − 29 days). Records due before it are never
+marked absent by that source.
+
+## D013 — Piazza email fallback via the Gmail REST API with httpx (2026-10-18)
+**Decision.** Gmail is called directly with httpx, refreshing an OAuth token from a JSON file, instead of using
+`google-api-python-client`. That keeps it respx-testable and light on the Pi. It runs only when the
+Piazza API is unconfigured or its latest run failed. Posts dedupe with the API by `(platform, nid:nr)`.
+
+## D014 — Live smoke test skipped in Phase 1 (2026-10-18)
+No credentials were available when Phase 1 finished, so `tests/integration/test_live_smoke.py`
+(opt-in via `ARGUS_LIVE=1`) has not run against real ELMS, Gradescope, Piazza, or umd.io yet.
+Run it once credentials exist. Its first run is also the check on the Piazza email format.

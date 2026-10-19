@@ -1,0 +1,14 @@
+{"result": {
+  "id": "kq2", "nr": 102, "type": "question", "tags": ["hw3", "student"],
+  "created": "2026-10-18T01:00:00Z",
+  "change_log": [{"type": "create", "uid": "u_student", "when": "2026-10-18T01:00:00Z"}],
+  "history": [
+    {"subject": "HW3 problem 2 clarification", "uid": "u_student", "created": "2026-10-18T01:00:00Z",
+     "content": "<p>Can we assume the graph is connected?</p>"}
+  ],
+  "children": [
+    {"type": "i_answer", "id": "kq2a", "created": "2026-10-18T02:10:00Z",
+     "history": [{"content": "<p>Yes. Also, HW3 is now due Saturday at 11:59pm.</p>", "created": "2026-10-18T02:10:00Z", "uid": "u_ta"}]},
+    {"type": "followup", "id": "kq2f", "created": "2026-10-18T02:30:00Z", "subject": "thanks!", "children": []}
+  ]
+}, "error": null}

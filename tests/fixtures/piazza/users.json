@@ -1,0 +1,5 @@
+{"result": [
+  {"id": "u_prof", "role": "professor", "name": "Synthetic Professor"},
+  {"id": "u_ta", "role": "ta", "name": "Synthetic TA"},
+  {"id": "u_student", "role": "student", "name": "Synthetic Student"}
+], "error": null}

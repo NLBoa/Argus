@@ -1,0 +1,12 @@
+[
+  {
+    "id": 7100001,
+    "name": "Problem Set 5",
+    "description": "",
+    "due_at": "2026-10-22T03:59:00Z",
+    "points_possible": 20,
+    "submission_types": ["external_tool"],
+    "html_url": "https://umd.instructure.com/courses/1234568/assignments/7100001",
+    "submission": {"workflow_state": "submitted", "score": null}
+  }
+]

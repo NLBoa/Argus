@@ -81,6 +81,12 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - umd.io meeting times are strings like `9:30am`; umd.io `seats` fields are strings.
 - Gradescope may need a password even for SSO users (set one at gradescope.com).
 - `gradescopeapi` and `piazza-api` are unofficial and break without warning. Their versions are pinned exactly.
+- Canvas iCal SUMMARY ends with `[CMSC351-0101-Fall2026]` (stripped for display). The feed keeps about 30 days of history.
+  The feed URL path *is* the token, so it is redacted everywhere.
+- `gradescopeapi` posts login credentials as query params. Student-view rows without a link have no id
+  (Argus derives `name-<hash>`), and its dates carry offsets.
+- `piazza-api` login needs a `session_id` cookie. `content.get` is per post, so fetch only staff-relevant posts.
+- The Piazza notification email format is unverified until real mail arrives (`collectors/piazza_email.py`).
 - The newest Playwright Python Docker image is v1.63.0, so Playwright is pinned `==1.63.0` to match.
 
 ## Vault rules
@@ -112,6 +118,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - **Integration** (`tests/integration`): the store, collectors against fixtures (respx), vault temp repos,
   the webhook (TestClient), and the simulated-week pipeline.
 - **E2E / a11y** (`tests/e2e`) and **visual** (`tests/visual`): a live server with a fake clock, driven by Playwright.
+  These run in their own pytest process (the `make` targets do this). Plain `pytest` runs unit and integration only.
 - **Evals** (`tests/evals`, marker `evals`): the real API. Run only with `make evals`.
 - **LLM calls are mocked** at the `argus.ai.client` boundary with recorded responses from
   `tests/fixtures/ai/`. No test outside evals touches the network.

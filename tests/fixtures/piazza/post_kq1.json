@@ -1,0 +1,12 @@
+{"result": {
+  "id": "kq1", "nr": 101, "type": "note", "tags": ["instructor-note", "exam"],
+  "created": "2026-10-16T15:00:00Z",
+  "change_log": [{"type": "create", "uid": "u_prof", "when": "2026-10-16T15:00:00Z"}],
+  "history": [
+    {"subject": "Midterm 1 logistics", "uid": "u_prof", "created": "2026-10-17T18:00:00Z",
+     "content": "<p>Midterm 1 will be held <b>in class on Thursday, Nov 5</b>.</p><p>It covers lectures 1&ndash;12. One cheat sheet allowed.</p>"},
+    {"subject": "Midterm 1 logistics", "uid": "u_prof", "created": "2026-10-16T15:00:00Z",
+     "content": "<p>Midterm 1 will be held in class.</p>"}
+  ],
+  "children": []
+}, "error": null}

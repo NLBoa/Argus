@@ -1,0 +1,28 @@
+[
+  {
+    "id": 7000101,
+    "name": "Homework 3",
+    "description": "<p>Prove the three lemmas from <strong>lecture 9</strong>.</p><ul><li>Lemma A</li><li>Lemma B</li></ul>",
+    "due_at": "2026-10-23T03:59:00Z",
+    "unlock_at": "2026-10-16T13:00:00Z",
+    "lock_at": "2026-10-25T03:59:00Z",
+    "points_possible": 30.0,
+    "submission_types": ["online_upload"],
+    "html_url": "https://umd.instructure.com/courses/1234567/assignments/7000101",
+    "is_quiz_assignment": false,
+    "submission": {"workflow_state": "unsubmitted", "score": null, "submitted_at": null}
+  },
+  {
+    "id": 7000102,
+    "name": "Quiz 2",
+    "description": null,
+    "due_at": "2026-10-27T16:00:00Z",
+    "unlock_at": null,
+    "lock_at": "2026-10-27T15:00:00Z",
+    "points_possible": 10,
+    "submission_types": ["online_quiz"],
+    "html_url": "https://umd.instructure.com/courses/1234567/assignments/7000102",
+    "is_quiz_assignment": true,
+    "submission": {"workflow_state": "unsubmitted", "score": null}
+  }
+]

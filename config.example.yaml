@@ -1,6 +1,9 @@
 # Argus configuration. Copy to config.yaml and edit. Contains NO secrets:
 # credentials go in environment variables (see .env.example) or systemd credentials.
 
+# umd.io semester code: YYYY + 01 (spring), 05 (summer), 08 (fall), 12 (winter).
+term: "202608"
+
 courses:
   # code: UMD course code; section: 4-digit section (umd.io looks up meetings by these).
   # canvas_id: numeric id from the ELMS course URL (umd.instructure.com/courses/<id>).

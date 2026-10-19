@@ -1,0 +1,10 @@
+{"result": {
+  "id": "kq4", "nr": 104, "type": "note", "tags": ["logistics"],
+  "created": "2026-10-18T14:00:00Z",
+  "change_log": [{"type": "create", "uid": "u_ta", "when": "2026-10-18T14:00:00Z"}],
+  "history": [
+    {"subject": "Quiz 3 moved", "uid": "u_ta", "created": "2026-10-18T14:00:00Z",
+     "content": "<p>Quiz 3 is now on Friday instead of Wednesday.</p>"}
+  ],
+  "children": []
+}, "error": null}

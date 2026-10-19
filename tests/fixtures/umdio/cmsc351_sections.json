@@ -1,0 +1,17 @@
+[
+  {
+    "course": "CMSC351",
+    "section_id": "CMSC351-0101",
+    "semester": "202608",
+    "number": "0101",
+    "seats": "120",
+    "open_seats": "3",
+    "waitlist": "0",
+    "instructors": ["Synthetic Professor"],
+    "meetings": [
+      {"days": "TuTh", "room": "1101", "building": "IRB", "classtype": "", "start_time": "9:30am", "end_time": "10:45am"},
+      {"days": "F", "room": "0318", "building": "CSI", "classtype": "Discussion", "start_time": "12:00pm", "end_time": "12:50pm"},
+      {"days": "", "room": "ONLINE", "building": "", "classtype": "", "start_time": "", "end_time": ""}
+    ]
+  }
+]

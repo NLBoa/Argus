@@ -1,0 +1,21 @@
+[
+  {
+    "id": 7000099,
+    "name": "Homework 2",
+    "description": "<p>Recurrences.</p>",
+    "due_at": "2026-10-09T03:59:00Z",
+    "points_possible": 30,
+    "submission_types": ["online_upload"],
+    "html_url": "https://umd.instructure.com/courses/1234567/assignments/7000099",
+    "submission": {"workflow_state": "graded", "score": 27.5, "submitted_at": "2026-10-08T22:10:00Z"}
+  },
+  {
+    "id": 7000098,
+    "name": "Attendance",
+    "due_at": null,
+    "points_possible": 5,
+    "submission_types": ["none"],
+    "html_url": "https://umd.instructure.com/courses/1234567/assignments/7000098",
+    "submission": {"workflow_state": "unsubmitted", "score": null}
+  }
+]

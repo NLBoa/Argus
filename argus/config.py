@@ -115,6 +115,8 @@ class PathsConfig(_Strict):
 
 
 class AppConfig(_Strict):
+    # umd.io semester code (e.g. "202608" for Fall 2026); omit to use umd.io's current term.
+    term: Annotated[str, Field(pattern=r"^\d{4}(01|05|08|12)$")] | None = None
     courses: list[CourseConfig] = []
     schedule: ScheduleConfig = ScheduleConfig()
     notifications: NotificationsConfig = NotificationsConfig()
