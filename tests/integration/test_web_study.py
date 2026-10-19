@@ -84,7 +84,7 @@ def test_exam_list_and_prep_page(client: TestClient) -> None:
         )
     ]
     assert order == sorted(order)
-    assert "Review: " in page and "Review plan" in page
+    assert "of study" in page and "Study time" in page
     assert 'data-level="untested"' in page and ">Memoization<" in page
     assert client.get("/exams/9999").status_code == 404
     assert client.get(f"/exams/{item_id(client, 'Homework 4')}").status_code == 404

@@ -334,7 +334,13 @@ def exams_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
 
 @router.get("/exams/{item_id}", response_class=HTMLResponse)
 def exam_view(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
-    data = load_exam(conn, state.config, state.clock.now(), item_id)
+    data = load_exam(
+        conn,
+        state.config,
+        state.clock.now(),
+        item_id,
+        tracking_sources=state.caps.tracking_sources,
+    )
     if data is None:
         raise HTTPException(404, "No such exam")
     return render(

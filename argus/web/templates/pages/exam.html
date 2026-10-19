@@ -30,12 +30,13 @@
       {% else %}<p class="text-muted">No concepts in scope yet.</p>{% endif %}
     </section>
     <section class="panel panel-pad" aria-labelledby="plan-heading">
-      <h2 class="section-title" id="plan-heading">Review plan</h2>
+      <h2 class="section-title" id="plan-heading">Study time</h2>
       {% if data.sessions %}
       <ul class="m-0 p-0 list-none grid gap-2">
         {% for s in data.sessions %}<li{% if s.past %} class="text-muted"{% endif %}><strong>{{ s.when }}</strong>: {{ s.label }}{% if s.past %} (done){% endif %}</li>{% endfor %}
       </ul>
-      {% else %}<p class="text-muted">Review sessions are planned in your free time during the week before the exam.</p>{% endif %}
+      {% else %}<p class="text-muted">Study time is set aside in your work windows during the week before the exam.</p>{% endif %}
+      {% if data.study_short %}<p class="mt-2"><strong>{{ data.study_short }}</strong> of study time doesn't fit in your work windows before the exam.</p>{% endif %}
     </section>
     {% if data.scope or data.logistics %}
     <section class="panel panel-pad" aria-labelledby="info-heading">

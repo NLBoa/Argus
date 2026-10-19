@@ -5,15 +5,15 @@ All AI traffic goes through FakeTransport; the vault is a temp git repo without 
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from argus.ai.client import AIClient
-from argus.clock import FakeClock, local_datetime
-from argus.config import AppConfig
+from argus.clock import FakeClock, local_datetime, to_local
+from argus.config import AppConfig, WorkWindowConfig
 from argus.domain.models import (
     ItemKind,
     MaterialPage,
@@ -25,9 +25,9 @@ from argus.domain.models import (
 )
 from argus.exams import concept_readiness, practice_items, record_attempt, sync_exams
 from argus.notify.router import Router
-from argus.planning import replan
+from argus.planning import compute, replan
 from argus.reminders.engine import ReminderEngine
-from argus.reminders.rules import Rule, candidates, start_nudges
+from argus.reminders.rules import Rule, candidates
 from argus.store import repo
 from argus.store.db import transaction
 from argus.study import ensure_study, targeted_practice
@@ -188,8 +188,25 @@ async def study(db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock)
     transport = FakeTransport(responder=respond)
     assert await ensure_study(db, ai(db, app_config, clock, transport), app_config, clock) == 1
     sync_exams(db, clock.now())
-    replan(db, app_config, clock)
+    # Evenings 7-11 pm every day: seeded into the store, so later planning sees them (D057).
+    replan(db, windowed(app_config), clock, tracking_sources=EVERY_SOURCE)
     return transport
+
+
+def windowed(cfg: AppConfig) -> AppConfig:
+    nightly = WorkWindowConfig(
+        days=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], start=time(19), end=time(23)
+    )
+    return cfg.model_copy(
+        update={"schedule": cfg.schedule.model_copy(update={"work_windows": [nightly]})}
+    )
+
+
+def study_windows(
+    db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, exam: int
+) -> list[str]:
+    plan = compute(db, app_config, clock.now(), tracking_sources=EVERY_SOURCE)
+    return [w for w, q in sorted(plan.study.quota.items()) if exam in q]
 
 
 async def test_verified_notes_exam_prep_and_review_plan(
@@ -211,12 +228,9 @@ async def test_verified_notes_exam_prep_and_review_plan(
         and item.source_ref == "Lecture 7 slides, slide 4"
     )
 
-    reviews = db.execute(
-        "SELECT * FROM plan_blocks WHERE kind = 'review' ORDER BY start_at"
-    ).fetchall()
-    assert len(reviews) == 4  # 5, 3, 2, 1 days out (7 days out has passed)
-    assert {r["item_id"] for r in reviews} == {world["Midterm 1"]}
-    assert reviews[0]["label"] == "Review: Master theorem"
+    # Study time for the exam is reserved in the evenings of the week before it (D062).
+    reserved = study_windows(db, app_config, clock, world["Midterm 1"])
+    assert reserved and reserved[0].startswith("2026-10-19")
 
     result = vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert result.status == "ok" and result.files > 0
@@ -233,7 +247,7 @@ async def test_verified_notes_exam_prep_and_review_plan(
 
     exam = parse(note(app_config, EXAM)).regions
     assert "0 solid, 0 shaky, 1 untested" in exam["scope"].content
-    assert exam["plan"].content.count("Review: Master theorem") == 4
+    assert exam["plan"].content.count(": Study ") == len(reserved)
     assert "> [!check]- Answer\n> Theta(n log n)" in exam["practice"].content
     cards = note(app_config, layout.flashcards("CMSC351"))
     assert (
@@ -272,14 +286,11 @@ async def test_self_grading_updates_readiness_and_review_nudges(
     vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert "0 solid, 1 shaky, 0 untested" in note(app_config, EXAM)
 
-    first = db.execute(
-        "SELECT start_at FROM plan_blocks WHERE kind = 'review' ORDER BY start_at"
-    ).fetchone()[0]
-    clock.set(repo.parse_iso(first) + timedelta(minutes=2))
+    # The study card is in the window message before the first evening with study time.
+    clock.set(local_datetime(to_local(clock.now()).date(), 18, 45))
     engine = ReminderEngine(db, app_config, clock, Router([]), caps=tracked_caps(app_config))
-    [nudge] = start_nudges(engine.snapshot(clock.now()))
-    assert nudge.title == "Time to review" and "Review: Master theorem" in nudge.body
-    assert any(r.rule is Rule.START_NUDGE for r in candidates(engine.snapshot(clock.now())))
+    [msg] = [r for r in candidates(engine.snapshot(clock.now())) if r.rule is Rule.WINDOW_PLAN]
+    assert msg.title == "Tonight 7-11pm" and "Study" in msg.body and "Midterm 1" in msg.body
 
 
 async def test_without_ai_the_fallback_notes_are_still_written(

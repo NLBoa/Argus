@@ -11,7 +11,7 @@
 {% else %}
 {% if data.explanation %}<p class="panel panel-pad mb-6 text-lg">{{ data.explanation }}</p>{% endif %}
 <section aria-labelledby="chart-heading" class="mb-8">
-  <h2 class="section-title" id="chart-heading">Hours needed against free hours <span class="section-count">{{ data.total_need|hours }} planned of {{ data.total_free|hours }} free</span></h2>
+  <h2 class="section-title" id="chart-heading">Work planned in your work windows <span class="section-count">{{ data.total_need|hours }} of {{ data.total_free|hours }}</span></h2>
   <div class="panel panel-pad">{{ workload_chart(data.days) }}</div>
 </section>
 <section aria-labelledby="risk-heading">
@@ -19,7 +19,7 @@
   {% if data.at_risk %}
     <ul class="item-list m-0 p-0 list-none">{% for v in data.at_risk %}{{ item_row(v) }}{% endfor %}</ul>
   {% else %}
-    <div class="panel">{{ empty_state("circle-check", "Everything fits", "Every open item fits in your free time before it's due.") }}</div>
+    <div class="panel">{{ empty_state("circle-check", "Everything fits", "Every open item fits in your work windows before it's due.") }}</div>
   {% endif %}
 </section>
 {% endif %}

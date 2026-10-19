@@ -81,15 +81,7 @@ def test_override_clear_and_replan(client: TestClient) -> None:
     assert r.status_code == 303 and r.headers["location"] == f"/items/{HW3}"
     html = client.get(f"/items/{HW3}").text
     assert "You set this estimate." in html
-    planned = (
-        conn_of(client)
-        .execute(
-            "SELECT SUM((julianday(end_at) - julianday(start_at)) * 24) FROM plan_blocks WHERE item_id = ?",
-            (HW3,),
-        )
-        .fetchone()[0]
-    )
-    assert planned == pytest.approx(8.0, abs=0.01)  # the plan uses the override
+    assert "<strong>8 h</strong> left to do." in html  # the plan uses the override
     client.post(f"/items/{HW3}/estimate/clear", headers=ORIGIN)
     assert "You set this estimate." not in client.get(f"/items/{HW3}").text
     assert (
@@ -119,9 +111,11 @@ def test_log_time(client: TestClient) -> None:
 
 def test_workload(client: TestClient) -> None:
     html = client.get("/workload").text
-    assert "Hours needed against free hours" in html
-    assert "Problem Set 6" in html  # squeezed by Homework 3: needs attention
-    assert "needs" in html and "more hours than there is free time" in html
+    assert "Work planned in your work windows" in html
+    # Tonight's window (7-11 pm) is 4 h: Homework 3 (due 11:30 pm) and Problem Set 6 (11:59 pm,
+    # after Homework 3) don't both fit, so both need attention.
+    assert "Homework 3" in html and "Problem Set 6" in html
+    assert "more hours than your work windows have before it is due" in html
 
 
 def test_announcements_and_decisions(client: TestClient) -> None:

@@ -25,17 +25,18 @@ from argus.notify.router import Router
 from argus.planner.freetime import meetings_on
 from argus.planner.review import review_order
 from argus.planner.risk import RiskLevel
-from argus.planning import blocks_between, risk_map
+from argus.planning import Planning, compute
 from argus.reminders.guards import GuardContext, Verdict, check
 from argus.reminders.rules import (
     Announced,
     Brief,
     Countdown,
+    NoticeEntry,
     Reminder,
     Rule,
-    SessionRef,
     Snapshot,
     SourceAlertState,
+    WindowNotice,
     candidates,
 )
 from argus.sms import today_text
@@ -59,7 +60,7 @@ SOURCES = (
 )
 _TAGS = {
     Rule.AT_RISK: ("warning",),
-    Rule.START_NUDGE: ("hourglass_flowing_sand",),
+    Rule.WINDOW_PLAN: ("hourglass_flowing_sand",),
     Rule.DUE_3H: ("rotating_light",),
     Rule.DUE_24H: ("alarm_clock",),
     Rule.NEW_ITEM: ("inbox_tray",),
@@ -96,16 +97,8 @@ class ReminderEngine:
         health = repo.source_health(self.conn, SOURCES)
         first = repo.first_success_at(self.conn)
         tracking = self.caps.tracking_sources
-        risk = risk_map(self.conn, self.config, now, tracking_sources=tracking)
-        sessions = [
-            SessionRef(
-                b.item_id, b.start, b.end, (b.label or "Review") if b.kind == "review" else None
-            )
-            for b in blocks_between(
-                self.conn, now - timedelta(minutes=15), now + timedelta(minutes=1)
-            )
-            if b.kind in ("work", "review") and b.item_id is not None
-        ]
+        plan = compute(self.conn, self.config, now, tracking_sources=tracking)
+        risky = {i: ip for i, ip in plan.items.items() if ip.level is RiskLevel.AT_RISK}
         vault = vault_health(self.conn)
         sources = {
             s: SourceAlertState(s, h.failures, h.failing_since, h.last_error)
@@ -115,9 +108,15 @@ class ReminderEngine:
             "vault", vault.failures, vault.failing_since, vault.last_error
         )
         items = repo.list_items(self.conn)
+        notice, in_window = self._window(plan, now)
         return Snapshot(
-            at_risk=frozenset(i for i, r in risk.items() if r.level is RiskLevel.AT_RISK),
-            sessions=sessions,
+            at_risk=frozenset(risky),
+            at_risk_load={
+                i: (ip.load.capacity, ip.load.demand) for i, ip in risky.items() if ip.load
+            },
+            in_window=in_window,
+            window=notice,
+            notice_lead=timedelta(minutes=self.config.notifications.window_notice_minutes),
             ai_budget_month=month_key(now) if budget_hit_this_month(self.conn, now) else None,
             now=now,
             items=items,
@@ -130,6 +129,37 @@ class ReminderEngine:
             bootstrap_until=first + BOOTSTRAP_GRACE if first else None,
         )
 
+    def _window(self, plan: Planning, now: datetime) -> tuple[WindowNotice | None, frozenset[int]]:
+        """The current or next window's split: the stored one (made just before it starts and
+        kept up to date by the planning step), or the planner's forecast if none is stored yet."""
+        w = plan.window
+        if w is None:
+            return None, frozenset()
+        stored = repo.window_plan(self.conn, w.window_id)
+        alloc = list(stored.allocation) if stored else plan.allocation(w.window_id)
+        entries = []
+        for entry, hours in alloc:
+            kind, _, raw = entry.partition(":")
+            ip = plan.items.get(int(raw))
+            if ip is None:
+                continue
+            it = ip.item
+            if kind == "item" and not it.status.is_open:
+                continue
+            entries.append(
+                NoticeEntry(
+                    it.id if kind == "item" else None,
+                    it.course_code,
+                    it.title,
+                    hours,
+                    it.due_at if kind == "item" else None,
+                    ip.level is RiskLevel.AT_RISK,
+                )
+            )
+        running = w.start <= now < w.end
+        in_window = frozenset(e.item_id for e in entries if running and e.item_id is not None)
+        return WindowNotice(w.window_id, w.start, w.end, tuple(entries)), in_window
+
     def _end_of_day(self, now: datetime) -> datetime:
         return local_datetime(to_local(now).date() + timedelta(days=1), 0)
 
@@ -137,7 +167,9 @@ class ReminderEngine:
         local = to_local(now)
         if local.time() < self.config.schedule.morning_brief:
             return None
-        body, ids = today_text(self.conn, now)
+        body, ids = today_text(
+            self.conn, self.config, now, tracking_sources=self.caps.tracking_sources
+        )
         return Brief(local.date(), body, ids, self._end_of_day(now))
 
     def _countdowns(self, now: datetime) -> list[Countdown]:

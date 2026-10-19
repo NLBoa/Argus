@@ -9,13 +9,23 @@ Deadline rules are deterministic and never depend on the AI.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 from argus.clock import to_local
-from argus.domain.models import Item, ItemKind
-from argus.reminders.text import fit, short, when
+from argus.domain.models import Item
+from argus.reminders.text import (
+    SEGMENT,
+    due_phrase,
+    fit,
+    gsm_length,
+    hours_short,
+    short,
+    to_gsm7,
+    when,
+    window_phrase,
+)
 from argus.store.db import iso
 
 NEW_ITEM_HORIZON = timedelta(days=7)
@@ -26,7 +36,8 @@ ALERT_AFTER_FAILURES = 3
 
 
 class Rule(StrEnum):
-    START_NUDGE = "start_nudge"
+    START_NUDGE = "start_nudge"  # retired (D061): kept so old notifications and mutes still parse
+    WINDOW_PLAN = "window_plan"
     AT_RISK = "at_risk"
     DUE_24H = "due_24h"
     DUE_3H = "due_3h"
@@ -39,7 +50,8 @@ class Rule(StrEnum):
     @property
     def label(self) -> str:
         return {
-            "start_nudge": "Start nudges",
+            "start_nudge": "Start nudges (retired)",
+            "window_plan": "Work window plan",
             "at_risk": "At-risk alerts",
             "due_24h": "Due in 24 hours",
             "due_3h": "Due in 3 hours",
@@ -77,11 +89,23 @@ class SourceAlertState:
 
 
 @dataclass(frozen=True, slots=True)
-class SessionRef:
-    item_id: int
+class NoticeEntry:
+    """One line of a work-window message."""
+
+    item_id: int | None  # None for exam study (never numbered: DONE n must not hit an exam)
+    course: str
+    title: str
+    hours: float
+    due: datetime | None
+    at_risk: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WindowNotice:
+    window_id: str
     start: datetime
     end: datetime
-    review: str | None = None  # the review block's label; None for a work session
+    entries: tuple[NoticeEntry, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +149,12 @@ class Snapshot:
     # Items created before this belong to the first import and never count as "new".
     bootstrap_until: datetime | None = None
     at_risk: frozenset[int] = frozenset()  # item ids the planner says are at risk
-    sessions: Sequence[SessionRef] = ()
+    # (window hours before due, hours due by then) for at-risk items, for the message
+    at_risk_load: Mapping[int, tuple[float, float]] = field(default_factory=dict)
+    # Items planned for the window now in progress: their at-risk text waits until it ends (D061)
+    in_window: frozenset[int] = frozenset()
+    window: WindowNotice | None = None  # the current or next work window and its split
+    notice_lead: timedelta = timedelta(minutes=20)
     ai_budget_month: str | None = None  # "2026-10" when the AI budget was hit this month
     brief: Brief | None = None  # today's morning brief, once its time has come
     countdowns: Sequence[Countdown] = ()
@@ -265,72 +294,114 @@ def system_alerts(snap: Snapshot) -> list[Reminder]:
     return out
 
 
-NUDGE_WINDOW = timedelta(minutes=10)
-
-
 def at_risk(snap: Snapshot) -> list[Reminder]:
-    out = []
-    for it in _deadline_candidates(snap.items):
+    """One message for everything newly at risk (keys stay per item, D020). An item planned for
+    the window in progress waits until the window ends: the student may be working on it."""
+    risky = [
+        it
+        for it in _deadline_candidates(snap.items)
+        if it.due_at is not None
+        and it.due_at > snap.now
+        and it.id in snap.at_risk
+        and it.id not in snap.in_window
+        and item_key(it, Rule.AT_RISK) not in snap.sent_keys
+    ]
+    if not risky:
+        return []
+    risky.sort(key=lambda i: (i.due_at, i.id))
+    keys = tuple(item_key(i, Rule.AT_RISK) for i in risky)
+    expires = min(i.due_at for i in risky if i.due_at)
+    if len(risky) == 1:
+        it = risky[0]
         assert it.due_at is not None
-        key = item_key(it, Rule.AT_RISK)
-        if it.id not in snap.at_risk or key in snap.sent_keys or it.due_at <= snap.now:
-            continue
-        out.append(
+        load = snap.at_risk_load.get(it.id)
+        why = (
+            f"only {hours_short(load[0])} of work windows before {when(it.due_at)} for "
+            f"{hours_short(load[1])} of work"
+            if load
+            else f"not enough work-window time before {when(it.due_at)}"
+        )
+        body = f"[1] {it.course_code} {short(it.title, 50)}: {why}. Reply EST 1 h to correct the estimate."
+        return [
             Reminder(
                 rule=Rule.AT_RISK,
-                keys=(key,),
+                keys=keys,
                 title="At risk",
-                body=f"[1] {it.course_code} {short(it.title, 60)} needs more time than you have free before "
-                f"{when(it.due_at)}. Reply EST 1 h to correct the estimate.",
+                body=fit(body, SEGMENT - len("At risk: ")),
                 item_ids=(it.id,),
                 priority=4,
                 counts_toward_cap=False,
-                expires_at=it.due_at,
+                expires_at=expires,
             )
+        ]
+    tail = " Reply EST n h to fix an estimate."
+    title = f"{len(risky)} at risk"
+    parts: list[str] = []
+    for n, it in enumerate(risky, start=1):
+        assert it.due_at is not None
+        part = f"[{n}] {it.course_code} {short(it.title, 30)} ({due_phrase(it.due_at, snap.now)})"
+        if gsm_length(to_gsm7(f"{title}: " + "; ".join([*parts, part]) + "." + tail)) > SEGMENT:
+            break
+        parts.append(part)
+    shown = tuple(i.id for i in risky[: len(parts)])
+    return [
+        Reminder(
+            rule=Rule.AT_RISK,
+            keys=keys,
+            title=title,
+            body="; ".join(parts) + "." + tail,
+            item_ids=shown,
+            priority=4,
+            counts_toward_cap=False,
+            expires_at=expires,
         )
-    return out
+    ]
 
 
-def start_nudges(snap: Snapshot) -> list[Reminder]:
-    items = {i.id: i for i in _deadline_candidates(snap.items)}
-    exams = {i.id: i for i in snap.items if i.status.is_open and i.kind is ItemKind.EXAM}
-    out = []
-    for s in snap.sessions:
-        it = (exams if s.review else items).get(s.item_id)
-        if it is None or not s.start <= snap.now < s.start + NUDGE_WINDOW:
-            continue
-        kind = ":review" if s.review else ""
-        key = f"{it.id}:{Rule.START_NUDGE.value}{kind}:{iso(s.start)}"
-        if key in snap.sent_keys:
-            continue
-        until = when(s.end).split(" ", 1)[1]
-        if s.review:
-            out.append(
-                Reminder(
-                    rule=Rule.START_NUDGE,
-                    keys=(key,),
-                    title="Time to review",
-                    body=f"{it.course_code} {short(s.review, 70)} until {until}. "
-                    "Test yourself first; the practice questions are on the exam prep page.",
-                    item_ids=(it.id,),
-                    priority=3,
-                    expires_at=s.start + NUDGE_WINDOW,
-                )
-            )
-            continue
-        out.append(
-            Reminder(
-                rule=Rule.START_NUDGE,
-                keys=(key,),
-                title="Time to start",
-                body=f"[1] {it.course_code} {short(it.title, 60)} until {until}. "
-                "Reply DONE 1 when submitted.",
-                item_ids=(it.id,),
-                priority=3,
-                expires_at=s.start + NUDGE_WINDOW,
-            )
+NOTICE_AFTER_START = timedelta(minutes=30)
+
+
+def window_plan(snap: Snapshot) -> list[Reminder]:
+    """The work-window message (D061): once per window, `notice_lead` before it starts, saying
+    what to do and why. Built entry by entry so it fits one segment and its [n] numbers match
+    `item_ids` exactly. Not counted toward the daily cap (at most 3 windows a day)."""
+    w = snap.window
+    if w is None or not w.entries:
+        return []
+    if not w.start - snap.notice_lead <= snap.now < w.start + NOTICE_AFTER_START:
+        return []
+    key = f"window:{w.window_id}"
+    if key in snap.sent_keys:
+        return []
+    title = window_phrase(w.start, w.end, snap.now)
+    parts: list[str] = []
+    ids: list[int] = []
+    for e in w.entries:
+        if e.item_id is None:
+            part = f"Study {hours_short(e.hours)}: {short(e.title, 30)}."
+        else:
+            due = f", {due_phrase(e.due, snap.now)}" if e.due else ""
+            risk = " (at risk)" if e.at_risk else ""
+            part = f"[{len(ids) + 1}] {short(e.title, 30)}, {hours_short(e.hours)} left{due}{risk}."
+        if gsm_length(to_gsm7(f"{title}: " + " ".join([*parts, part]))) > SEGMENT:
+            break
+        parts.append(part)
+        if e.item_id is not None:
+            ids.append(e.item_id)
+    if not parts:
+        return []
+    return [
+        Reminder(
+            rule=Rule.WINDOW_PLAN,
+            keys=(key,),
+            title=title,
+            body=" ".join(parts),
+            item_ids=tuple(ids),
+            priority=4,
+            counts_toward_cap=False,
+            expires_at=w.start + NOTICE_AFTER_START,
         )
-    return out
+    ]
 
 
 def ai_budget_alert(snap: Snapshot) -> list[Reminder]:
@@ -442,7 +513,7 @@ def candidates(snap: Snapshot) -> list[Reminder]:
         due_now(snap)
         + due_soon(snap)
         + at_risk(snap)
-        + start_nudges(snap)
+        + window_plan(snap)
         + new_items(snap)
         + announced(snap)
         + exam_countdowns(snap)

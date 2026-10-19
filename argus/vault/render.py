@@ -246,7 +246,7 @@ def exam_note(e: ExamData) -> DesiredNote:
         )
     plan = (
         "\n".join(f"- {_when(at)}: {label}" for at, label in e.sessions)
-        or "Review sessions appear here once concepts exist."
+        or "Study time appears here in the week before the exam, in your work windows."
     )
     if e.practice:
         qs = "\n\n".join(
@@ -360,10 +360,10 @@ def review_today(
             + (f" ({layout.link(note)})" if note else "")
             for start, end, label, note in sessions
         )
-        or "No sessions planned today."
+        or "No work windows today."
     )
     due_lines = "\n".join(_item_line(i) for i in due) or "Nothing due today."
-    body = f"# {day:%A, %B} {day.day}\n\n## Sessions\n\n{plan}\n\n## Due today\n\n{due_lines}"
+    body = f"# {day:%A, %B} {day.day}\n\n## Work windows\n\n{plan}\n\n## Due today\n\n{due_lines}"
     return DesiredNote({"date": day.isoformat()}, (("today", body),), "")
 
 

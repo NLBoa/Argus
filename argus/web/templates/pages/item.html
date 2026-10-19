@@ -76,10 +76,9 @@
   <aside class="grid gap-6 content-start" aria-label="Plan and context">
     <section class="panel panel-pad" aria-labelledby="plan-heading">
       <h2 class="section-title" id="plan-heading">Plan</h2>
-      {% if data.remaining %}<p><strong>{{ data.remaining }}</strong> left to do, with <strong>{{ data.free_before_due or "no" }}</strong> of free time before it's due.</p>{% endif %}
-      {% if data.sessions %}
-      <ul class="mt-3 m-0 p-0 list-none grid gap-1">{% for s in data.sessions %}<li class="tnum">{{ s.when }}, {{ s.length }}</li>{% endfor %}</ul>
-      {% else %}<p class="text-muted mt-2">No sessions planned.</p>{% endif %}
+      {% if data.remaining %}<p><strong>{{ data.remaining }}</strong> left to do.</p>{% endif %}
+      {% if data.capacity %}<p class="mt-2"><strong>{{ data.capacity }}</strong> of work-window time before it's due, for <strong>{{ data.demand }}</strong> of work due by then (this and anything due earlier).</p>
+      {% elif not data.remaining %}<p class="text-muted">Nothing to plan.</p>{% endif %}
     </section>
     {% if data.scope or data.logistics %}
     <section class="panel panel-pad" aria-labelledby="info-heading">

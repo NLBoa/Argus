@@ -126,7 +126,7 @@ QUIET = TimeWindow(start=time(23), end=time(8))
 
 def test_snooze_defers_everything_but_the_three_hour_warning() -> None:
     ctx = GuardContext(QUIET, [], 0, 6, snoozed={1: NOW + timedelta(hours=2)})
-    nudge = Reminder(Rule.START_NUDGE, ("k",), "t", "b", item_ids=(1,))
+    nudge = Reminder(Rule.WINDOW_PLAN, ("k",), "t", "b", item_ids=(1,))
     assert check(nudge, ctx, NOW) == (Verdict.DEFER, "snoozed")
     assert check(nudge, ctx, NOW + timedelta(hours=2))[0] is Verdict.SEND  # snooze over
     warning = Reminder(Rule.DUE_3H, ("k",), "t", "b", item_ids=(1,), bypass_quiet=True)

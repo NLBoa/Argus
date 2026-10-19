@@ -223,6 +223,15 @@ class DueMark:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowBand:
+    """A work window on the rail: a thin bar beside the blocks, never on top of them."""
+
+    top_pct: float
+    height_pct: float
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
 class TimelineView:
     day: date
     start_hour: int
@@ -232,6 +241,7 @@ class TimelineView:
     now_pct: float | None
     now_text: str | None
     due_marks: tuple[DueMark, ...] = field(default=())
+    windows: tuple[WindowBand, ...] = field(default=())
 
     @property
     def span_hours(self) -> int:
@@ -255,6 +265,7 @@ def timeline(
     config: AppConfig,
     courses: Mapping[str, CourseView],
     due_items: Sequence[ItemView] = (),
+    windows: Sequence[tuple[datetime, datetime]] = (),
 ) -> TimelineView:
     window = config.schedule.waking_window
     start_h = window.start.hour
@@ -294,8 +305,18 @@ def timeline(
         for v in due_items
         if v.due_at and start <= v.due_at < end
     )
+    bands = tuple(
+        WindowBand(
+            pct(ws),
+            round(pct(we) - pct(ws), 3),
+            f"Work window, {clock_time(ws)} to {clock_time(we)}",
+        )
+        for ws, we in windows
+        if we > start and ws < end
+    )
     in_window = start <= now < end
     return TimelineView(
+        windows=bands,
         day=day,
         start_hour=start_h,
         end_hour=end_h,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any, ClassVar
 
@@ -22,7 +23,7 @@ from argus.collectors.gradescope import GradescopeCollector, GSAssignment
 from argus.collectors.http import Fetcher
 from argus.collectors.piazza import PiazzaCollector
 from argus.collectors.runner import SyncRunner
-from argus.config import AppConfig, Secrets, TimeWindow
+from argus.config import AppConfig, Secrets, TimeWindow, WorkWindowConfig
 from argus.domain.models import MeetingRecord, Weekday
 from argus.store import repo
 from argus.store.db import open_db, transaction
@@ -166,10 +167,25 @@ def model(req: dict[str, Any]) -> Any:
     return ok({"line": "Sessions are planned before each deadline."})
 
 
+# Evenings Mon-Thu 7-11 pm and Sunday 1-6 pm, like the demo.
+WINDOWS = [
+    WorkWindowConfig(days=["Mon", "Tue", "Wed", "Thu"], start=time(19), end=time(23)),
+    WorkWindowConfig(days=["Sun"], start=time(13), end=time(18)),
+]
+Student = Callable[[sqlite3.Connection, FakeClock], None]
+
+
+def with_windows(app_config: AppConfig) -> AppConfig:
+    return app_config.model_copy(
+        update={"schedule": app_config.schedule.model_copy(update={"work_windows": WINDOWS})}
+    )
+
+
 async def run_week(
-    tmp_path: Any, app_config: AppConfig
+    tmp_path: Any, app_config: AppConfig, *, student: Student | None = None
 ) -> tuple[sqlite3.Connection, list[tuple[datetime, dict[str, Any]]]]:
-    """Run the worker every 15 minutes from START to END. Returns the db and every ntfy send."""
+    """Run the worker every 15 minutes from START to END. Returns the db and every ntfy send.
+    `student` runs before each tick (e.g. answering "did you work on it?" after a window)."""
     clock = FakeClock(START)
     FakeGS.clock = clock
     FakePiazza.clock = clock
@@ -238,6 +254,8 @@ async def run_week(
                             conn, hw_a.id, True, clock.now()
                         )  # submitted Wednesday afternoon
                     done_marked = True
+                if student is not None:
+                    student(conn, clock)
                 await worker.tick()
                 clock.advance(timedelta(minutes=15))
 

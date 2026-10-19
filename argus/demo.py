@@ -342,7 +342,13 @@ def seed_demo(
     from argus.clock import FakeClock
     from argus.planning import replan
 
-    replan(conn, DEMO_CONFIG, FakeClock(now), force=True)
+    replan(
+        conn,
+        DEMO_CONFIG,
+        FakeClock(now),
+        tracking_sources=derive(DEMO_CONFIG, demo_secrets(profile)).tracking_sources,
+        force=True,
+    )
 
 
 def _seed_tier2(

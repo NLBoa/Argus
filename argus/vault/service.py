@@ -27,7 +27,8 @@ from argus.domain.titles import normalize_title
 from argus.estimates import effective_estimates
 from argus.exams import PracticeRow, concept_readiness, practice_items
 from argus.logging import get_logger
-from argus.planning import blocks_between
+from argus.planning import Planning, busy_windows, compute
+from argus.reminders.text import hours_short
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 from argus.vault import layout, render
@@ -165,6 +166,7 @@ class Builder:
     writer: VaultWriter
     caps: Capabilities  # sections a missing source can't support are left out (D055)
     _logged: int = 0  # allowed edits already recorded
+    _plan: Planning | None = None
 
     def build(self) -> str:
         """Write every note. Returns the commit message."""
@@ -189,6 +191,17 @@ class Builder:
         return msg + (f", propose changes to {proposed}" if proposed else "")
 
     # -- helpers
+
+    def _planning(self) -> Planning:
+        """The plan, computed once per build (the exam notes and the Today note share it)."""
+        if self._plan is None:
+            self._plan = compute(
+                self.conn,
+                self.config,
+                self.clock.now(),
+                tracking_sources=self.caps.tracking_sources,
+            )
+        return self._plan
 
     def _status(self, item: Item, now: datetime) -> str:
         """The status a note shows. Past-due work no source reports submissions for is
@@ -384,10 +397,12 @@ class Builder:
         ids = json.loads(row["concept_ids"]) if row else []
         in_scope = [k for k in concepts if k["id"] in ids]
         ready = concept_readiness(self.conn, ids)
-        sessions = self.conn.execute(
-            "SELECT start_at, label FROM plan_blocks WHERE kind = 'review' AND item_id = ? ORDER BY start_at",
-            (item.id,),
-        ).fetchall()
+        plan = self._planning()
+        sessions = [
+            (sp.start, f"Study {hours_short(plan.study.quota[sp.window_id][item.id])}")
+            for sp in plan.spans
+            if item.id in plan.study.quota.get(sp.window_id, {})
+        ]
         practice = [p for p in practice_items(self.conn, ids) if p.kind == "question"]
         self.writer.write(
             path,
@@ -402,7 +417,7 @@ class Builder:
                         render.ExamConcept(k["name"], by_slug[k["slug"]], ready[k["id"]].value)
                         for k in in_scope
                     ],
-                    sessions=[(parse_iso(s["start_at"]), s["label"] or "Review") for s in sessions],
+                    sessions=sessions,
                     practice=[(p.prompt, p.answer, p.concept) for p in _interleave(practice)][:20],
                     study=study,
                 )
@@ -414,12 +429,17 @@ class Builder:
     def _today(self, items: list[Item], now: datetime) -> None:
         day = to_local(now).date()
         start, end = local_datetime(day, 0), local_datetime(day + timedelta(days=1), 0)
-        by_id = {i.id: i for i in items}
+        plan = self._planning()
         sessions = []
-        for b in blocks_between(self.conn, start, end):
-            item = by_id.get(b.item_id) if b.item_id is not None else None
-            label = b.label or (f"{item.course_code}: {item.title}" if item else "Work session")
-            sessions.append((b.start, b.end, label, item_note_path(item) if item else None))
+        for sp in busy_windows(plan, start, end):
+            parts = []
+            for entry, hours in plan.allocation(sp.window_id):
+                kind, _, raw = entry.partition(":")
+                ip = plan.items.get(int(raw))
+                if ip is not None:
+                    name = ip.item.title if kind == "item" else f"Study for {ip.item.title}"
+                    parts.append(f"{name}, {hours_short(hours)}")
+            sessions.append((sp.start, sp.end, "; ".join(parts) or "Nothing planned yet", None))
         due = [
             _line(i, self._status(i, now))
             for i in items

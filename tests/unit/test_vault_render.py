@@ -178,7 +178,7 @@ def test_exam_note_has_scope_readiness_plan_and_folded_practice() -> None:
     assert "**1.** Q?\n\n> [!check]- Answer\n> A." in regions["practice"]
     assert note.frontmatter["date"] == "2026-10-21"
     empty = dict(render.exam_note(render.ExamData("C", "E", None, None, None, [], [], [])).regions)
-    assert "appear here" in empty["plan"] and "appear here" in empty["practice"]
+    assert "appears here" in empty["plan"] and "appear here" in empty["practice"]
 
 
 def test_flashcards_use_obsidian_to_anki_syntax_and_keep_ids() -> None:
@@ -233,7 +233,7 @@ def test_today_weekly_and_proposals() -> None:
         body.startswith("# Monday, October 19")
         and "- 2 pm to 3:30 pm: HW 3 ([[Courses/C/Assignments/HW 3]])" in body
     )
-    assert "No sessions planned today." in render.review_today(day, [], []).regions[0][1]
+    assert "No work windows today." in render.review_today(day, [], []).regions[0][1]
     weekly = dict(render.weekly_note(day, [], ["Courses/C/C.md: rewrote core"]).regions)
     assert (
         "Nothing due this week." in weekly["summary"]

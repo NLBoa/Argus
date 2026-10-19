@@ -7,21 +7,103 @@ Monday 08:00 to Sunday 23:45 local. Assertions check the deadline and reminder p
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
-from argus.clock import to_local
+from argus.clock import FakeClock, to_local
 from argus.config import AppConfig
 from argus.store import repo
-from tests.integration.simweek import QUIET, run_week
+from argus.store.db import transaction
+from tests.integration.simweek import QUIET, run_week, with_windows
+from tests.integration.test_deadline_golden import GOLDEN, deadline_alerts
 
 
 async def test_simulated_week(tmp_path: Any, app_config: AppConfig) -> None:
+    """No work windows: the time-only rules, and no window messages."""
     conn, sent = await run_week(tmp_path, app_config)
     _check(conn, sent)
+    assert not [n for n in repo.recent_notifications(conn, limit=500) if n.rule == "window_plan"]
+
+
+async def test_simulated_week_with_windows_never_logging(
+    tmp_path: Any, app_config: AppConfig
+) -> None:
+    """Work windows on, and a student who never logs time or answers: no nagging loop (D060)."""
+    conn, sent = await run_week(tmp_path, with_windows(app_config))
+    _check(conn, sent)
+    _check_windows(conn)
+    # Deadline alerts are exactly what they were before work windows existed.
+    assert deadline_alerts(conn) == json.loads(GOLDEN.read_text())
+
+
+async def test_simulated_week_with_windows_logging_as_planned(
+    tmp_path: Any, app_config: AppConfig
+) -> None:
+    """A student who does what each window planned and says so: nothing is planned twice."""
+
+    def answer_last_window(conn: sqlite3.Connection, clock: FakeClock) -> None:
+        plan = repo.latest_ended_window_plan(conn, clock.now())
+        if plan is None or clock.now() - plan.ends_at >= timedelta(minutes=15):
+            return
+        with transaction(conn):
+            for entry, hours in plan.allocation:
+                if entry.startswith("item:"):
+                    item_id = int(entry.split(":", 1)[1])
+                    repo.checkin(
+                        conn,
+                        item_id,
+                        window_id=plan.window_id,
+                        window_start=plan.starts_at,
+                        hours=hours,
+                        now=clock.now(),
+                    )
+
+    conn, sent = await run_week(tmp_path, with_windows(app_config), student=answer_last_window)
+    _check(conn, sent)
+    _check_windows(conn)
+    # Each item gets at most its estimate (p80 = 3 h) of window time across all windows, so
+    # it is named in no more windows than that needs.
+    planned: Counter[int] = Counter()
+    windows_named: Counter[int] = Counter()
+    for r in conn.execute("SELECT allocation FROM window_plans"):
+        for entry, hours in json.loads(r["allocation"]):
+            if entry.startswith("item:"):
+                planned[int(entry.split(":", 1)[1])] += hours
+                windows_named[int(entry.split(":", 1)[1])] += 1
+    assert planned and max(planned.values()) <= 3.0 + 1e-6, planned
+    capacity = 4.0  # the shortest evening window
+    for item_id, n in windows_named.items():
+        assert n <= -(-planned[item_id] // capacity) + 1, (
+            item_id,
+            n,
+        )  # +1: a window split by a due time
+
+
+def _check_windows(conn: sqlite3.Connection) -> None:
+    notifications = repo.recent_notifications(conn, limit=500)
+    window_msgs = [n for n in notifications if n.rule == "window_plan"]
+    assert window_msgs, "the week has work windows with work in them"
+    keys = [n.key for n in window_msgs]
+    assert len(keys) == len(set(keys))  # one message per window, at most
+    assert len(keys) <= 9  # Mon-Thu evenings and Sunday afternoon this week
+    at_risk: Counter[int] = Counter()
+    plans = [
+        (repo.parse_iso(r["starts_at"]), repo.parse_iso(r["ends_at"]), json.loads(r["allocation"]))
+        for r in conn.execute("SELECT * FROM window_plans")
+    ]
+    for n in notifications:
+        if n.rule != "at_risk" or n.status != "sent" or n.sent_at is None:
+            continue
+        for item_id in n.item_ids:
+            at_risk[item_id] += 1
+            for start, end, alloc in plans:
+                inside = start <= n.sent_at < end
+                assert not (inside and f"item:{item_id}" in [e for e, _ in alloc]), (n, start)
+    assert all(v <= 1 for v in at_risk.values()), at_risk  # once per item and due date
 
 
 def _check(conn: sqlite3.Connection, sent: list[tuple[datetime, dict[str, Any]]]) -> None:
@@ -66,27 +148,6 @@ def _check(conn: sqlite3.Connection, sent: list[tuple[datetime, dict[str, Any]]]
             assert due_day is not None
             same_day = due_day.group(1) == f"{to_local(when):%a}"
             assert body["title"] == ("Due today" if same_day else "Due tomorrow"), (when, body)
-
-    # Work is planned once: never more than the estimate (p80 = 3 h) per item, so nudges stop.
-    planned = Counter[int]()
-    for b in conn.execute("SELECT item_id, start_at, end_at FROM plan_blocks WHERE kind = 'work'"):
-        s_, e_ = (
-            datetime.fromisoformat(x.replace("Z", "+00:00")) for x in (b["start_at"], b["end_at"])
-        )
-        planned[b["item_id"]] += (e_ - s_).total_seconds() / 3600
-    assert planned and max(planned.values()) <= 3.0 + 1e-9, planned
-    nudges = Counter(n.item_ids[0] for n in notifications if n.rule == "start_nudge")
-    assert max(nudges.values()) <= 3, nudges
-
-    # Start nudges went out, and no work session ever overlapped class.
-    assert any(n.rule == "start_nudge" for n in notifications)
-    for b in conn.execute("SELECT start_at, end_at FROM plan_blocks"):
-        start = to_local(datetime.fromisoformat(b["start_at"].replace("Z", "+00:00")))
-        end = to_local(datetime.fromisoformat(b["end_at"].replace("Z", "+00:00")))
-        if start.weekday() in (1, 3):
-            class_start = start.replace(hour=9, minute=15)  # lecture 9:30 minus the walking buffer
-            class_end = start.replace(hour=11, minute=0)
-            assert end <= class_start or start >= class_end, (start, end)
 
     # Idempotency: every send has a unique key and nothing was delivered twice.
     keys = [k for (k,) in conn.execute("SELECT key FROM notification_keys")]

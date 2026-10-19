@@ -223,7 +223,13 @@ def override_estimate(
         estimates.set_override(conn, item, hours, state.clock.now())
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    replan(conn, state.config, state.clock, force=True)
+    replan(
+        conn,
+        state.config,
+        state.clock,
+        tracking_sources=state.caps.tracking_sources,
+        force=True,
+    )
     return back(request, f"/items/{item_id}")
 
 
@@ -231,7 +237,13 @@ def override_estimate(
 def clear_estimate(request: Request, state: State, conn: Conn, item_id: int) -> Response:
     _item_or_404(conn, item_id)
     estimates.clear_override(conn, item_id, state.clock.now())
-    replan(conn, state.config, state.clock, force=True)
+    replan(
+        conn,
+        state.config,
+        state.clock,
+        tracking_sources=state.caps.tracking_sources,
+        force=True,
+    )
     return back(request, f"/items/{item_id}")
 
 
@@ -241,7 +253,13 @@ async def rerun_estimate(request: Request, state: State, conn: Conn, item_id: in
     await estimates.estimate_item(
         conn, ai_client(state, conn), state.config, state.clock, item, force_ai=True
     )
-    replan(conn, state.config, state.clock, force=True)
+    replan(
+        conn,
+        state.config,
+        state.clock,
+        tracking_sources=state.caps.tracking_sources,
+        force=True,
+    )
     return back(request, f"/items/{item_id}")
 
 
@@ -257,7 +275,13 @@ def log_hours(
             repo.refresh_statuses(conn, now, tracking_sources=state.caps.tracking_sources)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    replan(conn, state.config, state.clock, force=True)
+    replan(
+        conn,
+        state.config,
+        state.clock,
+        tracking_sources=state.caps.tracking_sources,
+        force=True,
+    )
     return back(request, f"/items/{item_id}")
 
 
@@ -278,7 +302,7 @@ def practice_attempt(
         raise HTTPException(422, str(e)) from e
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
-    replan(conn, state.config, state.clock)  # readiness feeds the review plan
+    replan(conn, state.config, state.clock, tracking_sources=state.caps.tracking_sources)
     if not is_htmx(request):
         return back(request, "/exams")
     view = practice_card(conn, state.config, practice_id, result)

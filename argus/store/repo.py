@@ -37,6 +37,8 @@ from argus.domain.models import (
 )
 from argus.domain.status import StatusFacts, derive_status
 from argus.logging import get_logger
+from argus.planner.queue import Pref
+from argus.planner.windows import WorkWindow
 from argus.store.db import iso, iso_or_none, parse_iso, parse_iso_or_none, transaction
 
 log = get_logger(__name__)
@@ -793,6 +795,8 @@ class TimeLog:
     started_at: datetime
     ended_at: datetime | None
     source: str
+    window_id: str | None = None  # checkin: the window it answers for
+    created_at: datetime | None = None
 
     def hours(self, now: datetime) -> float:
         end = self.ended_at or now
@@ -806,6 +810,8 @@ def _row_to_log(r: sqlite3.Row) -> TimeLog:
         parse_iso(r["started_at"]),
         parse_iso_or_none(r["ended_at"]),
         r["source"],
+        r["window_id"],
+        parse_iso_or_none(r["created_at"]),
     )
 
 
@@ -866,6 +872,48 @@ def time_logs_for(conn: sqlite3.Connection, item_id: int) -> list[TimeLog]:
         "SELECT * FROM time_logs WHERE item_id = ? ORDER BY started_at", (item_id,)
     ).fetchall()
     return [_row_to_log(r) for r in rows]
+
+
+def all_time_logs(conn: sqlite3.Connection) -> list[TimeLog]:
+    rows = conn.execute("SELECT * FROM time_logs ORDER BY started_at, id").fetchall()
+    return [_row_to_log(r) for r in rows]
+
+
+def time_logs_created_between(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> list[TimeLog]:
+    rows = conn.execute(
+        "SELECT * FROM time_logs WHERE created_at >= ? AND created_at < ?",
+        (iso(start), iso(end)),
+    ).fetchall()
+    return [_row_to_log(r) for r in rows]
+
+
+def checkin(
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    window_id: str,
+    window_start: datetime,
+    hours: float,
+    now: datetime,
+) -> bool:
+    """The student's answer to "did you work on it?" for one window (D060): `hours` of work
+    (0 for "None"), recorded once per item and window. Returns False if already answered."""
+    if not 0 <= hours <= 24:
+        raise ValueError("hours must be between 0 and 24")
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO time_logs (item_id, started_at, ended_at, source, window_id, created_at)
+           VALUES (?, ?, ?, 'checkin', ?, ?)""",
+        (
+            item_id,
+            iso(window_start),
+            iso(window_start + timedelta(hours=hours)),
+            window_id,
+            iso(now),
+        ),
+    )
+    return cur.rowcount == 1
 
 
 # ---------------------------------------------------------------- notifications
@@ -1715,8 +1763,23 @@ def retract_user_estimates(conn: sqlite3.Connection, item_id: int, now: datetime
 
 
 def logged_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
+    """Progress per item: every logged hour, a running timer up to now included."""
+    return _hours(conn, now, include_legacy=True)
+
+
+def actual_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
+    """Time the student actually reported, for calibration: not `legacy` credit carried over
+    from planned sessions (D060)."""
+    return _hours(conn, now, include_legacy=False)
+
+
+def _hours(conn: sqlite3.Connection, now: datetime, *, include_legacy: bool) -> dict[int, float]:
     out: dict[int, float] = {}
-    for r in conn.execute("SELECT item_id, started_at, ended_at FROM time_logs"):
+    rows = conn.execute(
+        "SELECT item_id, started_at, ended_at FROM time_logs WHERE ? OR source <> 'legacy'",
+        (include_legacy,),
+    )
+    for r in rows:
         end = parse_iso_or_none(r["ended_at"]) or now
         out[r["item_id"]] = out.get(r["item_id"], 0.0) + max(
             0.0, (end - parse_iso(r["started_at"])).total_seconds() / 3600
@@ -1736,7 +1799,7 @@ class FinishedRow:
 
 def finished_history(conn: sqlite3.Connection, now: datetime) -> list[FinishedRow]:
     """Finished items with logged time: the evidence for calibration and fallbacks."""
-    hours = logged_hours(conn, now)
+    hours = actual_hours(conn, now)
     latest = latest_estimates(conn)
     out = []
     for r in conn.execute(
@@ -1810,3 +1873,170 @@ def list_materials(
         )
         for r in conn.execute(sql + " ORDER BY m.module_id, m.title", params)
     ]
+
+
+# ---------------------------------------------------------------- work windows and the queue
+
+
+def _plan_state_row(conn: sqlite3.Connection, now: datetime) -> None:
+    conn.execute(
+        """INSERT INTO plan_state (id, inputs_hash, explanation, planned_at)
+           VALUES (1, '', '', ?) ON CONFLICT (id) DO NOTHING""",
+        (iso(now),),
+    )
+
+
+def work_windows(conn: sqlite3.Connection) -> list[WorkWindow]:
+    """The student's work windows (one row per start day, grouped back into windows)."""
+    grouped: dict[tuple[str, str], set[int]] = {}
+    for r in conn.execute("SELECT day, start_time, end_time FROM work_windows ORDER BY id"):
+        grouped.setdefault((r["start_time"], r["end_time"]), set()).add(int(r["day"]))
+    return [
+        WorkWindow(frozenset(days), time.fromisoformat(start), time.fromisoformat(end))
+        for (start, end), days in grouped.items()
+    ]
+
+
+def set_work_windows(
+    conn: sqlite3.Connection, windows: Sequence[WorkWindow], now: datetime
+) -> None:
+    conn.execute("DELETE FROM work_windows")
+    for w in windows:
+        for day in sorted(w.days):
+            conn.execute(
+                "INSERT INTO work_windows (day, start_time, end_time, created_at) VALUES (?, ?, ?, ?)",
+                (day, f"{w.start:%H:%M}", f"{w.end:%H:%M}", iso(now)),
+            )
+
+
+def seed_work_windows(
+    conn: sqlite3.Connection, windows: Sequence[WorkWindow], now: datetime
+) -> bool:
+    """First run only: copy config.yaml's work windows into the table (D057). Marked as seeded
+    only when config gave at least one window, so adding them to config later still works."""
+    _plan_state_row(conn, now)
+    seeded = conn.execute("SELECT windows_seeded_at FROM plan_state WHERE id = 1").fetchone()[0]
+    if seeded is not None or not windows:
+        return False
+    if conn.execute("SELECT 1 FROM work_windows LIMIT 1").fetchone() is None:
+        set_work_windows(conn, windows, now)
+    conn.execute("UPDATE plan_state SET windows_seeded_at = ? WHERE id = 1", (iso(now),))
+    return True
+
+
+def queue_prefs(conn: sqlite3.Connection) -> dict[str, Pref]:
+    return {
+        r["entry"]: Pref(
+            r["entry"],
+            r["pin_rank"],
+            r["pin_kind"],
+            parse_iso_or_none(r["pin_until"]),
+            r["skip_window"],
+        )
+        for r in conn.execute("SELECT * FROM queue_prefs")
+    }
+
+
+def latest_remaining_marks(conn: sqlite3.Connection) -> dict[int, tuple[float, datetime]]:
+    """Per item, the student's latest "about N h left" and when it was given."""
+    out: dict[int, tuple[float, datetime]] = {}
+    for r in conn.execute("SELECT item_id, hours, at FROM remaining_marks ORDER BY at, id"):
+        out[r["item_id"]] = (float(r["hours"]), parse_iso(r["at"]))
+    return out
+
+
+def add_remaining_mark(
+    conn: sqlite3.Connection, item_id: int, hours: float, now: datetime, source: str
+) -> None:
+    if not 0 <= hours <= 200:
+        raise ValueError("hours must be between 0 and 200")
+    conn.execute(
+        "INSERT INTO remaining_marks (item_id, hours, at, source, created_at) VALUES (?, ?, ?, ?, ?)",
+        (item_id, hours, iso(now), source, iso(now)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class WindowPlan:
+    window_id: str
+    starts_at: datetime
+    ends_at: datetime
+    allocation: tuple[tuple[str, float], ...]  # (entry, hours) in queue order
+
+
+def _row_to_window_plan(r: sqlite3.Row) -> WindowPlan:
+    return WindowPlan(
+        r["window_id"],
+        parse_iso(r["starts_at"]),
+        parse_iso(r["ends_at"]),
+        tuple((str(e), float(h)) for e, h in json.loads(r["allocation"])),
+    )
+
+
+def window_plan(conn: sqlite3.Connection, window_id: str) -> WindowPlan | None:
+    r = conn.execute("SELECT * FROM window_plans WHERE window_id = ?", (window_id,)).fetchone()
+    return _row_to_window_plan(r) if r else None
+
+
+def latest_ended_window_plan(conn: sqlite3.Connection, now: datetime) -> WindowPlan | None:
+    r = conn.execute(
+        "SELECT * FROM window_plans WHERE ends_at <= ? ORDER BY ends_at DESC LIMIT 1", (iso(now),)
+    ).fetchone()
+    return _row_to_window_plan(r) if r else None
+
+
+def save_window_plan(
+    conn: sqlite3.Connection,
+    window_id: str,
+    *,
+    starts_at: datetime,
+    ends_at: datetime,
+    allocation: Sequence[tuple[str, float]],
+    now: datetime,
+) -> None:
+    """Keep a window's split up to date until it ends; after that it is history (D061)."""
+    if now >= ends_at:
+        return
+    conn.execute(
+        """INSERT INTO window_plans (window_id, starts_at, ends_at, allocation, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (window_id) DO UPDATE SET starts_at = excluded.starts_at,
+             ends_at = excluded.ends_at, allocation = excluded.allocation,
+             updated_at = excluded.updated_at""",
+        (
+            window_id,
+            iso(starts_at),
+            iso(ends_at),
+            json.dumps([[e, round(h, 4)] for e, h in allocation]),
+            iso(now),
+        ),
+    )
+
+
+def convert_legacy_blocks(conn: sqlite3.Connection, now: datetime) -> int | None:
+    """Once, after 0009 (D060): planned work sessions that had passed counted as progress for
+    items with no logged time (D030). Carry that over as `legacy` time so remaining hours don't
+    jump at the switch. Returns the rows added, or None if already done."""
+    _plan_state_row(conn, now)
+    if conn.execute("SELECT legacy_converted_at FROM plan_state WHERE id = 1").fetchone()[0]:
+        return None
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'plan_blocks_legacy'"
+    ).fetchone()
+    added = 0
+    if exists:
+        cur = conn.execute(
+            """INSERT INTO time_logs (item_id, started_at, ended_at, source, created_at)
+               SELECT b.item_id, b.start_at, MIN(b.end_at, ?), 'legacy', ?
+                 FROM plan_blocks_legacy b
+                WHERE b.kind = 'work' AND b.item_id IS NOT NULL AND b.start_at < ?
+                  AND b.item_id NOT IN (SELECT item_id FROM time_logs WHERE source <> 'legacy')""",
+            (iso(now), iso(now), iso(now)),
+        )
+        added = cur.rowcount
+    conn.execute(
+        "UPDATE plan_state SET legacy_converted_at = ?, model_since = COALESCE(model_since, ?)"
+        " WHERE id = 1",
+        (iso(now), iso(now)),
+    )
+    return added

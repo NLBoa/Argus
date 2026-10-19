@@ -12,13 +12,13 @@ from argus.config import AppConfig
 from argus.domain.models import ItemKind
 from argus.exams import PracticeRow, concept_readiness, practice_items
 from argus.planner.review import Readiness
+from argus.planning import compute
 from argus.store import repo
-from argus.store.db import parse_iso
 from argus.vault import layout
 from argus.vault.proposals import EXPIRY
 from argus.vault.service import item_note_path
 from argus.vault.writer import VaultWriter
-from argus.web.format import clock_time, due_text, relative
+from argus.web.format import clock_time, due_text, hours, relative
 from argus.web.viewmodels import CourseView, DiffView, PracticeView, course_views, diff_view
 
 PRACTICE_PER_VISIT = 10
@@ -73,9 +73,10 @@ class ExamPage:
     logistics: str | None
     counts: dict[str, int]
     concepts: list[ConceptLine]
-    sessions: list[SessionLine]
+    sessions: list[SessionLine]  # study time reserved in work windows (D062)
     practice: list[PracticeView]
     obsidian: str | None
+    study_short: str | None = None  # study time that doesn't fit before the exam
 
 
 def _concept_ids(conn: sqlite3.Connection, item_id: int) -> list[int]:
@@ -133,7 +134,12 @@ def practice_order(rows: list[PracticeRow], ready: dict[int, Readiness]) -> list
 
 
 def load_exam(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, item_id: int
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    item_id: int,
+    *,
+    tracking_sources: frozenset[str],
 ) -> ExamPage | None:
     item = repo.get_item(conn, item_id)
     courses = course_views(config)
@@ -161,18 +167,17 @@ def load_exam(
         ),
         key=lambda c: (_READINESS_ORDER[Readiness(c.readiness)], c.name),
     )
+    plan = compute(conn, config, now, tracking_sources=tracking_sources)
     sessions = [
         SessionLine(
-            f"{to_local(parse_iso(r['start_at'])):%a %b} {to_local(parse_iso(r['start_at'])).day}, "
-            f"{clock_time(parse_iso(r['start_at']))}",
-            r["label"] or "Review",
-            parse_iso(r["end_at"]) <= now,
+            f"{to_local(sp.start):%a %b} {to_local(sp.start).day}, {clock_time(sp.start)}",
+            f"{hours(plan.study.quota[sp.window_id][item.id])} of study",
+            sp.end <= now,
         )
-        for r in conn.execute(
-            "SELECT start_at, end_at, label FROM plan_blocks WHERE kind = 'review' AND item_id = ? ORDER BY start_at",
-            (item.id,),
-        )
+        for sp in plan.spans
+        if item.id in plan.study.quota.get(sp.window_id, {})
     ]
+    short = plan.study.shortfall.get(item.id)
     row = conn.execute(
         "SELECT scope, logistics FROM exams WHERE item_id = ?", (item.id,)
     ).fetchone()
@@ -190,6 +195,7 @@ def load_exam(
         sessions=sessions,
         practice=[practice_view(p, course) for p in practice],
         obsidian=obsidian_link(config, item_note_path(item)),
+        study_short=hours(short) if short else None,
     )
 
 

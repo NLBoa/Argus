@@ -8,9 +8,9 @@ from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.reminders.rules import (
     Reminder,
     Rule,
-    SessionRef,
     Snapshot,
     SourceAlertState,
+    at_risk,
     candidates,
     due_now,
     due_soon,
@@ -226,18 +226,39 @@ def test_at_risk_is_immediate_and_uncapped() -> None:
     assert candidates(snap(item(1, timedelta(hours=-1)), at_risk=frozenset({1}))) == []
 
 
-def test_start_nudge_fires_in_window_once() -> None:
+def test_at_risk_says_why_with_the_load() -> None:
     it = item(1, timedelta(days=2))
-    s = SessionRef(1, NOW - timedelta(minutes=3), NOW + timedelta(minutes=87))
-    [r] = candidates(snap(it, sessions=[s]))
-    assert r.rule == Rule.START_NUDGE and r.title == "Time to start"
-    assert "until 10:27am" in r.body
-    assert r.expires_at == s.start + timedelta(minutes=10)
-    assert candidates(snap(it, sessions=[s], sent=set(r.keys))) == []
-    late = SessionRef(1, NOW - timedelta(minutes=11), NOW + timedelta(minutes=60))
-    assert candidates(snap(it, sessions=[late])) == []
-    done = item(1, timedelta(days=2), status=ItemStatus.SUBMITTED)
-    assert candidates(snap(done, sessions=[s])) == []
+    [r] = at_risk(snap(it, at_risk=frozenset({1}), at_risk_load={1: (3.0, 5.0)}))
+    assert "only 3h of work windows before" in r.body and "for 5h of work" in r.body
+    assert gsm_length(r.sms) <= SEGMENT
+
+
+def test_at_risk_items_are_batched_with_a_key_each() -> None:
+    items = [item(i, timedelta(days=i)) for i in (1, 2, 3)]
+    [r] = at_risk(snap(*items, at_risk=frozenset({1, 2, 3})))
+    assert r.title == "3 at risk"
+    assert r.keys == tuple(item_key(i, Rule.AT_RISK) for i in items)  # one key per item (D020)
+    assert r.item_ids == (1, 2, 3) and "[3]" in r.body
+    assert gsm_length(r.sms) <= SEGMENT
+    # Once sent, nothing repeats; a new item at risk gets its own message.
+    assert at_risk(snap(*items, at_risk=frozenset({1, 2, 3}), sent=set(r.keys))) == []
+
+
+def test_at_risk_waits_while_the_item_is_being_worked_on() -> None:
+    it = item(1, timedelta(days=2))
+    assert at_risk(snap(it, at_risk=frozenset({1}), in_window=frozenset({1}))) == []
+    assert len(at_risk(snap(it, at_risk=frozenset({1})))) == 1
+
+
+def test_batched_at_risk_fits_one_segment_and_numbers_match() -> None:
+    long = [
+        item(i, timedelta(days=i), title=f"An unusually long assignment title {i}")
+        for i in range(1, 9)
+    ]
+    [r] = at_risk(snap(*long, at_risk=frozenset(range(1, 9))))
+    assert gsm_length(r.sms) <= SEGMENT
+    shown = r.body.count("[")
+    assert len(r.item_ids) == shown and len(r.keys) == 8  # every item is keyed, some unshown
 
 
 def test_ai_budget_alert_once_per_month() -> None:

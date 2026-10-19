@@ -160,8 +160,12 @@ class Worker:
         self._last_ping = now
 
     async def _plan(self) -> None:
-        if replan(self.conn, self.config, self.clock) and self.ai.available:
-            await explain(self.conn, self.ai, self.config, self.clock)
+        tracking = self.caps.tracking_sources
+        if (
+            replan(self.conn, self.config, self.clock, tracking_sources=tracking)
+            and self.ai.available
+        ):
+            await explain(self.conn, self.ai, self.config, self.clock, tracking_sources=tracking)
 
     async def _study(self) -> None:
         now = self.clock.now()

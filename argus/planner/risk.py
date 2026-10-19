@@ -1,11 +1,17 @@
-"""Risk levels for items.
+"""Risk levels for items (D059).
 
-An item is AT RISK when the free hours left before its due time are fewer than its remaining p80
-hours (the spec rule). Those inputs come from the planner (Phase 4). Without them, risk uses only
-time and status: open and past due is OVERDUE, and due within 24 hours but not started is WATCH.
+With work windows, an open item that takes a submission is judged on its load: C, the work-window
+hours before it is due (minus reserved exam study and a skipped window), against D, its own
+remaining hours plus the remaining hours of everything due at or before it.
 
-An item no enabled source can report a submission for (D056) is never OVERDUE: once its deadline
-passes it is UNCONFIRMED ("Did you submit?") until the student marks it done.
+- AT RISK: C < D (there is not enough window time for what is due by then).
+- CREEPING: C < 1.5 x D (it fits, without much room).
+- An item with nothing left (E = 0) is OK. Comparisons are strict.
+
+Without work windows (or without an estimate), only time and status count: open and due within
+24 hours but not started is CREEPING. Past due is OVERDUE, except that an item no enabled source
+can report a submission for (D056) is never OVERDUE: once its deadline passes it is UNCONFIRMED
+("Did you submit?"), and inside a late window it is CREEPING.
 """
 
 from __future__ import annotations
@@ -19,13 +25,13 @@ from argus.domain.models import Item, ItemStatus
 from argus.domain.status import awaiting_confirmation
 from argus.planner.windows import WindowSpan
 
-WATCH_WINDOW = timedelta(hours=24)
-WATCH_MARGIN = 1.5  # free time under 1.5x the remaining work: watch
+SOON = timedelta(hours=24)  # time-only rule: due this soon and not started is creeping
+MARGIN = 1.5  # window time under 1.5x the work due by then: creeping
 
 
 class RiskLevel(Enum):
     OK = ("ok", "On track", 0)
-    WATCH = ("watch", "Watch", 1)
+    CREEPING = ("creeping", "Creeping", 1)
     UNCONFIRMED = ("unconfirmed", "Did you submit?", 2)
     AT_RISK = ("at-risk", "At risk", 3)
     OVERDUE = ("overdue", "Overdue", 4)
@@ -36,16 +42,10 @@ class RiskLevel(Enum):
         self.severity = severity
 
 
-def assess(
-    item: Item,
-    now: datetime,
-    *,
-    tracked: bool,
-    remaining_p80_hours: float | None = None,
-    free_hours_before_due: float | None = None,
-) -> RiskLevel:
+def assess(item: Item, now: datetime, *, tracked: bool, load: Load | None = None) -> RiskLevel:
     """`tracked`: some enabled source reports this item's submission (D056). Required, so no
-    caller can silently fall back to "tracked" and call untracked work overdue."""
+    caller can silently fall back to "tracked" and call untracked work overdue. `load` is C and D
+    from the work windows; None without windows or an estimate (the time-only rule)."""
     if awaiting_confirmation(item, now, tracked=tracked):
         return RiskLevel.UNCONFIRMED
     if item.status == ItemStatus.MISSED:
@@ -54,17 +54,17 @@ def assess(
         return RiskLevel.OK
     if now >= item.due_at:
         # Untracked and inside a late window: still workable, but Argus can't say it's overdue.
-        return RiskLevel.OVERDUE if tracked else RiskLevel.WATCH
-    if remaining_p80_hours is not None and free_hours_before_due is not None:
-        if remaining_p80_hours <= 0:
+        return RiskLevel.OVERDUE if tracked else RiskLevel.CREEPING
+    if load is not None:
+        if load.remaining <= 0:
             return RiskLevel.OK
-        if free_hours_before_due < remaining_p80_hours:
+        if load.capacity < load.demand:
             return RiskLevel.AT_RISK
-        if free_hours_before_due < WATCH_MARGIN * remaining_p80_hours:
-            return RiskLevel.WATCH
+        if load.capacity < MARGIN * load.demand:
+            return RiskLevel.CREEPING
         return RiskLevel.OK
-    if item.due_at - now <= WATCH_WINDOW and item.status == ItemStatus.UPCOMING:
-        return RiskLevel.WATCH
+    if item.due_at - now <= SOON and item.status == ItemStatus.UPCOMING:
+        return RiskLevel.CREEPING
     return RiskLevel.OK
 
 

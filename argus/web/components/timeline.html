@@ -9,6 +9,7 @@
       {% for text, top in tl.hours %}<span class="day-rail__hour" style="top: {{ top }}%">{{ text }}</span>{% endfor %}
     </div>
     <div class="day-rail__track">
+      {% for w in tl.windows %}<div class="rail-window" style="top: {{ w.top_pct }}%; height: {{ w.height_pct }}%" title="{{ w.label }}"></div>{% endfor %}
       {% for b in tl.blocks %}
       <div class="rail-block rail-block--{{ b.kind }}" {% if b.accent %}data-accent="{{ b.accent }}"{% endif %} style="top: {{ b.top_pct }}%; height: {{ b.height_pct }}%">
         <span class="rail-block__title">{{ b.title }}</span>
@@ -24,6 +25,7 @@
     </div>
   </div>
   <ul class="visually-hidden">
+    {% for w in tl.windows %}<li>{{ w.label }}</li>{% endfor %}
     {% for b in tl.blocks %}<li>{{ b.label }}</li>{% endfor %}
     {% for m in tl.due_marks %}<li>{{ m.item_title }} due at {{ m.text }}</li>{% endfor %}
   </ul>

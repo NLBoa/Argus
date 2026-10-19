@@ -23,9 +23,9 @@ from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item
 from argus.logging import get_logger
-from argus.planning import blocks_between, replan
+from argus.planning import compute, replan
 from argus.reminders.commands import Command, Verb, is_reserved, parse
-from argus.reminders.text import fit, short, when
+from argus.reminders.text import fit, short, when, window_phrase
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 
@@ -232,7 +232,12 @@ class Inbox:
         if cmd.verb is Verb.HELP:
             return help_text(self.caps), ()
         if cmd.verb is Verb.TODAY:
-            return today_text(self.conn, self.clock.now())
+            return today_text(
+                self.conn,
+                self.config,
+                self.clock.now(),
+                tracking_sources=self.caps.tracking_sources,
+            )
         n, item = self._item(cmd, context)
         label = f"[{n}] {item.course_code} {short(item.title, 50)}"
         now = self.clock.now()
@@ -243,7 +248,13 @@ class Inbox:
                 if timer and timer.item_id == item.id:
                     repo.stop_timer(self.conn, now)
                 repo.refresh_statuses(self.conn, now, tracking_sources=self.caps.tracking_sources)
-            replan(self.conn, self.config, self.clock, force=True)
+            replan(
+                self.conn,
+                self.config,
+                self.clock,
+                tracking_sources=self.caps.tracking_sources,
+                force=True,
+            )
             return f"Marked {label} done. No more reminders for it.", ()
         if cmd.verb is Verb.LOG:
             assert cmd.hours is not None
@@ -251,7 +262,13 @@ class Inbox:
                 repo.log_time(self.conn, item.id, cmd.hours, now, source="sms")
                 repo.refresh_statuses(self.conn, now, tracking_sources=self.caps.tracking_sources)
             total = sum(log.hours(now) for log in repo.time_logs_for(self.conn, item.id))
-            replan(self.conn, self.config, self.clock, force=True)
+            replan(
+                self.conn,
+                self.config,
+                self.clock,
+                tracking_sources=self.caps.tracking_sources,
+                force=True,
+            )
             return f"Logged {cmd.hours:g}h on {label} ({total:g}h so far). Plan updated.", ()
         if cmd.verb is Verb.SNOOZE:
             assert cmd.duration is not None
@@ -269,7 +286,13 @@ class Inbox:
                 estimates.set_override(self.conn, item, cmd.hours, now)
             except ValueError as e:
                 raise LookupError(str(e)) from e
-            replan(self.conn, self.config, self.clock, force=True)
+            replan(
+                self.conn,
+                self.config,
+                self.clock,
+                tracking_sources=self.caps.tracking_sources,
+                force=True,
+            )
             return f"Set {label} to {cmd.hours:g}h. Plan updated.", ()
         return self._answer(cmd, item, label), ()
 
@@ -300,7 +323,13 @@ class Inbox:
             )
         else:
             message = announcements.dismiss(self.conn, f.id, now)
-        replan(self.conn, self.config, self.clock, force=True)
+        replan(
+            self.conn,
+            self.config,
+            self.clock,
+            tracking_sources=self.caps.tracking_sources,
+            force=True,
+        )
         return message
 
     def _asked_about(self, item_id: int) -> int | None:
@@ -315,8 +344,15 @@ class Inbox:
         return None
 
 
-def today_text(conn: sqlite3.Connection, now: datetime) -> tuple[str, tuple[int, ...]]:
-    """Today's open items (numbered) and the next planned session. Also the morning brief's body."""
+def today_text(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    *,
+    tracking_sources: frozenset[str],
+) -> tuple[str, tuple[int, ...]]:
+    """Today's open items (numbered) and what the next work window starts with. Also the
+    morning brief's body."""
     day = to_local(now).date()
     end = local_datetime(day + timedelta(days=1), 0)
     due = [
@@ -332,8 +368,17 @@ def today_text(conn: sqlite3.Connection, now: datetime) -> tuple[str, tuple[int,
         if i.due_at
     ]
     head = "Due today: " + "; ".join(parts) + "." if parts else "Nothing due today."
-    nxt = next(
-        (b for b in blocks_between(conn, now, end) if b.start >= now - timedelta(minutes=5)), None
-    )
-    tail = f" Next session {when(nxt.start).split(' ', 1)[1]}." if nxt else ""
+    p = compute(conn, config, now, tracking_sources=tracking_sources)
+    tail = ""
+    if p.window is not None:
+        alloc = p.allocation(p.window.window_id)
+        first = alloc[0][0] if alloc else None
+        what = "nothing planned yet"
+        if first and first.startswith("item:"):
+            ip = p.items.get(int(first.split(":", 1)[1]))
+            what = f"{short(ip.item.title, 28)} first" if ip else what
+        elif first:
+            ip = p.items.get(int(first.split(":", 1)[1]))
+            what = f"study for {short(ip.item.title, 24)} first" if ip else what
+        tail = f" {window_phrase(p.window.start, p.window.end, now)}: {what}."
     return head + tail, tuple(i.id for i in due)

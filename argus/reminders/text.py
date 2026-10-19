@@ -63,3 +63,39 @@ def when(dt: datetime) -> str:
     hour = local.hour % 12 or 12
     minute = f":{local.minute:02d}" if local.minute else ""
     return f"{local:%a} {hour}{minute}{'am' if local.hour < 12 else 'pm'}"
+
+
+def clock(dt: datetime) -> str:
+    """'7pm' or '7:30pm' in local time."""
+    return when(dt).split(" ", 1)[1]
+
+
+def window_phrase(start: datetime, end: datetime, now: datetime) -> str:
+    """'Tonight 7-11pm', 'This afternoon 1-6pm', or 'Sun 1-6pm' for a later day."""
+    s, n = to_local(start), to_local(now)
+    if s.date() == n.date():
+        word = "Tonight" if s.hour >= 17 else "This afternoon" if s.hour >= 12 else "This morning"
+    else:
+        word = f"{s:%a}"
+    a, b = clock(start), clock(end)
+    if a[-2:] == b[-2:]:
+        a = a[:-2]  # '7-11pm', not '7pm-11pm'
+    return f"{word} {a}-{b}"
+
+
+def hours_short(hours: float) -> str:
+    """'4h', '1.5h', '45m'."""
+    if hours < 1:
+        return f"{max(5, round(hours * 60 / 5) * 5)}m"
+    rounded = round(hours * 2) / 2
+    return f"{rounded:g}h"
+
+
+def due_phrase(due: datetime, now: datetime) -> str:
+    """'due today', 'due tomorrow', or 'due Thu' by local calendar day."""
+    days = (to_local(due).date() - to_local(now).date()).days
+    if days <= 0:
+        return "due today"
+    if days == 1:
+        return "due tomorrow"
+    return f"due {to_local(due):%a}"

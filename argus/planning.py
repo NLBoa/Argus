@@ -1,9 +1,14 @@
-"""Planning service: turn estimates, time logged, and free time into work sessions and risk.
+"""Planning service: work windows, the queue, and risk (D057-D062).
 
-Deterministic code makes the plan (planner/scheduler.py). The AI only words the one-line
-explanation, with a fallback sentence built from the same facts. Replanning happens when the
-inputs change or at least hourly; blocks that have already started are never moved, so start
-nudges stay stable.
+Deterministic code decides everything here; the AI only words the one-line explanation, with a
+fallback sentence built from the same facts. `compute` is a read of the store: per item its
+remaining hours (E), load (C and D) and risk level; the ranked queue; exam study time; and how
+each upcoming window's time would be split. `replan` is the housekeeping run every worker tick
+and after the student changes something: seed the work windows once, convert legacy planned
+sessions once, and keep the current (or about to start) window's split up to date until it ends.
+
+Progress is only what the student logged (timer, LOG, the form, or an answer to "did you work
+on it?"). Nothing is assumed (D060); a running timer counts as it runs.
 """
 
 from __future__ import annotations
@@ -11,7 +16,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from argus.ai import prompts
@@ -19,173 +25,249 @@ from argus.ai.client import AIClient, Tier
 from argus.ai.schemas import PlanNoteOut
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
-from argus.domain.models import ItemKind
+from argus.domain.models import Item, ItemKind
+from argus.domain.status import awaiting_confirmation, effective_deadline
 from argus.estimates import effective_estimates
-from argus.exams import review_concepts
-from argus.planner.freetime import Interval, free_hours_between, free_intervals, subtract
-from argus.planner.review import ReviewConcept, place_reviews, review_sessions
-from argus.planner.risk import RiskLevel, assess
-from argus.planner.scheduler import GRID, Block, Plan, PlanItem, schedule
+from argus.planner.calibration import DEFAULT_HOURS, DEFAULT_P80_RATIO, Effective
+from argus.planner.exam_time import ExamStudy, StudyPlan, study_plan
+from argus.planner.queue import Entry, forecast, order
+from argus.planner.queue import Tier as QueueTier
+from argus.planner.risk import Load, RiskLevel, Work, assess, loads
+from argus.planner.windows import (
+    WindowSpan,
+    WorkWindow,
+    current_or_next,
+    from_config,
+    window_spans,
+)
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 
-HORIZON = timedelta(days=14)
+HORIZON = timedelta(days=120)  # window time is counted up to the latest due date, within this
+TONIGHT_WITHIN = timedelta(hours=24)  # the queue's window: the current one or the next in 24 h
+MIN_LEFT = 0.25  # the queue shows at least 15 minutes left on an open item (display only)
 REPLAN_EVERY = timedelta(hours=1)
+LOG_AFTER = timedelta(hours=24)  # a LOG this soon after a window answers its question
+_TIERS = {
+    RiskLevel.OVERDUE: QueueTier.OVERDUE,
+    RiskLevel.AT_RISK: QueueTier.AT_RISK,
+    RiskLevel.CREEPING: QueueTier.CREEPING,
+}
 
 
 @dataclass(frozen=True)
-class PlanInputs:
+class ItemPlan:
+    item: Item
+    tracked: bool
+    remaining: float | None  # E, hours; None without an estimate
+    load: Load | None  # C and D; None without windows, an estimate, or a due date
+    level: RiskLevel
+
+
+@dataclass(frozen=True)
+class Planning:
     now: datetime
-    items: list[PlanItem]
-    free: list[Interval]
-    remaining_hours: dict[int, float]
+    windows_on: bool
+    spans: list[WindowSpan]
+    items: dict[int, ItemPlan]
+    study: StudyPlan
+    queue: list[Entry]  # ranked
+    window: WindowSpan | None  # the current window, or the next one within 24 h ("tonight")
+    forecast: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
 
-    def digest(self) -> str:
-        payload = [
-            iso(self.now.replace(minute=0, second=0, microsecond=0)),
-            [
-                (i.item_id, iso(i.due_at) if i.due_at else None, int(i.remaining / GRID))
-                for i in self.items
-            ],
-            [(iso(f.start), iso(f.end)) for f in self.free],
-        ]
-        return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+    def allocation(self, window_id: str) -> list[tuple[str, float]]:
+        return self.forecast.get(window_id, [])
 
 
-def _grid_start(now: datetime) -> datetime:
-    rem = now.minute % 15
-    base = now.replace(second=0, microsecond=0)
-    return base if rem == 0 and now.second == 0 else base + timedelta(minutes=15 - rem)
+def _overlap(start: datetime, end: datetime, a: datetime, b: datetime) -> float:
+    lo, hi = max(start, a), min(end, b)
+    return max(0.0, (hi - lo).total_seconds() / 3600)
 
 
-def gather(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> PlanInputs:
-    start = _grid_start(now)
-    eff = effective_estimates(conn, now)
-    progress = credited_hours(conn, now)
-    items: list[PlanItem] = []
-    remaining: dict[int, float] = {}
-    for it in repo.list_items(conn, open_only=True):
-        if it.id not in eff or not it.kind.takes_submission:
+def windows_from_config(config: AppConfig) -> list[WorkWindow]:
+    return from_config(config.schedule.work_windows)
+
+
+def _remaining(
+    items: Sequence[Item],
+    eff: dict[int, Effective],
+    logs: Sequence[repo.TimeLog],
+    marks: dict[int, tuple[float, datetime]],
+    now: datetime,
+) -> dict[int, float | None]:
+    """E per open item that takes a submission: the student's latest "about N h left" minus
+    what they logged since, else the calibrated p80 minus everything logged; None without
+    an estimate."""
+    progress: dict[int, float] = {}
+    for lg in logs:
+        progress[lg.item_id] = progress.get(lg.item_id, 0.0) + lg.hours(now)
+    out: dict[int, float | None] = {}
+    for it in items:
+        if not (it.status.is_open and it.kind.takes_submission):
             continue
-        if it.due_at is not None and it.due_at <= now:
-            continue
-        left = max(0.0, eff[it.id].p80 - progress.get(it.id, 0.0))
-        remaining[it.id] = left
-        items.append(PlanItem(it.id, it.due_at, timedelta(hours=left)))
-    s = config.schedule
-    free = free_intervals(
-        start,
-        start + HORIZON,
-        waking=s.waking_window,
-        quiet=s.quiet_hours,
-        buffer_minutes=s.walking_buffer_minutes,
-        meetings=repo.list_meetings(conn),
-        commitments=s.commitments,
-    )
-    # Time already promised to sessions that have started stays promised.
-    started = [Interval(b.start, b.end) for b in current_blocks(conn, now) if b.start < start]
-    return PlanInputs(
-        now=start, items=items, free=subtract(free, started), remaining_hours=remaining
-    )
-
-
-def upcoming_reviews(
-    conn: sqlite3.Connection, now: datetime
-) -> list[tuple[int, datetime, list[ReviewConcept]]]:
-    """Exams within the planning horizon with concepts to review: (exam id, exam time, concepts).
-    Only sessions that fall inside the horizon are placed (review days are 7..1 days out)."""
-    out = []
-    for item in repo.list_items(conn, due_after=now, due_before=now + HORIZON, open_only=True):
-        if item.kind is not ItemKind.EXAM or item.due_at is None:
-            continue
-        concepts = review_concepts(conn, item.id)
-        if concepts:
-            out.append((item.id, item.due_at, concepts))
+        if it.id in marks:
+            hours, at = marks[it.id]
+            since = sum(
+                _overlap(lg.started_at, lg.ended_at or now, at, now)
+                for lg in logs
+                if lg.item_id == it.id
+            )
+            out[it.id] = max(0.0, hours - since)
+        elif it.id in eff:
+            out[it.id] = max(0.0, eff[it.id].p80 - progress.get(it.id, 0.0))
+        else:
+            out[it.id] = None
     return out
 
 
-def credited_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
-    """Progress per item. If the student logs time for an item (timer, LOG, or the form), the
-    logs are the truth. Otherwise planned sessions that have passed count as done: the plan
-    assumes it was followed, so the same work is never re-planned (and re-nudged) forever.
-    The student corrects with LOG n h or EST n h."""
-    logged = repo.logged_hours(conn, now)
-    planned: dict[int, float] = {}
-    for r in conn.execute(
-        "SELECT item_id, start_at, end_at FROM plan_blocks"
-        " WHERE kind = 'work' AND item_id IS NOT NULL AND start_at < ?",
-        (iso(now),),
-    ):
-        start, end = parse_iso(r["start_at"]), min(parse_iso(r["end_at"]), now)
-        planned[r["item_id"]] = planned.get(r["item_id"], 0.0) + max(
-            0.0, (end - start).total_seconds() / 3600
+def _study_cards(items: Sequence[Item], study: StudyPlan, window: WindowSpan) -> list[Entry]:
+    """One "Study for <exam>" card per exam with time reserved in this window (D062)."""
+    by_id = {i.id: i for i in items}
+    return [
+        Entry(
+            f"study:{exam_id}",
+            exam_id,
+            "study",
+            by_id[exam_id].due_at,
+            QueueTier.STUDY,
+            None,
+            hours,
         )
-    return {
-        i: logged[i] if i in logged else planned.get(i, 0.0) for i in set(logged) | set(planned)
+        for exam_id, hours in sorted(study.quota.get(window.window_id, {}).items())
+    ]
+
+
+def compute(
+    conn: sqlite3.Connection, config: AppConfig, now: datetime, *, tracking_sources: frozenset[str]
+) -> Planning:
+    windows = repo.work_windows(conn)
+    items = repo.list_items(conn)
+    eff = effective_estimates(conn, now)
+    logs = repo.all_time_logs(conn)
+    marks = repo.latest_remaining_marks(conn)
+
+    remaining = _remaining(items, eff, logs, marks, now)
+
+    latest_due = max((i.due_at for i in items if i.due_at and i.due_at > now), default=now)
+    s = config.schedule
+    spans = window_spans(
+        now - timedelta(days=1),
+        min(max(latest_due + timedelta(days=1), now + timedelta(days=15)), now + HORIZON),
+        windows,
+        meetings=repo.list_meetings(conn),
+        commitments=s.commitments,
+        buffer_minutes=s.walking_buffer_minutes,
+    )
+    windows_on = bool(windows)
+
+    exams = [
+        ExamStudy(
+            i.id,
+            i.due_at,
+            p80=eff[i.id].p80 if i.id in eff else DEFAULT_HOURS[ItemKind.EXAM] * DEFAULT_P80_RATIO,
+            logged=sum(lg.hours(now) for lg in logs if lg.item_id == i.id),
+        )
+        for i in items
+        if i.kind is ItemKind.EXAM and i.status.is_open and i.due_at is not None and i.due_at > now
+    ]
+    study = study_plan(exams, spans, now) if windows_on else StudyPlan()
+    window = current_or_next(spans, now, within=TONIGHT_WITHIN)
+    prefs = repo.queue_prefs(conn)
+    skips = {
+        int(entry.split(":", 1)[1]): p.skip_window
+        for entry, p in prefs.items()
+        if entry.startswith("item:") and p.skip_window
     }
 
-
-@dataclass(frozen=True)
-class StoredBlock:
-    id: int
-    item_id: int | None
-    kind: str
-    start: datetime
-    end: datetime
-    label: str | None = None
-
-
-def _stored(r: sqlite3.Row) -> StoredBlock:
-    return StoredBlock(
-        r["id"],
-        r["item_id"],
-        r["kind"],
-        parse_iso(r["start_at"]),
-        parse_iso(r["end_at"]),
-        r["label"],
-    )
-
-
-def current_blocks(
-    conn: sqlite3.Connection, now: datetime, until: datetime | None = None
-) -> list[StoredBlock]:
-    sql = "SELECT * FROM plan_blocks WHERE end_at > ?"
-    params: list[object] = [iso(now)]
-    if until is not None:
-        sql += " AND start_at < ?"
-        params.append(iso(until))
-    rows = conn.execute(sql + " ORDER BY start_at", params).fetchall()
-    return [_stored(r) for r in rows]
-
-
-def blocks_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> list[StoredBlock]:
-    rows = conn.execute(
-        "SELECT * FROM plan_blocks WHERE end_at > ? AND start_at < ? ORDER BY start_at",
-        (iso(start), iso(end)),
-    ).fetchall()
-    return [_stored(r) for r in rows]
-
-
-def facts(plan: Plan, inputs: PlanInputs, titles: dict[int, str]) -> list[str]:
-    """Plain facts about a plan, most urgent first. Shared by the AI prompt and the fallback."""
-    out = []
-    for item_id, hours in sorted(plan.unscheduled.items(), key=lambda kv: -kv[1]):
-        out.append(
-            f"{titles.get(item_id, 'An item')} needs {hours:.1f} more hours than there is free time before it is due"
+    tracked = {i.id: i.tracked_by(tracking_sources) for i in items}
+    work = []
+    for it in items:
+        e = remaining.get(it.id)
+        if e is None or it.due_at is None:
+            continue
+        deadline = effective_deadline(it.due_at, it.late_due_at)
+        counts = not awaiting_confirmation(it, now, tracked=tracked[it.id]) and (
+            deadline is None or deadline > now
         )
-    week = inputs.now + timedelta(days=7)
-    this_week = [b for b in plan.blocks if b.start < week]
-    hours = sum((b.end - b.start).total_seconds() for b in this_week) / 3600
-    if this_week:
-        out.append(f"{len(this_week)} work sessions ({hours:.1f} hours) planned in the next 7 days")
-        first = this_week[0]
-        out.append(
-            f"Next session: {titles.get(first.item_id, 'work')} at {to_local(first.start):%a %I:%M %p}".replace(
-                " 0", " "
+        work.append(Work(it.id, it.due_at, e, counts))
+    load = loads(work, now, spans, reserved=study.reserved(), skips=skips) if windows_on else {}
+
+    plans: dict[int, ItemPlan] = {}
+    entries: list[Entry] = []
+    for it in items:
+        lo = load.get(it.id)
+        level = assess(it, now, tracked=tracked[it.id], load=lo)
+        plans[it.id] = ItemPlan(it, tracked[it.id], remaining.get(it.id), lo, level)
+        if not (it.status.is_open and it.kind.takes_submission) or level is RiskLevel.UNCONFIRMED:
+            continue
+        deadline = effective_deadline(it.due_at, it.late_due_at)
+        if deadline is not None and deadline <= now:
+            continue  # too late to do anything about it
+        entries.append(
+            Entry(
+                f"item:{it.id}",
+                it.id,
+                "work",
+                it.due_at,
+                _TIERS.get(level, QueueTier.OK),
+                lo.slack if lo is not None else None,
+                remaining.get(it.id) or 0.0,  # unfloored: nothing left gets no window time
             )
         )
-    else:
-        out.append("Nothing needs planned work in the next 7 days")
+    if window is not None:
+        entries += _study_cards(items, study, window)
+    ranked = order(entries, prefs, now, window.window_id if window else None)
+    ahead = (
+        forecast(
+            ranked,
+            spans,
+            now,
+            reserved=study.quota,
+            skips={f"item:{i}": w for i, w in skips.items()},
+        )
+        if windows_on
+        else {}
+    )
+    return Planning(now, windows_on, spans, plans, study, ranked, window, ahead)
+
+
+# ---------------------------------------------------------------- facts and the explanation
+
+
+def facts(p: Planning) -> list[str]:
+    """Plain facts about the plan, most urgent first. Shared by the AI prompt and the fallback."""
+    if not p.windows_on:
+        return ["No work windows are set, so Argus can't tell how much time you have"]
+    out = []
+    risky = sorted(
+        (ip for ip in p.items.values() if ip.level is RiskLevel.AT_RISK and ip.load is not None),
+        key=lambda ip: (ip.load.slack if ip.load else 0.0, ip.item.id),
+    )
+    for ip in risky:
+        assert ip.load is not None
+        out.append(
+            f"{ip.item.title} needs {ip.load.demand - ip.load.capacity:.1f} more hours than "
+            "your work windows have before it is due"
+        )
+    titles = {i: ip.item.title for i, ip in p.items.items()}
+    for exam_id, hours in sorted(p.study.shortfall.items()):
+        out.append(f"Study time for {titles.get(exam_id, 'an exam')} is {hours:.1f} hours short")
+    week = p.now + timedelta(days=7)
+    window_hours = sum(sp.hours_between(p.now, week) for sp in p.spans)
+    work_hours = sum(
+        ip.remaining or 0.0
+        for ip in p.items.values()
+        if ip.item.due_at is not None and p.now < ip.item.due_at <= week and ip.load is not None
+    )
+    out.append(
+        f"{work_hours:.1f} hours of work due in the next 7 days, "
+        f"{window_hours:.1f} hours of work windows"
+    )
+    if p.window is not None:
+        first = next(iter(p.allocation(p.window.window_id)), None)
+        what = titles.get(int(first[0].split(":", 1)[1]), "work") if first else "nothing yet"
+        start = to_local(p.window.start)
+        out.append(f"Next work window {start:%a} {start:%I:%M %p}".replace(" 0", " ") + f": {what}")
     return out
 
 
@@ -194,76 +276,68 @@ def fallback_line(fs: list[str]) -> str:
 
 
 def replan(
-    conn: sqlite3.Connection, config: AppConfig, clock: Clock, *, force: bool = False
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    clock: Clock,
+    *,
+    tracking_sources: frozenset[str],
+    force: bool = False,
 ) -> bool:
-    """Recompute future sessions if inputs changed (or hourly). Returns True if it replanned."""
+    """Housekeeping: seed work windows once, convert legacy sessions once, keep this window's
+    split current until it ends. Returns True when the facts changed (or an hour passed), so the
+    explanation can be reworded."""
     now = clock.now()
-    inputs = gather(conn, config, now)
-    exams = upcoming_reviews(conn, now)
-    digest = hashlib.sha256(
-        (
-            inputs.digest()
-            + json.dumps(
-                [(e, [(c.id, c.readiness.value, c.priority) for c in cs]) for e, _, cs in exams]
-            )
-        ).encode()
-    ).hexdigest()
-    state = conn.execute("SELECT inputs_hash, planned_at FROM plan_state WHERE id = 1").fetchone()
-    if (
-        not force
-        and state is not None
-        and state["inputs_hash"] == digest
-        and now - parse_iso(state["planned_at"]) < REPLAN_EVERY
-    ):
-        return False
-    plan = schedule(inputs.items, inputs.free)
-    titles = {i.id: i.title for i in repo.list_items(conn)}
-    line = fallback_line(facts(plan, inputs, titles))
-    # Reviews go in the free time the work plan leaves; past and started blocks stay put.
-    free = subtract(inputs.free, [Interval(b.start, b.end) for b in plan.blocks])
-    reviews: list[tuple[int, Block, str]] = []
-    for exam_id, exam_at, concepts in exams:
-        sessions = review_sessions(exam_at, inputs.now, concepts)
-        for session, block in zip(sessions, place_reviews(sessions, free), strict=False):
-            label = "Review: " + ", ".join(c.name for c in session.concepts)
-            reviews.append((exam_id, block, label))
-            free = subtract(free, [Interval(block.start, block.end)])
     with transaction(conn):
-        conn.execute("DELETE FROM plan_blocks WHERE start_at >= ?", (iso(inputs.now),))
-        for b in plan.blocks:
-            conn.execute(
-                "INSERT INTO plan_blocks (item_id, kind, start_at, end_at, created_at) VALUES (?, 'work', ?, ?, ?)",
-                (b.item_id, iso(b.start), iso(b.end), iso(now)),
+        repo.seed_work_windows(conn, windows_from_config(config), now)
+        repo.convert_legacy_blocks(conn, now)
+    p = compute(conn, config, now, tracking_sources=tracking_sources)
+    lead = timedelta(minutes=config.notifications.window_notice_minutes)
+    fs = facts(p)
+    digest = hashlib.sha256(json.dumps(fs).encode()).hexdigest()
+    with transaction(conn):
+        # The split is made before the window starts and frozen when it starts, so it records
+        # what the whole window was for. A worker that was down at the start stores what is left.
+        w = p.window
+        if w is not None and (
+            w.start - lead <= now < w.start
+            or (w.start <= now < w.end and repo.window_plan(conn, w.window_id) is None)
+        ):
+            repo.save_window_plan(
+                conn,
+                w.window_id,
+                starts_at=w.start,
+                ends_at=w.end,
+                allocation=p.allocation(w.window_id),
+                now=now,
             )
-        for exam_id, b, label in reviews:
-            conn.execute(
-                "INSERT INTO plan_blocks (item_id, kind, start_at, end_at, label, created_at)"
-                " VALUES (?, 'review', ?, ?, ?, ?)",
-                (exam_id, iso(b.start), iso(b.end), label, iso(now)),
-            )
+        state = conn.execute(
+            "SELECT inputs_hash, planned_at FROM plan_state WHERE id = 1"
+        ).fetchone()
+        if (
+            not force
+            and state is not None
+            and state["inputs_hash"] == digest
+            and now - parse_iso(state["planned_at"]) < REPLAN_EVERY
+        ):
+            return False
         conn.execute(
-            """INSERT INTO plan_state (id, inputs_hash, explanation, planned_at) VALUES (1, ?, ?, ?)
-               ON CONFLICT (id) DO UPDATE SET inputs_hash = excluded.inputs_hash,
-                 explanation = excluded.explanation, planned_at = excluded.planned_at""",
-            (digest, line, iso(now)),
+            """UPDATE plan_state SET inputs_hash = ?, explanation = ?, planned_at = ?,
+                 model_since = COALESCE(model_since, ?) WHERE id = 1""",
+            (digest, fallback_line(fs), iso(now), iso(now)),
         )
     return True
 
 
-async def explain(conn: sqlite3.Connection, ai: AIClient, config: AppConfig, clock: Clock) -> str:
+async def explain(
+    conn: sqlite3.Connection,
+    ai: AIClient,
+    config: AppConfig,
+    clock: Clock,
+    *,
+    tracking_sources: frozenset[str],
+) -> str:
     """Word the plan with the AI (cached by facts). Falls back to the plain first fact."""
-    now = clock.now()
-    inputs = gather(conn, config, now)
-    plan = Plan(
-        tuple(
-            Block(b.item_id or 0, b.start, b.end)
-            for b in current_blocks(conn, now)
-            if b.kind == "work"
-        ),
-        unscheduled_hours(conn, config, now),
-    )
-    titles = {i.id: i.title for i in repo.list_items(conn)}
-    fs = facts(plan, inputs, titles)
+    fs = facts(compute(conn, config, clock.now(), tracking_sources=tracking_sources))
     result = await ai.structured(
         task="plan_note",
         tier=Tier.FAST,
@@ -279,81 +353,108 @@ async def explain(conn: sqlite3.Connection, ai: AIClient, config: AppConfig, clo
 
 def explanation(conn: sqlite3.Connection) -> str | None:
     row = conn.execute("SELECT explanation FROM plan_state WHERE id = 1").fetchone()
-    return str(row[0]) if row else None
+    return str(row[0]) if row and row[0] else None
 
 
-def unscheduled_hours(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime
-) -> dict[int, float]:
-    inputs = gather(conn, config, now)
-    return schedule(inputs.items, inputs.free).unscheduled
+# ---------------------------------------------------------------- views of the plan
 
 
 @dataclass(frozen=True)
 class RiskView:
     level: RiskLevel
-    remaining_p80: float | None
-    free_before_due: float | None
+    remaining: float | None
+    capacity: float | None  # C: work-window hours before it's due
+    demand: float | None  # D: hours of work due by then, this item included
+
+
+def risk_views(p: Planning) -> dict[int, RiskView]:
+    return {
+        i: RiskView(
+            ip.level,
+            ip.remaining,
+            ip.load.capacity if ip.load else None,
+            ip.load.demand if ip.load else None,
+        )
+        for i, ip in p.items.items()
+    }
 
 
 def risk_map(
-    conn: sqlite3.Connection,
-    config: AppConfig,
-    now: datetime,
-    *,
-    tracking_sources: frozenset[str],
+    conn: sqlite3.Connection, config: AppConfig, now: datetime, *, tracking_sources: frozenset[str]
 ) -> dict[int, RiskView]:
-    """The spec rule for every open item: at risk when free hours before due < remaining p80.
-    Items the plan cannot fully fit (earlier deadlines take the time) are at least Watch.
-    Past-due items no enabled source reports submissions for are UNCONFIRMED (D056)."""
-    inputs = gather(conn, config, now)
-    squeezed = schedule(inputs.items, inputs.free).unscheduled
-    out: dict[int, RiskView] = {}
-    for item in repo.list_items(conn):
-        remaining = inputs.remaining_hours.get(item.id)
-        free = (
-            free_hours_between(inputs.free, inputs.now, item.due_at)
-            if item.due_at and remaining is not None
-            else None
-        )
-        level = assess(
-            item,
-            now,
-            remaining_p80_hours=remaining,
-            free_hours_before_due=free,
-            tracked=item.tracked_by(tracking_sources),
-        )
-        if (
-            item.id in squeezed
-            and level.severity < RiskLevel.WATCH.severity
-            and level is not RiskLevel.UNCONFIRMED
-        ):
-            level = RiskLevel.WATCH
-        out[item.id] = RiskView(level, remaining, free)
-    return out
+    return risk_views(compute(conn, config, now, tracking_sources=tracking_sources))
 
 
 @dataclass(frozen=True)
 class WorkloadDayData:
     day: datetime
-    need_hours: float
-    free_hours: float
+    need_hours: float  # work and study forecast into that day's windows
+    free_hours: float  # work-window hours left that day
 
 
-def workload(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, days: int = 14
-) -> list[WorkloadDayData]:
-    """Per local day: planned work hours (need) against free hours."""
-    inputs = gather(conn, config, now)
-    today = to_local(now).date()
+def workload(p: Planning, days: int = 14) -> list[WorkloadDayData]:
+    """Per local day: work-window hours and the work forecast into them."""
+    today = to_local(p.now).date()
     out = []
-    for d in range(days):
-        day = today + timedelta(days=d)
-        start, end = local_datetime(day, 0), local_datetime(day + timedelta(days=1), 0)
-        need = sum(
-            (min(b.end, end) - max(b.start, start)).total_seconds() / 3600
-            for b in blocks_between(conn, start, end)
-            if b.kind == "work"
+    for n in range(days):
+        start = local_datetime(today + timedelta(days=n), 0)
+        end = local_datetime(today + timedelta(days=n + 1), 0)
+        on_day = [sp for sp in p.spans if start <= sp.start < end]
+        out.append(
+            WorkloadDayData(
+                start,
+                sum(h for sp in on_day for _, h in p.allocation(sp.window_id)),
+                sum(sp.hours_between(max(p.now, start), sp.end) for sp in on_day),
+            )
         )
-        out.append(WorkloadDayData(start, need, free_hours_between(inputs.free, start, end)))
     return out
+
+
+@dataclass(frozen=True)
+class Confirmation:
+    window_id: str
+    start: datetime
+    end: datetime
+    item_ids: tuple[int, ...]
+
+
+def pending_confirmation(conn: sqlite3.Connection, p: Planning) -> Confirmation | None:
+    """After a window ends, the items it was planned for with no time logged in it (and no LOG
+    within a day after) get one quiet question on Today: "did you work on it?" (D060). No answer
+    means no credit; an answer is recorded once. The question goes when the next window ends."""
+    plan = repo.latest_ended_window_plan(conn, p.now)
+    if plan is None:
+        return None
+    later = [sp for sp in p.spans if sp.start >= plan.ends_at]
+    if later and later[0].end <= p.now:
+        return None
+    logs = repo.all_time_logs(conn)
+    ids: list[int] = []
+    for entry, _hours in plan.allocation:
+        if not entry.startswith("item:"):
+            continue
+        item_id = int(entry.split(":", 1)[1])
+        ip = p.items.get(item_id)
+        if ip is None or not ip.item.status.is_open:
+            continue
+        mine = [lg for lg in logs if lg.item_id == item_id]
+        answered = any(lg.source == "checkin" and lg.window_id == plan.window_id for lg in mine)
+        worked = any(
+            lg.source != "checkin"
+            and _overlap(lg.started_at, lg.ended_at or p.now, plan.starts_at, plan.ends_at) > 0
+            for lg in mine
+        )
+        logged_after = any(
+            lg.source in ("sms", "manual")
+            and lg.created_at is not None
+            and plan.ends_at <= lg.created_at < plan.ends_at + LOG_AFTER
+            for lg in mine
+        )
+        if not (answered or worked or logged_after):
+            ids.append(item_id)
+    return Confirmation(plan.window_id, plan.starts_at, plan.ends_at, tuple(ids)) if ids else None
+
+
+def busy_windows(p: Planning, start: datetime, end: datetime) -> Sequence[WindowSpan]:
+    """Work windows overlapping [start, end), for the day rail and the vault's Today note."""
+    return [sp for sp in p.spans if sp.end > start and sp.start < end]

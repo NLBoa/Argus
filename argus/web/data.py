@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from argus.capabilities import Capabilities, Feature
 from argus.clock import local_datetime, to_local
@@ -13,9 +13,9 @@ from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.estimates import effective_estimates, estimate_sources
 from argus.planner.calibration import Effective, Finished, factor
-from argus.planner.freetime import Busy, busy_on
+from argus.planner.freetime import busy_on
 from argus.planner.risk import RiskLevel
-from argus.planning import blocks_between, explanation, risk_map, workload
+from argus.planning import Planning, busy_windows, compute, explanation, risk_views, workload
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
 from argus.store import repo
@@ -66,13 +66,15 @@ def _views(
     now: datetime,
     *,
     caps: Capabilities,
+    plan: Planning | None = None,
     **filters: object,
 ) -> list[ItemView]:
     courses = course_views(config)
     timer = repo.running_timer(conn)
     running = timer.item_id if timer else None
     estimates = estimate_views(conn, now)
-    risk = risk_map(conn, config, now, tracking_sources=caps.tracking_sources)
+    plan = plan or compute(conn, config, now, tracking_sources=caps.tracking_sources)
+    risk = risk_views(plan)
     return [
         item_view(
             i,
@@ -124,11 +126,13 @@ def load_today(
     start = local_datetime(today, 0)
     tomorrow = local_datetime(today + timedelta(days=1), 0)
     after = local_datetime(today + timedelta(days=2), 0)
+    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
     views = _views(
         conn,
         config,
         now,
         caps=caps,
+        plan=plan,
         due_after=now - timedelta(days=14),
         due_before=after,
         include_undated=False,
@@ -190,13 +194,19 @@ def load_today(
     if unconfirmed:
         parts.append(f"{len(unconfirmed)} to confirm")
     busy = busy_on(today, repo.list_meetings(conn), config.schedule.commitments)
-    busy += _sessions(conn, today)
+    windows = [(sp.start, sp.end) for sp in busy_windows(plan, start, tomorrow)]
     by_id = {v.id: v for v in views}
     return TodayData(
         date_text=long_date(today),
         summary=", ".join(parts),
         timeline=timeline(
-            today, busy, now, config=config, courses=course_views(config), due_items=due_today
+            today,
+            busy,
+            now,
+            config=config,
+            courses=course_views(config),
+            due_items=due_today,
+            windows=windows,
         ),
         groups=groups,
         timer=timer_view(
@@ -205,29 +215,6 @@ def load_today(
             now,
         ),
     )
-
-
-def _sessions(conn: sqlite3.Connection, day: date) -> list[Busy]:
-    """Planned work sessions on a local day, as rail blocks."""
-    titles = {i.id: (i.title, i.course_code) for i in repo.list_items(conn)}
-    out = []
-    for b in blocks_between(
-        conn, local_datetime(day, 0), local_datetime(day + timedelta(days=1), 0)
-    ):
-        if b.kind != "work" or b.item_id not in titles:
-            continue
-        title, code = titles[b.item_id]
-        out.append(
-            Busy(
-                start=b.start,
-                end=b.end,
-                kind="session",
-                title=title,
-                course_code=code,
-                where="planned",
-            )
-        )
-    return out
 
 
 def _running_extra(
@@ -362,7 +349,11 @@ def load_health(
         channel=channels[0] if channels else None,
         ai_spend=ai_spend(conn, config, now),
         last_sync=relative(max(successes), now) if successes else None,
-        rules=[RuleRow(r.value, r.label, r.value in muted, rule_note(r, caps)) for r in Rule],
+        rules=[
+            RuleRow(r.value, r.label, r.value in muted, rule_note(r, caps))
+            for r in Rule
+            if r is not Rule.START_NUDGE  # retired (D061)
+        ],
         vault=vault_status(conn, now),
         notifications=[
             NotificationLine(
@@ -759,12 +750,6 @@ class PastLine:
 
 
 @dataclass(frozen=True)
-class SessionLine:
-    when: str
-    length: str
-
-
-@dataclass(frozen=True)
 class ItemDetail:
     view: ItemView
     item: Item
@@ -776,9 +761,9 @@ class ItemDetail:
     logged: str
     logs: list[LogLine]
     past: list[PastLine]
-    sessions: list[SessionLine]
-    remaining: str | None
-    free_before_due: str | None
+    remaining: str | None  # E
+    capacity: str | None  # C: work-window time before it's due
+    demand: str | None  # D: work due by then, this item included
     findings: list[repo.FindingRow]
     scope: str | None
     logistics: str | None
@@ -792,7 +777,8 @@ def load_item(
     item = repo.get_item(conn, item_id)
     if item is None:
         return None
-    views = {v.id: v for v in _views(conn, config, now, caps=caps)}
+    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
+    views = {v.id: v for v in _views(conn, config, now, caps=caps, plan=plan)}
     view = views.get(item.id) or item_view(
         item, now, course_views(config), tracking_sources=caps.tracking_sources
     )
@@ -828,7 +814,7 @@ def load_item(
                 log.ended_at is None,
             )
         )
-    risk = risk_map(conn, config, now, tracking_sources=caps.tracking_sources).get(item.id)
+    risk = risk_views(plan).get(item.id)
     row = conn.execute("SELECT scope, logistics FROM items WHERE id = ?", (item.id,)).fetchone()
     return ItemDetail(
         obsidian=obsidian_link(config, item_note_path(item)),
@@ -851,18 +837,9 @@ def load_item(
             )
             for f in same
         ][-8:],
-        sessions=[
-            SessionLine(
-                f"{to_local(b.start):%a %b} {to_local(b.start).day}, {clock_time(b.start)}",
-                hours((b.end - b.start).total_seconds() / 3600),
-            )
-            for b in blocks_between(conn, now, now + timedelta(days=30))
-            if b.item_id == item.id and b.kind == "work"
-        ],
-        remaining=hours(risk.remaining_p80) if risk and risk.remaining_p80 is not None else None,
-        free_before_due=hours(risk.free_before_due)
-        if risk and risk.free_before_due is not None
-        else None,
+        remaining=hours(risk.remaining) if risk and risk.remaining is not None else None,
+        capacity=hours(risk.capacity) if risk and risk.capacity is not None else None,
+        demand=hours(risk.demand) if risk and risk.demand is not None else None,
         findings=[f for f in repo.list_findings(conn) if f.item_id == item.id],
         scope=row["scope"] if row else None,
         logistics=row["logistics"] if row else None,
@@ -884,7 +861,8 @@ class WorkloadData:
 def load_workload(
     conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> WorkloadData:
-    rows = workload(conn, config, now)
+    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
+    rows = workload(plan)
     today = to_local(now).date()
     days = [
         WorkloadDay(
@@ -897,8 +875,8 @@ def load_workload(
     ]
     risky = [
         v
-        for v in _views(conn, config, now, caps=caps, open_only=True)
-        if v.risk.slug in ("at-risk", "watch", "overdue")
+        for v in _views(conn, config, now, caps=caps, plan=plan, open_only=True)
+        if v.risk.slug in ("at-risk", "creeping", "overdue")
     ]
     risky.sort(key=lambda v: (-v.risk.severity, v.due_at or now))
     return WorkloadData(

@@ -32,7 +32,7 @@ async def test_ok_records_cost_and_caches(db: sqlite3.Connection, clock: FakeClo
     c = client(db, clock, t)
     r = await c.structured(task="plan_note", tier=Tier.FAST, prompt=PROMPT, schema=PlanNoteOut)
     assert r.ok and r.value is not None and r.value.line == "Two sessions before Thursday."
-    assert r.status == "ok" and r.model == "claude-haiku-5-5" and r.prompt_id == "plan_note.v1"
+    assert r.status == "ok" and r.model == "claude-haiku-5-5" and r.prompt_id == "plan_note.v2"
     sent = t.calls[0]
     assert sent["model"] == "claude-haiku-5-5"
     assert sent["schema"]["additionalProperties"] is False
