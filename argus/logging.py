@@ -13,7 +13,7 @@ import logging
 import re
 import sys
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, TextIO
 
 REDACTED = "[REDACTED]"
 
@@ -97,9 +97,12 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def configure_logging(level: str = "INFO", secrets: Iterable[str] = ()) -> None:
+def configure_logging(
+    level: str = "INFO", secrets: Iterable[str] = (), *, stream: TextIO | None = None
+) -> None:
+    """JSON logs to stdout (or `stream`: commands whose stdout is data log to stderr)."""
     redactor.register(secrets)
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(stream or sys.stdout)
     handler.addFilter(RedactingFilter())
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()

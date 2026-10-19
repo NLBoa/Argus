@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from argus.collectors.base import CollectContext, RunStatus
-from argus.collectors.canvas_ical import CanvasIcalCollector, parse_feed
+from argus.collectors.canvas_ical import CanvasIcalCollector, parse_feed, state_key
 from argus.collectors.http import AuthError
 from argus.config import AppConfig
 from argus.domain.models import ItemKind, Source
@@ -73,12 +73,13 @@ async def test_collect_ok_then_unchanged(make_ctx: Callable[..., CollectContext]
     assert first.status == RunStatus.OK
     assert len(first.items) == 5
     assert set(first.complete_scopes) == {"CMSC351", "MATH240"}
-    assert first.state_updates["feed"].etag == '"v1"'
+    key = state_key(ctx.config)
+    assert first.state_updates[key].etag == '"v1"'
 
     # Same bytes again (server ignored the ETag): detected via hash.
     second = await collector.collect(
         make_ctx(
-            {(Source.CANVAS_ICAL.value, "feed"): first.state_updates["feed"]},
+            {(Source.CANVAS_ICAL.value, key): first.state_updates[key]},
             canvas_ical_url=FEED_URL,
         )
     )
@@ -88,15 +89,34 @@ async def test_collect_ok_then_unchanged(make_ctx: Callable[..., CollectContext]
 
 @respx.mock
 async def test_collect_sends_conditional_headers_and_handles_304(
-    make_ctx: Callable[..., CollectContext],
+    make_ctx: Callable[..., CollectContext], app_config: AppConfig
 ) -> None:
     route = respx.get(FEED_URL).respond(304)
     prev = SourceState(payload_hash=sha256(FEED), etag='"v1"')
     result = await CanvasIcalCollector().collect(
-        make_ctx({(Source.CANVAS_ICAL.value, "feed"): prev}, canvas_ical_url=FEED_URL)
+        make_ctx(
+            {(Source.CANVAS_ICAL.value, state_key(app_config)): prev}, canvas_ical_url=FEED_URL
+        )
     )
     assert result.status == RunStatus.UNCHANGED
     assert route.calls[0].request.headers["If-None-Match"] == '"v1"'
+
+
+@respx.mock
+async def test_a_changed_course_list_rereads_the_same_feed(
+    make_ctx: Callable[..., CollectContext], app_config: AppConfig
+) -> None:
+    """The feed was seen while the config still had other courses: the new list must not be
+    told "unchanged" (and must not send the old ETag) until ELMS happens to post something."""
+    route = respx.get(FEED_URL).respond(200, content=FEED)
+    old = app_config.model_copy(update={"courses": app_config.courses[:1]})
+    seen = SourceState(payload_hash=sha256(FEED), etag='"v1"')
+    assert state_key(old) != state_key(app_config)
+    ctx = make_ctx({(Source.CANVAS_ICAL.value, state_key(old)): seen}, canvas_ical_url=FEED_URL)
+    result = await CanvasIcalCollector().collect(ctx)
+    assert result.status == RunStatus.OK
+    assert set(result.complete_scopes) == {"CMSC351", "MATH240"}
+    assert "If-None-Match" not in route.calls[0].request.headers
 
 
 @respx.mock

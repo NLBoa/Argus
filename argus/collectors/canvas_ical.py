@@ -26,7 +26,12 @@ _UID_ASSIGNMENT = re.compile(r"event-assignment-(\d+)$")
 _UID_EVENT = re.compile(r"event-calendar-event-(\d+)$")
 _BRACKET_CODE = re.compile(r"\[([A-Z]{4}\s?\d{3}[A-Z]?)")
 FEED_LOOKBACK = timedelta(days=29)  # the feed keeps ~30 days of history; stay inside it
-STATE_KEY = "feed"
+
+
+def state_key(config: AppConfig) -> str:
+    """Per course list: the same feed bytes mean new items once the configured courses change."""
+    courses = ",".join(sorted(f"{c.code}:{c.canvas_id}" for c in config.courses))
+    return f"feed:{sha256(courses)[:16]}"
 
 
 def _as_utc(value: date | datetime) -> tuple[datetime, bool]:
@@ -103,7 +108,8 @@ class CanvasIcalCollector:
 
     async def collect(self, ctx: CollectContext) -> CollectResult:
         assert ctx.secrets.canvas_ical_url is not None
-        prev = ctx.state(self.source, STATE_KEY)
+        key = state_key(ctx.config)
+        prev = ctx.state(self.source, key)
         resp = await ctx.fetcher.get(
             ctx.secrets.canvas_ical_url.get_secret_value(),
             etag=prev.etag,
@@ -118,7 +124,7 @@ class CanvasIcalCollector:
             last_modified=resp.headers.get("last-modified"),
         )
         if digest == prev.payload_hash:
-            return CollectResult(self.source, RunStatus.UNCHANGED, state_updates={STATE_KEY: state})
+            return CollectResult(self.source, RunStatus.UNCHANGED, state_updates={key: state})
         items = parse_feed(resp.body, ctx.config)
         window_start = ctx.clock.now() - FEED_LOOKBACK
         scopes = {c.code: window_start for c in ctx.config.courses if c.canvas_id is not None}
@@ -127,5 +133,5 @@ class CanvasIcalCollector:
             RunStatus.OK,
             items=tuple(items),
             complete_scopes=scopes,
-            state_updates={STATE_KEY: state},
+            state_updates={key: state},
         )

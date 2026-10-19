@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ runner = CliRunner()
 
 class FakeGS:
     def login(self, email: str, password: str) -> None:
-        return None
+        logging.getLogger("gradescopeapi").warning("library chatter")  # must not reach stdout
 
     def courses(self) -> list[tuple[str, str, str]]:
         return [
@@ -71,6 +72,7 @@ def test_discover_builds_a_working_config(config_path: Path, tmp_path: Path) -> 
     assert "ELMS feed: CMSC216, CMSC250, ENGL101" in result.stderr
     assert "Left out (earlier terms): MATH140 (Spring 2026)" in result.stderr
     assert "Gradescope: CMSC216 (not followed: MATH141)" in result.stderr
+    assert "library chatter" in result.stderr and "library chatter" not in result.stdout
     assert "Piazza: CMSC216, CMSC250" in result.stderr
     out = tmp_path / "new.yaml"
     out.write_text(result.stdout)

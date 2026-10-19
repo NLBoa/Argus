@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 from datetime import timedelta
 from itertools import groupby
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TextIO
 
 import typer
 
@@ -30,10 +31,10 @@ def make_clock() -> Clock:
     return SystemClock()
 
 
-def _setup(config: Path) -> tuple[AppConfig, Secrets]:
+def _setup(config: Path, *, log_stream: TextIO | None = None) -> tuple[AppConfig, Secrets]:
     cfg = load_config(config)
     secrets = load_secrets()
-    configure_logging("WARNING", secrets=secrets.secret_values())
+    configure_logging("WARNING", secrets=secrets.secret_values(), stream=log_stream)
     return cfg, secrets
 
 
@@ -200,7 +201,7 @@ def discover(
     from argus.collectors.http import AuthError, Fetcher, FetchError, make_client
     from argus.collectors.piazza import LibPiazzaClient
 
-    _, secrets = _setup(config)
+    _, secrets = _setup(config, log_stream=sys.stderr)  # stdout is the config
 
     def note(msg: str) -> None:
         typer.echo(msg, err=True)
