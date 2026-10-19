@@ -217,7 +217,22 @@ The kiosk page shifts its content slowly to protect the screen from burn-in.
 
 Run `make deploy PI_HOST=argus-pi` from an up-to-date clone. Migrations run automatically.
 
+### Updating from the Pi itself (Raspberry Pi Connect, no SSH)
+
+Push the branch to GitHub, then in the Pi Connect shell run (first time; later runs can use the local copy at
+`/opt/argus-src/deploy/update-on-pi.sh`):
+
+```
+curl -fsSL https://raw.githubusercontent.com/NLBoa/Argus/main/deploy/update-on-pi.sh | sudo bash -s -- main
+```
+
+Replace `main` (both places) with the branch to install. `deploy/update-on-pi.sh` backs up the database, builds the
+stylesheet, checks `/etc/argus/config.yaml` with the new code (and stops if it fails), syncs to `/opt/argus`, and runs
+the installer. On the tailnet the Pi is named `argus`.
+
 ### Deploy checklist (every overhaul phase)
+
+With Pi Connect, `deploy/update-on-pi.sh` does steps 1, 2, and 4 for you.
 
 1. On the Pi, take a snapshot first: `sudo argus-admin backup`.
 2. Check the config the new code will read: `sudo argus-admin check-config`. Fix anything it reports
