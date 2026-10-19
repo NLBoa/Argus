@@ -1,0 +1,16 @@
+# Synthetic configuration for tests. Ids are fake.
+courses:
+  - code: CMSC351
+    section: "0101"
+    canvas_id: 1234567
+    gradescope_id: "765432"
+    piazza_network_id: "abc123xyz"
+    accent: indigo
+  - code: MATH240
+    section: "0201"
+    canvas_id: 1234568
+    gradescope_id: "765433"
+    accent: teal
+schedule:
+  commitments:
+    - { title: "Dining hall shift", days: [Tue, Thu], start: "17:00", end: "20:00" }

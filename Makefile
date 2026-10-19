@@ -46,10 +46,10 @@ types: ## mypy --strict on argus/
 test-unit: ## Unit + property + time tests
 	$(PYTEST) tests/unit -q
 
-test-int: ## Integration tests (store, collectors, vault git, pipeline, webhook)
+test-int: css ## Integration tests (store, collectors, vault git, pipeline, webhook)
 	$(PYTEST) tests/integration -q
 
-cov: ## Unit + integration with coverage floors
+cov: css ## Unit + integration with coverage floors (the web tests read the built CSS)
 	$(PYTEST) tests/unit tests/integration -q \
 	  --cov --cov-report=term-missing:skip-covered --cov-report=json
 	$(PY) python scripts/coverage_floors.py
