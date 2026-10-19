@@ -190,3 +190,12 @@ def test_source_names_for_copy() -> None:
     assert derive(CONFIG, secrets(token=True, piazza=True)).post_sources() == "ELMS and Piazza"
     assert derive(CONFIG, secrets(piazza=True)).post_sources() == "Piazza"
     assert derive(CONFIG, secrets(ical=True)).post_sources() == "your course sites"
+
+
+def test_sms_help_lists_ok_no_only_with_staff_posts() -> None:
+    from argus.sms import help_text
+
+    assert "OK 1, NO 1" in help_text(derive(CONFIG, secrets(piazza=True)))
+    assert "OK 1" not in help_text(derive(CONFIG, secrets(ical=True)))
+    for caps in (derive(CONFIG, secrets(piazza=True)), derive(CONFIG, secrets(ical=True))):
+        assert len(help_text(caps)) <= 160

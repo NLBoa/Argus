@@ -1224,11 +1224,10 @@ def rebuild_search_index(conn: sqlite3.Connection) -> int:
            WHERE i.removed_at IS NULL AND c.active = 1"""
     )
     for r in conn.execute(
-        """SELECT m.id, m.name, m.items, m.digest, c.code FROM modules m
+        """SELECT m.id, m.name, m.items, c.code FROM modules m
            JOIN courses c ON c.id = m.course_id WHERE c.active = 1"""
     ).fetchall():
-        titles = "; ".join(i["title"] for i in json.loads(r["items"]))
-        body = titles + ("\n" + r["digest"] if r["digest"] else "")
+        body = "; ".join(i["title"] for i in json.loads(r["items"]))
         conn.execute(
             "INSERT INTO search_index (title, body, kind, ref_id, course, url)"
             " VALUES (?, ?, 'module', ?, ?, ?)",

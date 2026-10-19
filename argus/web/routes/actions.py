@@ -314,7 +314,9 @@ async def approve_proposal(
         except LookupError as e:
             errors.append(str(e))
 
-    result = await asyncio.to_thread(vault.run_cycle, conn, state.config, state.clock, before=apply)
+    result = await asyncio.to_thread(
+        vault.run_cycle, conn, state.config, state.clock, caps=state.caps, before=apply
+    )
     if errors:
         message, kind = errors[0], "error"
     elif not outcome:

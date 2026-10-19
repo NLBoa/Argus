@@ -52,6 +52,9 @@ def test_exam_countdown_names_weakest_concepts() -> None:
     assert r.keys[0].endswith(":3") and r.keys[0].startswith("1:exam_countdown:")
     [tomorrow] = exam_countdowns(snap(countdowns=[Countdown(EXAM, 1, (), EOD)]))
     assert tomorrow.title == "Exam tomorrow" and "Weakest" not in tomorrow.body
+    # No concept notes, no practice to point at (D055).
+    assert "Practice on Exam prep." in r.body
+    assert "Practice" not in tomorrow.body
     assert exam_countdowns(snap(countdowns=[c], sent={r.keys[0]})) == []
     undated = Item(2, "CMSC351", ItemKind.EXAM, "Final", None, ItemStatus.UPCOMING)
     assert exam_countdowns(snap(countdowns=[Countdown(undated, 7, (), EOD)])) == []

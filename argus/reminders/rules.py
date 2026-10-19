@@ -380,8 +380,9 @@ def exam_countdowns(snap: Snapshot) -> list[Reminder]:
                 rule=Rule.EXAM_COUNTDOWN,
                 keys=(key,),
                 title=f"Exam {span}",
+                # Practice exists only with verified concept notes (D055): no promise without them.
                 body=f"[1] {c.item.course_code} {short(c.item.title, 40)}, {when(c.item.due_at)}.{weakest}"
-                " Practice on Exam prep.",
+                + (" Practice on Exam prep." if c.weakest else ""),
                 item_ids=(c.item.id,),
                 priority=3,
                 expires_at=c.until,

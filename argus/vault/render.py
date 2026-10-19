@@ -122,6 +122,7 @@ class CourseData:
     modules: Sequence[tuple[str, str]]  # (name, note path)
     exams: Sequence[tuple[str, str]]  # (title, note path)
     grade: str | None
+    concept_map: bool = True  # study notes can exist for this course (D055)
 
 
 def course_note(c: CourseData) -> DesiredNote:
@@ -141,7 +142,8 @@ def course_note(c: CourseData) -> DesiredNote:
         parts.append("## Exam prep\n\n" + "\n".join(f"- {layout.link(p, t)}" for t, p in c.exams))
     if c.modules:
         parts.append("## Modules\n\n" + "\n".join(f"- {layout.link(p, n)}" for n, p in c.modules))
-    parts.append(f"Concept map: {layout.link(layout.concept_map(c.code), 'Concept map')}")
+    if c.concept_map:
+        parts.append(f"Concept map: {layout.link(layout.concept_map(c.code), 'Concept map')}")
     return DesiredNote({"course": c.code}, (("core", "\n\n".join(parts)),), PLAIN_TAIL)
 
 
@@ -150,11 +152,8 @@ def module_note(
     name: str,
     materials: Sequence[tuple[str, str]],
     concepts: Sequence[str],
-    digest: str | None,
 ) -> DesiredNote:
     parts = []
-    if digest:
-        parts.append(digest)
     parts.append(
         "## Materials\n\n"
         + ("\n".join(f"- [{t}]({u})" for t, u in materials) or "No files in this module yet.")
@@ -218,6 +217,7 @@ class ExamData:
     concepts: Sequence[ExamConcept]
     sessions: Sequence[tuple[datetime, str]]  # (start, label)
     practice: Sequence[tuple[str, str, str]]  # (prompt, answer, concept)
+    study: bool = True  # concept notes can exist; without them the study regions stay empty
 
 
 def exam_note(e: ExamData) -> DesiredNote:
@@ -229,9 +229,10 @@ def exam_note(e: ExamData) -> DesiredNote:
         scope.append(f"**Covers:** {e.scope}")
     if e.logistics:
         scope.append(f"**Logistics:** {e.logistics}")
-    scope.append(
-        f"**Readiness:** {counts['solid']} solid, {counts['shaky']} shaky, {counts['untested']} untested"
-    )
+    if e.study:
+        scope.append(
+            f"**Readiness:** {counts['solid']} solid, {counts['shaky']} shaky, {counts['untested']} untested"
+        )
     if e.concepts:
         scope.append(
             "\n| Concept | Readiness |\n|---|---|\n"
@@ -254,10 +255,12 @@ def exam_note(e: ExamData) -> DesiredNote:
         "exam": e.title,
         "date": to_local(e.at).date().isoformat() if e.at else None,
     }
+    # Without study notes (no course files or no AI, D055) the plan and practice regions are
+    # left empty: the markers stay, so the regions exist if study notes arrive later.
     regions = (
         ("scope", "\n".join(scope)),
-        ("plan", "## Review plan\n\n" + plan),
-        ("practice", "## Practice exam\n\n" + practice),
+        ("plan", "## Review plan\n\n" + plan if e.study or e.sessions else ""),
+        ("practice", "## Practice exam\n\n" + practice if e.study else ""),
     )
     return DesiredNote(fm, regions, PLAIN_TAIL)
 

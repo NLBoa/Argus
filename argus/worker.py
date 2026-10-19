@@ -176,7 +176,7 @@ class Worker:
     async def _vault(self) -> None:
         # Blocking git calls (each with a timeout) every 15 minutes: the loop is single-user.
         if vault.due(self.conn, self.clock.now()):
-            vault.run_cycle(self.conn, self.config, self.clock)
+            vault.run_cycle(self.conn, self.config, self.clock, caps=self.caps)
 
     async def run(self, stop: asyncio.Event, tick_seconds: float = TICK_SECONDS) -> None:
         while not stop.is_set():

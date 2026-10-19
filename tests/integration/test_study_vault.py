@@ -218,7 +218,7 @@ async def test_verified_notes_exam_prep_and_review_plan(
     assert {r["item_id"] for r in reviews} == {world["Midterm 1"]}
     assert reviews[0]["label"] == "Review: Master theorem"
 
-    result = vault.run_cycle(db, app_config, clock)
+    result = vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert result.status == "ok" and result.files > 0
     concept = note(app_config, CONCEPT)
     core = parse(concept).regions["core"].content
@@ -254,7 +254,7 @@ async def test_verified_notes_exam_prep_and_review_plan(
     assert "No proposals right now." in note(app_config, layout.PROPOSALS)
 
     # Nothing changed: the next cycle commits nothing.
-    assert vault.run_cycle(db, app_config, clock).files == 0
+    assert vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config)).files == 0
 
 
 async def test_self_grading_updates_readiness_and_review_nudges(
@@ -269,7 +269,7 @@ async def test_self_grading_updates_readiness_and_review_nudges(
         record_attempt(db, item.id, "maybe", clock.now())
     with pytest.raises(LookupError):
         record_attempt(db, 999, "correct", clock.now())
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert "0 solid, 1 shaky, 0 untested" in note(app_config, EXAM)
 
     first = db.execute(
@@ -286,24 +286,31 @@ async def test_without_ai_the_fallback_notes_are_still_written(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
 ) -> None:
     assert await ensure_study(db, ai(db, app_config, clock, None), app_config, clock) == 0
-    assert vault.run_cycle(db, app_config, clock).status == "ok"
+    no_ai = tracked_caps(app_config, ai=False)
+    assert vault.run_cycle(db, app_config, clock, caps=no_ai).status == "ok"
     assert "[Lecture 7 slides](https://elms.example/files/7)" in note(
         app_config, layout.module_note("CMSC351", "Recurrences")
     )
     assert "**Due:**" in note(app_config, layout.assignment_note("CMSC351", "Homework 3"))
-    assert "Practice questions appear here" in note(app_config, EXAM)
+    # No AI, no concept notes: the exam note has no study regions to promise (D055).
+    exam = note(app_config, EXAM)
+    assert "Practice questions appear here" not in exam and "Readiness" not in exam
+    assert "%% argus:begin practice %%\n%% argus:end practice %%" in exam
     assert not (app_config.paths.vault_dir / CONCEPT).exists()
+    assert not (app_config.paths.vault_dir / layout.flashcards("CMSC351")).exists()
+    assert not (app_config.paths.vault_dir / layout.INBOX_README).exists()
+    assert "Concept map" not in note(app_config, layout.course_note("CMSC351"))
 
 
 async def test_confusion_inbox_targets_practice_and_never_edits_the_entry(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
 ) -> None:
     transport = await study(db, app_config, clock)
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     entry = app_config.paths.vault_dir / layout.INBOX_DIR / "this week.md"
     original = "# Stuff\n\n- I don't get the master theorem case 3\n- something about lunch\n"
     entry.write_text(original, encoding="utf-8")
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert entry.read_text(encoding="utf-8") == original
     assert db.execute("SELECT priority FROM concepts").fetchone()[0] == 1
     [(entry_id, concept_id, text)] = vault.pending_practice(db)
@@ -312,7 +319,9 @@ async def test_confusion_inbox_targets_practice_and_never_edits_the_entry(
     assert await targeted_practice(db, client, clock, concept_id, text) == 1
     vault.mark_practiced(db, entry_id, clock.now())
     assert vault.pending_practice(db) == []
-    vault.run_cycle(db, app_config, clock)  # the same line is not counted twice
+    vault.run_cycle(
+        db, app_config, clock, caps=tracked_caps(app_config)
+    )  # the same line is not counted twice
     assert db.execute("SELECT priority FROM concepts").fetchone()[0] == 1
     assert "Which case is T(n) = 2T(n/2) + n?" in note(app_config, CONCEPT)
 
@@ -371,16 +380,22 @@ async def test_student_edit_becomes_a_proposal_and_approval_applies_once(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
 ) -> None:
     await study(db, app_config, clock)
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     path = app_config.paths.vault_dir / CONCEPT
     path.write_text(replace_region(path.read_text(), "core", "My own summary."), encoding="utf-8")
     with transaction(db):
         db.execute("UPDATE concepts SET body = replace(body, 'It solves', 'The theorem solves')")
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert "My own summary." in path.read_text()
     [proposal] = db.execute("SELECT * FROM proposals WHERE status = 'open'").fetchall()
     assert "[[Courses/CMSC351/Concepts/Master theorem]]" in note(app_config, layout.PROPOSALS)
-    vault.run_cycle(db, app_config, clock, before=lambda w: w.approve(proposal["id"]) and None)
+    vault.run_cycle(
+        db,
+        app_config,
+        clock,
+        caps=tracked_caps(app_config),
+        before=lambda w: w.approve(proposal["id"]) and None,
+    )
     assert "The theorem solves" in path.read_text() and "My own summary." not in path.read_text()
     assert (
         db.execute("SELECT status FROM proposals WHERE id = ?", (proposal["id"],)).fetchone()[0]
@@ -392,7 +407,7 @@ async def test_student_edit_becomes_a_proposal_and_approval_applies_once(
 async def test_allow_folder_edits_freely_and_logs_in_weekly_note(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
 ) -> None:
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     root = app_config.paths.vault_dir
     folder = root / layout.course_note("CMSC351")
     folder.write_text(
@@ -400,7 +415,7 @@ async def test_allow_folder_edits_freely_and_logs_in_weekly_note(
     )
     hw = root / layout.assignment_note("CMSC351", "Homework 3")
     hw.write_text(replace_region(hw.read_text(), "core", "scribbles"), encoding="utf-8")
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     assert "**Due:**" in hw.read_text()
     assert db.execute("SELECT COUNT(*) FROM proposals").fetchone()[0] == 0
     weekly = note(app_config, layout.weekly(date(2026, 10, 19)))
@@ -411,13 +426,13 @@ async def test_anki_ids_from_the_plugin_survive(
     db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock, world: dict[str, int]
 ) -> None:
     await study(db, app_config, clock)
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     path = app_config.paths.vault_dir / layout.flashcards("CMSC351")
     annotated = path.read_text().replace("\nEND", "\n<!--ID: 1566052191670-->\nEND", 1)
     path.write_text(annotated, encoding="utf-8")
     with transaction(db):
         db.execute("UPDATE practice_items SET answer = 'Theta(n lg n)'")
-    vault.run_cycle(db, app_config, clock)
+    vault.run_cycle(db, app_config, clock, caps=tracked_caps(app_config))
     text = path.read_text()
     assert "<!--ID: 1566052191670-->" in text and "Back: Theta(n lg n)" in text
     assert db.execute("SELECT COUNT(*) FROM proposals").fetchone()[0] == 0
@@ -437,7 +452,7 @@ def test_three_failed_cycles_raise_a_system_alert(
     )
     engine = ReminderEngine(db, broken, clock, Router([]), caps=tracked_caps(broken))
     for n in range(3):
-        assert vault.run_cycle(db, broken, clock).status == "error"
+        assert vault.run_cycle(db, broken, clock, caps=tracked_caps(broken)).status == "error"
         alerts = [
             r for r in candidates(engine.snapshot(clock.now())) if r.rule is Rule.SYSTEM_ALERT
         ]

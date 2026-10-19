@@ -13,8 +13,9 @@ from argus.domain.models import Source
 EVERY_SOURCE = frozenset(s.value for s in Source)
 
 
-def tracked_caps(config: AppConfig) -> Capabilities:
-    """Every collector enabled (ELMS API and Gradescope report submissions)."""
+def tracked_caps(config: AppConfig, *, ai: bool = True) -> Capabilities:
+    """Every collector enabled (ELMS API and Gradescope report submissions), AI too unless
+    `ai=False`."""
     return derive(
         config,
         Secrets(
@@ -25,4 +26,5 @@ def tracked_caps(config: AppConfig) -> Capabilities:
             piazza_email="s@example.test",
             piazza_password=SecretStr("pw"),
         ),
+        ai=ai,
     )

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from argus.capabilities import Capabilities, Feature
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, MeetingRecord, Weekday
@@ -161,6 +162,7 @@ class Builder:
     config: AppConfig
     clock: Clock
     writer: VaultWriter
+    caps: Capabilities  # sections a missing source can't support are left out (D055)
     _logged: int = 0  # allowed edits already recorded
 
     def build(self) -> str:
@@ -176,7 +178,8 @@ class Builder:
         self._today(items, now)
         self._record_allowed_edits(now)  # before the weekly note, so it lists this cycle's edits
         self._weekly(items, now)
-        self._write_once(layout.INBOX_README, render.INBOX_README_TEXT)
+        if self.caps.has(Feature.STUDY_GENERATION):  # the inbox promises targeted practice
+            self._write_once(layout.INBOX_README, render.INBOX_README_TEXT)
         self._proposals()
         self._record_allowed_edits(now)
         written = len(set(self.writer.log.written))
@@ -248,7 +251,8 @@ class Builder:
                 ),
             )
         modules = []
-        for sm in repo.list_modules(self.conn, code):
+        course_caps = self.caps.course(code)
+        for sm in repo.list_modules(self.conn, code) if course_caps.modules else ():
             path = layout.module_note(code, sm.record.name)
             files = [
                 (i.title, i.url)
@@ -256,18 +260,18 @@ class Builder:
                 if i.url and i.type in ("File", "Page", "ExternalUrl")
             ]
             notes = [by_slug[k["slug"]] for k in concepts if k["module_id"] == sm.record.canvas_id]
-            self.writer.write(
-                path, render.module_note(code, sm.record.name, files, notes, sm.digest)
-            )
+            self.writer.write(path, render.module_note(code, sm.record.name, files, notes))
             modules.append((sm.record.name, path))
         estimates = effective_estimates(self.conn, now)
+        # Study artifacts (flashcards, concept map, exam practice) only where they can exist.
+        study = bool(concepts) or self.caps.has(Feature.STUDY_GENERATION)
         exams = []
         for item in items:
             note_path = item_note_path(item)
             if note_path is None:
                 continue
             if item.kind is ItemKind.EXAM:
-                self._exam(item, note_path, concepts, by_slug)
+                self._exam(item, note_path, concepts, by_slug, study=study)
                 exams.append((item.title, note_path))
                 continue
             info = self.conn.execute(
@@ -303,7 +307,7 @@ class Builder:
         if cfg.piazza_network_id:
             links.append(("Piazza", f"https://piazza.com/class/{cfg.piazza_network_id}"))
         grade = None
-        if row.grade_score is not None:
+        if course_caps.modules and row.grade_score is not None:
             grade = f"{row.grade_score:g}%" + (f" ({row.grade_letter})" if row.grade_letter else "")
         self.writer.write(
             layout.course_note(code),
@@ -323,9 +327,12 @@ class Builder:
                     modules=modules,
                     exams=exams,
                     grade=grade,
+                    concept_map=study,
                 )
             ),
         )
+        if not study:
+            return
         flash_path = layout.flashcards(code)
         slugs = {k["id"]: k["slug"] for k in concepts}
         self.writer.write(
@@ -354,7 +361,13 @@ class Builder:
         )
 
     def _exam(
-        self, item: Item, path: str, concepts: list[sqlite3.Row], by_slug: dict[str, str]
+        self,
+        item: Item,
+        path: str,
+        concepts: list[sqlite3.Row],
+        by_slug: dict[str, str],
+        *,
+        study: bool,
     ) -> None:
         row = self.conn.execute("SELECT * FROM exams WHERE item_id = ?", (item.id,)).fetchone()
         ids = json.loads(row["concept_ids"]) if row else []
@@ -380,6 +393,7 @@ class Builder:
                     ],
                     sessions=[(parse_iso(s["start_at"]), s["label"] or "Review") for s in sessions],
                     practice=[(p.prompt, p.answer, p.concept) for p in _interleave(practice)][:20],
+                    study=study,
                 )
             ),
         )
@@ -480,6 +494,7 @@ def run_cycle(
     config: AppConfig,
     clock: Clock,
     *,
+    caps: Capabilities,
     before: Callable[[VaultWriter], None] | None = None,
 ) -> SyncResult:
     """One vault cycle. `before` runs after the pull and before the notes are written (used to
@@ -492,7 +507,7 @@ def run_cycle(
         scan_inbox(conn, root, clock.now())
         if before is not None:
             before(writer)
-        return Builder(conn, config, clock, writer).build()
+        return Builder(conn, config, clock, writer, caps).build()
 
     lock_path = config.paths.data_dir / "vault.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)

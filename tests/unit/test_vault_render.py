@@ -117,14 +117,14 @@ def test_course_note_lists_open_work_exams_and_modules() -> None:
 
 def test_module_and_assignment_notes() -> None:
     m = render.module_note(
-        "CMSC351", "Week 1", [("Slides", "https://s")], ["Courses/CMSC351/Concepts/A.md"], "Recap."
+        "CMSC351", "Week 1", [("Slides", "https://s")], ["Courses/CMSC351/Concepts/A.md"]
     )
     assert m.frontmatter == {"course": "CMSC351", "module": "Week 1"}
     assert (
         "- [Slides](https://s)" in m.regions[0][1]
         and "[[Courses/CMSC351/Concepts/A|A]]" in m.regions[0][1]
     )
-    assert "No files" in render.module_note("C", "M", [], [], None).regions[0][1]
+    assert "No files" in render.module_note("C", "M", [], []).regions[0][1]
     a = render.assignment_note(
         render.AssignmentData(
             "CMSC351",

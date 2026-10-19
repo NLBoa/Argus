@@ -18,7 +18,7 @@ from argus import announcements, estimates
 from argus.ai import prompts
 from argus.ai.client import AIClient, Tier
 from argus.ai.schemas import CommandOut
-from argus.capabilities import Capabilities
+from argus.capabilities import Capabilities, Feature
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item
@@ -36,6 +36,14 @@ AMBIGUOUS = timedelta(minutes=10)  # two numbered texts this close: [n] could me
 # An AI reading never silences reminders or changes dates by itself (review R16).
 CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE)
 HELP = "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, OK 1, NO 1, or TODAY. Numbers are the [n] in my last text."
+# Without a source of staff posts there are no announcement questions to answer OK/NO to (D055).
+HELP_NO_POSTS = (
+    "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, or TODAY. Numbers are the [n] in my last text."
+)
+
+
+def help_text(caps: Capabilities) -> str:
+    return HELP if caps.has(Feature.STAFF_POSTS) else HELP_NO_POSTS
 
 
 @dataclass(frozen=True)
@@ -196,7 +204,7 @@ class Inbox:
         if recent and last["status"] == "unclear":
             reply = "Still not sure what you meant, so nothing changed. You can make changes on the dashboard."
             return Outcome(fit(reply), "failed", "none")
-        return Outcome(fit("Not sure what you meant. " + HELP), "unclear", "none")
+        return Outcome(fit("Not sure what you meant. " + help_text(self.caps)), "unclear", "none")
 
     # ---------------------------------------------------------------- commands
 
@@ -222,7 +230,7 @@ class Inbox:
 
     def _run(self, cmd: Command, context: Context) -> tuple[str, tuple[int, ...]]:
         if cmd.verb is Verb.HELP:
-            return HELP, ()
+            return help_text(self.caps), ()
         if cmd.verb is Verb.TODAY:
             return today_text(self.conn, self.clock.now())
         n, item = self._item(cmd, context)
