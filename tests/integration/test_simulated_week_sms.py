@@ -33,7 +33,7 @@ from argus.store.db import open_db, transaction
 from argus.web.webhook import PATH, create_webhook_app, signature
 from argus.worker import Worker
 from tests.ai_fakes import FakeTransport
-from tests.integration.test_simulated_week import (
+from tests.integration.simweek import (
     END,
     FEED,
     NTFY,
