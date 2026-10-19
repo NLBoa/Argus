@@ -16,6 +16,7 @@ STRICT_PREFIXES = (
     "argus/planner/",
     "argus/reminders/",
     "argus/vault/ownership.py",
+    "argus/capabilities.py",
     "argus/vault/regions.py",
 )
 
