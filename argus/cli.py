@@ -47,9 +47,23 @@ def version() -> None:
 @app.command("check-config")
 def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     """Validate config.yaml and report which secrets are configured (never their values)."""
+    from argus.planner.windows import from_config, overlapping_windows
+
     cfg = load_config(config)
     secrets = load_secrets()
     typer.echo(f"config ok: {len(cfg.courses)} course(s)")
+    windows = cfg.schedule.work_windows
+    if windows:
+        typer.echo(
+            f"work windows: {len(windows)} in config.yaml (they seed the first run only; "
+            "after that Settings owns them)"
+        )
+    else:
+        typer.echo("work windows: none in config.yaml (risk uses the time-only rule until set)")
+    for clash in overlapping_windows(from_config(windows)):
+        typer.echo(f"  warning: {clash}; they are merged")
+    if "max_session_minutes" in cfg.schedule.model_fields_set:
+        typer.echo("  warning: schedule.max_session_minutes is no longer used; you can remove it")
     for name in type(secrets).model_fields:
         state = "set" if getattr(secrets, name) else "missing"
         typer.echo(f"  {name}: {state}")

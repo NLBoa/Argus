@@ -26,12 +26,18 @@ schedule:
   quiet_hours: { start: "23:00", end: "08:00" }
   walking_buffer_minutes: 15
   morning_brief: "08:00"    # inside quiet hours it would wait until they end
-  max_session_minutes: 120
+  # When you usually work. Argus plans into these hours only, and texts you before each one.
+  # These seed the first run; after that, edit them in Settings. `days` are start days; an end
+  # before the start runs past midnight. At most 3 windows a day.
+  work_windows:
+    - { days: [Mon, Tue, Wed, Thu], start: "19:00", end: "23:00" }
+    - { days: [Sun], start: "13:00", end: "18:00" }
   commitments:
     - { title: "Dining hall shift", days: [Tue, Thu], start: "17:00", end: "20:00" }
 
 notifications:
-  daily_text_cap: 6          # at-risk and 3-hour warnings are not counted
+  daily_text_cap: 6          # at-risk, work-window, and 3-hour messages are not counted
+  window_notice_minutes: 20  # the work-window message goes out this long before each window
   ntfy_server: "https://ntfy.sh"
   dashboard_url: "https://argus-pi.example-tailnet.ts.net"  # opened when you tap a push
   # Exactly the URL Twilio posts replies to (Funnel port 8443 or your Cloudflare hostname); see docs/runbook.md
