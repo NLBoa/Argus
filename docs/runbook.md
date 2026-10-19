@@ -83,6 +83,16 @@ sudo tailscale serve --bg 8000                 # https://argus-pi.<tailnet>.ts.n
 Set `notifications.dashboard_url` to that URL. Never put the dashboard behind Funnel. Funnel exposes a whole port,
 which is why the webhook runs as its own app on its own port.
 
+**Sharing the Pi (it is already on someone else's tailnet):** run a second Tailscale on your own account. It
+appears as its own machine (`argus`), and you control its Serve and Funnel settings. It uses userspace networking,
+so the Pi's existing Tailscale keeps working unchanged. Every command for it needs the `--socket` flag:
+```sh
+sudo systemctl enable --now argus-tailscale        # the unit install.sh copied (deploy/systemd/argus-tailscale.service)
+sudo tailscale --socket=/run/argus-tailscale/tailscaled.sock up --hostname=argus   # sign in with YOUR account
+sudo tailscale --socket=/run/argus-tailscale/tailscaled.sock serve --bg 8000       # https://argus.<your-tailnet>.ts.net/
+```
+Use the same `--socket` flag for the Funnel commands below.
+
 **Webhook with Tailscale Funnel (recommended):**
 ```sh
 sudo tailscale funnel --bg --https=8443 8001   # public https://argus-pi.<tailnet>.ts.net:8443/ → 127.0.0.1:8001

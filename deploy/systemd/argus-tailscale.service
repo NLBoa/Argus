@@ -1,0 +1,19 @@
+# Optional: a second tailscaled for a Pi that is already on someone else's tailnet (runbook, "Sharing the Pi").
+# Userspace networking: it adds no network interface or routes, so the Pi's own Tailscale is untouched.
+# install.sh copies this unit but never enables it. Drive it with:
+#   sudo tailscale --socket=/run/argus-tailscale/tailscaled.sock <command>
+[Unit]
+Description=Tailscale for Argus (the student's own tailnet)
+Documentation=file:///opt/argus/docs/runbook.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --port=41642 --state=/var/lib/argus-tailscale/tailscaled.state --socket=/run/argus-tailscale/tailscaled.sock
+StateDirectory=argus-tailscale
+StateDirectoryMode=0700
+RuntimeDirectory=argus-tailscale
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
