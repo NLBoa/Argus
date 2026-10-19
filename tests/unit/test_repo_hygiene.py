@@ -71,9 +71,19 @@ def test_gitleaks_runs_in_pre_commit() -> None:
 
 
 def test_secrets_and_local_config_are_gitignored() -> None:
-    ignored = (REPO_ROOT / ".gitignore").read_text().splitlines()
-    for entry in [".env", "config.yaml", "var/", "*.db"]:
-        assert entry in ignored
+    """Asks git itself: real config and secrets are ignored, the test fixtures are not."""
+    import subprocess
+
+    def ignored(path: str) -> bool:
+        r = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", path], cwd=REPO_ROOT, check=False
+        )
+        return r.returncode == 0
+
+    for path in [".env", "config.yaml", "var/argus.db", "x.db", "argus/web/static/dist/app.css"]:
+        assert ignored(path), path
+    for path in ["tests/fixtures/config.yaml", "config.example.yaml", ".env.example"]:
+        assert not ignored(path), path
 
 
 def test_ci_has_arm64_job_running_make_check() -> None:
