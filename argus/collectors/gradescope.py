@@ -67,6 +67,19 @@ class LibGradescopeClient:
         except _LAYOUT_ERRORS as e:
             raise FetchError(_LAYOUT_MESSAGE) from e
 
+    def courses(self) -> list[tuple[str, str, str]]:
+        """(course id, name, term) for every course the student is enrolled in."""
+        if self._conn.account is None:
+            raise AuthError("not logged in to Gradescope")
+        try:
+            student = self._conn.account.get_courses().get("student", {})
+        except _LAYOUT_ERRORS as e:
+            raise FetchError(_LAYOUT_MESSAGE) from e
+        return [
+            (str(cid), f"{c.name} {c.full_name}", f"{c.semester} {c.year}")
+            for cid, c in student.items()
+        ]
+
     def assignments(self, course_id: str) -> list[GSAssignment]:
         if self._conn.account is None:
             raise AuthError("not logged in to Gradescope")

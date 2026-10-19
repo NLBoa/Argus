@@ -36,12 +36,17 @@ and credentials). For example: `sudo argus-admin check-config`.
      database, installs and starts the units, and enables the backup timer.
 
    Re-running it is safe: it never overwrites your config or credentials.
-4. **Configure (Pi).** Edit `/etc/argus/config.yaml`: courses (code, section, `canvas_id`, `gradescope_id`, `piazza_network_id`),
+4. **Find your courses (Pi).** Add the credentials first (below). Then run `sudo argus-admin discover`.
+   It reads your ELMS feed and your Gradescope and Piazza class lists, and prints a `courses:` block with codes,
+   sections, and ids. `sudo argus-admin discover --config > /tmp/argus-config.yaml` prints the whole config with
+   that block in place; review it, then install it with `sudo install -o root -g argus -m 640 /tmp/argus-config.yaml
+   /etc/argus/config.yaml`.
+5. **Configure (Pi).** Edit `/etc/argus/config.yaml`: courses (code, section, `canvas_id`, `gradescope_id`, `piazza_network_id`),
    `schedule` (waking window, quiet hours, morning brief, commitments), `notifications` (`dashboard_url`,
    `webhook_url`), `ai.monthly_budget_usd`, and `paths.backup_remote`. Then `sudo argus-admin check-config` and
    `sudo systemctl restart argus-worker argus-web argus-webhook`.
-5. **Credentials.** See below, then restart the units again.
-6. **Vault.** See [Vault git remote](#vault-git-remote).
+6. **Credentials.** See below, then restart the units again.
+7. **Vault.** See [Vault git remote](#vault-git-remote).
 
 ## Credentials
 

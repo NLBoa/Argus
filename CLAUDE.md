@@ -33,7 +33,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Everything CI runs | `make check` |
 | Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
 | Webhook / backup / restore | `argus serve-webhook` · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
-| CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, …) |
+| CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, …) |
 
 ## Architecture map
 - `argus/clock.py`: the only wall-clock reader. `Clock`, `SystemClock`, `FakeClock`, local-time helpers.

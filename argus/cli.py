@@ -186,6 +186,80 @@ def notify_test(config: ConfigOpt = DEFAULT_CONFIG) -> None:
         raise typer.Exit(1)
 
 
+@app.command()
+def discover(
+    config: ConfigOpt = DEFAULT_CONFIG,
+    full: Annotated[
+        bool,
+        typer.Option("--config", help="Print the whole config with its courses block replaced."),
+    ] = False,
+) -> None:
+    """Find your courses (codes, sections, ELMS/Gradescope/Piazza ids) from your own accounts."""
+    from argus import discover as dv
+    from argus.collectors.gradescope import LibGradescopeClient
+    from argus.collectors.http import AuthError, Fetcher, FetchError, make_client
+    from argus.collectors.piazza import LibPiazzaClient
+
+    _, secrets = _setup(config)
+
+    def note(msg: str) -> None:
+        typer.echo(msg, err=True)
+
+    if secrets.canvas_ical_url is None:
+        note("discover: canvas_ical_url is missing; add it first (docs/runbook.md, Credentials)")
+        raise typer.Exit(1)
+
+    async def fetch(url: str) -> bytes:
+        async with make_client() as client:
+            return (await Fetcher(client).get(url)).body
+
+    try:
+        courses = dv.feed_courses(asyncio.run(fetch(secrets.canvas_ical_url.get_secret_value())))
+    except (AuthError, FetchError, ValueError) as e:
+        note(f"discover: couldn't read the ELMS feed: {e}")
+        raise typer.Exit(1) from e
+    if not courses:
+        note("discover: the ELMS feed lists no courses yet (nothing due in the next year?)")
+        raise typer.Exit(1)
+    codes = list(courses)
+    note(f"ELMS feed: {', '.join(codes)}")
+
+    gs_ids: dict[str, str] = {}
+    if secrets.gradescope_email and secrets.gradescope_password:
+        try:
+            gs = LibGradescopeClient()
+            gs.login(secrets.gradescope_email, secrets.gradescope_password.get_secret_value())
+            gs_ids, extra = dv.pick(codes, gs.courses())
+            note(
+                f"Gradescope: {', '.join(gs_ids) or 'none of these'}"
+                + (f" (also listed: {', '.join(extra)})" if extra else "")
+            )
+        except Exception as e:  # the unofficial library can fail in many ways; discovery goes on
+            note(f"Gradescope: skipped ({type(e).__name__}: {e})")
+    pz_ids: dict[str, str] = {}
+    if secrets.piazza_email and secrets.piazza_password:
+        try:
+            pz = LibPiazzaClient()
+            pz.login(secrets.piazza_email, secrets.piazza_password.get_secret_value())
+            pz_ids, extra = dv.pick(codes, pz.classes())
+            note(
+                f"Piazza: {', '.join(pz_ids) or 'none of these'}"
+                + (f" (also listed: {', '.join(extra)})" if extra else "")
+            )
+        except Exception as e:  # as above
+            note(f"Piazza: skipped ({type(e).__name__}: {e})")
+
+    found = [
+        dv.Found(code, section, canvas_id, gs_ids.get(code), pz_ids.get(code))
+        for code, (section, canvas_id) in courses.items()
+    ]
+    block = dv.render_courses(found)
+    if full:
+        typer.echo(dv.replace_courses(config.read_text(encoding="utf-8"), block), nl=False)
+    else:
+        typer.echo(block, nl=False)
+
+
 @app.command("serve-webhook")
 def serve_webhook(
     config: ConfigOpt = DEFAULT_CONFIG, host: str = "127.0.0.1", port: int = 8001

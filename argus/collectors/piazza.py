@@ -61,6 +61,14 @@ class LibPiazzaClient:
         except RequestError as e:
             raise FetchError(f"Piazza request failed: {type(e).__name__}") from e
 
+    def classes(self) -> list[tuple[str, str, str]]:
+        """(network id, name, term) for every class the student is in."""
+        raw = self._call(self._p.get_user_classes) or []
+        return [
+            (str(c["nid"]), f"{c.get('num', '')} {c.get('name', '')}", str(c.get("term", "")))
+            for c in raw
+        ]
+
     def feed(self, nid: str, limit: int) -> list[dict[str, Any]]:
         result = self._call(self._p.network(nid).get_feed, limit=limit, offset=0)
         if not isinstance(result, dict) or not isinstance(result.get("feed"), list):
