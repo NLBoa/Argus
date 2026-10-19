@@ -9,7 +9,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --port=41642 --state=/var/lib/argus-tailscale/tailscaled.state --socket=/run/argus-tailscale/tailscaled.sock
+ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --port=41642 --statedir=/var/lib/argus-tailscale --socket=/run/argus-tailscale/tailscaled.sock
 StateDirectory=argus-tailscale
 StateDirectoryMode=0700
 RuntimeDirectory=argus-tailscale
