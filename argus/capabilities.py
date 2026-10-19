@@ -22,15 +22,13 @@ from argus.collectors.base import CollectContext
 from argus.collectors.http import Fetcher
 from argus.collectors.runner import default_collectors
 from argus.config import AppConfig, Secrets
-from argus.domain.models import SUBMISSION_SOURCES
+from argus.domain.models import submission_sources
 
 AI = "ai"  # pseudo-source: an Anthropic key (or an injected transport in tests and the demo)
-TRACKING = SUBMISSION_SOURCES  # sources that report submission state (D056)
 
 
 class Feature(StrEnum):
     CALENDAR = "calendar"  # deadlines from the ELMS calendar feed
-    SCHEDULE = "schedule"  # class meeting times (umd.io)
     MODULES = "modules"
     GRADE = "grade"
     SYLLABUS = "syllabus"
@@ -51,7 +49,6 @@ def _any(*options: set[str]) -> tuple[frozenset[str], ...]:
 # tests/unit/test_capabilities.py and documented in docs/DECISIONS.md (D054).
 FEATURES: Mapping[Feature, tuple[frozenset[str], ...]] = {
     Feature.CALENDAR: _any({"canvas_ical"}),
-    Feature.SCHEDULE: _any({"umdio"}),
     Feature.MODULES: _any({"canvas_modules"}),
     Feature.GRADE: _any({"canvas_modules"}),
     Feature.SYLLABUS: _any({"canvas_modules"}),
@@ -69,7 +66,6 @@ FEATURES: Mapping[Feature, tuple[frozenset[str], ...]] = {
 class CourseCaps:
     canvas_api: bool = False
     modules: bool = False  # modules, grade, syllabus, and course files
-    gradescope: bool = False
     piazza: bool = False
 
 
@@ -93,14 +89,14 @@ class Capabilities:
     @property
     def tracking_sources(self) -> frozenset[str]:
         """The enabled sources that report submissions (D056)."""
-        return frozenset(s for s in TRACKING if self.sources.get(s))
+        return submission_sources(s for s, on in self.sources.items() if on)
 
     def shows_post(self, *, platform: str, kind: str, course: str) -> bool:
         """Whether a stored post may be shown: its source must still be set up for the course
         (D055). The syllabus comes from the modules sync, announcements from the ELMS API."""
         c = self.course(course)
         if kind == "syllabus":
-            return c.modules
+            return self.has(Feature.SYLLABUS) and c.modules
         if platform == "canvas":
             return c.canvas_api
         if platform == "piazza":
@@ -110,9 +106,9 @@ class Capabilities:
     def deadline_sources(self) -> str:
         """Where deadlines come from, for copy: "ELMS or Gradescope"."""
         names = []
-        if self.sources.get("canvas_ical") or self.sources.get("canvas_api"):
+        if self.has(Feature.CALENDAR) or self.sources.get("canvas_api"):
             names.append("ELMS")
-        if self.sources.get("gradescope"):
+        if self.has(Feature.GRADESCOPE):
             names.append("Gradescope")
         return " or ".join(names) or "your course sites"
 
@@ -147,7 +143,6 @@ def derive(config: AppConfig, secrets: Secrets, *, ai: bool = False) -> Capabili
         c.code: CourseCaps(
             canvas_api=sources.get("canvas_api", False) and c.canvas_id is not None,
             modules=sources.get("canvas_modules", False) and c.canvas_id is not None,
-            gradescope=sources.get("gradescope", False) and c.gradescope_id is not None,
             piazza=piazza and c.piazza_network_id is not None,
         )
         for c in config.courses

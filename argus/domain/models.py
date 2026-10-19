@@ -6,6 +6,7 @@ Collector output types end in `Record`, or are `SourceItem`. They are immutable,
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import IntEnum, StrEnum
@@ -39,6 +40,12 @@ class Source(StrEnum):
 
 # Sources that report whether work was submitted (D056). Without one, nothing is ever "missed".
 SUBMISSION_SOURCES = frozenset({Source.CANVAS_API.value, Source.GRADESCOPE.value})
+
+
+def submission_sources(enabled: Iterable[str]) -> frozenset[str]:
+    """Of these enabled sources, the ones that report submissions. The one rule shared by
+    Capabilities and the sync runner."""
+    return SUBMISSION_SOURCES.intersection(enabled)
 
 
 class ItemKind(StrEnum):

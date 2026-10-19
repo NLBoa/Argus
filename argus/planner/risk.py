@@ -37,10 +37,12 @@ def assess(
     item: Item,
     now: datetime,
     *,
+    tracked: bool,
     remaining_p80_hours: float | None = None,
     free_hours_before_due: float | None = None,
-    tracked: bool = True,
 ) -> RiskLevel:
+    """`tracked`: some enabled source reports this item's submission (D056). Required, so no
+    caller can silently fall back to "tracked" and call untracked work overdue."""
     if awaiting_confirmation(item, now, tracked=tracked):
         return RiskLevel.UNCONFIRMED
     if item.status == ItemStatus.MISSED:
@@ -48,7 +50,8 @@ def assess(
     if not item.status.is_open or item.due_at is None or not item.kind.takes_submission:
         return RiskLevel.OK
     if now >= item.due_at:
-        return RiskLevel.OVERDUE
+        # Untracked and inside a late window: still workable, but Argus can't say it's overdue.
+        return RiskLevel.OVERDUE if tracked else RiskLevel.WATCH
     if remaining_p80_hours is not None and free_hours_before_due is not None:
         if remaining_p80_hours <= 0:
             return RiskLevel.OK

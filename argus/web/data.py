@@ -78,6 +78,7 @@ def _views(
             i,
             now,
             courses,
+            tracking_sources=caps.tracking_sources,
             running_item_id=running,
             estimate=estimates.get(i.id),
             risk=risk[i.id].level if i.id in risk else None,
@@ -199,7 +200,9 @@ def load_today(
         ),
         groups=groups,
         timer=timer_view(
-            repo.running_timer(conn), by_id | _running_extra(conn, config, now, by_id), now
+            repo.running_timer(conn),
+            by_id | _running_extra(conn, config, now, by_id, caps.tracking_sources),
+            now,
         ),
     )
 
@@ -228,7 +231,11 @@ def _sessions(conn: sqlite3.Connection, day: date) -> list[Busy]:
 
 
 def _running_extra(
-    conn: sqlite3.Connection, config: AppConfig, now: datetime, known: dict[int, ItemView]
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    known: dict[int, ItemView],
+    tracking_sources: frozenset[str],
 ) -> dict[int, ItemView]:
     """The running item may be due later than tomorrow; fetch it so the timer bar can show it."""
     timer = repo.running_timer(conn)
@@ -237,7 +244,15 @@ def _running_extra(
     item = repo.get_item(conn, timer.item_id)
     if item is None:
         return {}
-    return {item.id: item_view(item, now, course_views(config), running_item_id=item.id)}
+    return {
+        item.id: item_view(
+            item,
+            now,
+            course_views(config),
+            tracking_sources=tracking_sources,
+            running_item_id=item.id,
+        )
+    }
 
 
 def load_upcoming(
@@ -430,7 +445,7 @@ def palette_items(
             "id": f"item-{v.id}",
             "label": v.title,
             "hint": f"{v.course.code}, {v.due_text or 'no due date'}",
-            "href": f"/upcoming#item-{v.id}",
+            "href": f"/items/{v.id}",
         }
         for v in views
     ] + [
@@ -778,7 +793,9 @@ def load_item(
     if item is None:
         return None
     views = {v.id: v for v in _views(conn, config, now, caps=caps)}
-    view = views.get(item.id) or item_view(item, now, course_views(config))
+    view = views.get(item.id) or item_view(
+        item, now, course_views(config), tracking_sources=caps.tracking_sources
+    )
     eff = effective_estimates(conn, now).get(item.id)
     history = repo.estimates_for(conn, item.id)
     base = next((e for e in reversed(history) if e.source != "user"), None)
@@ -970,19 +987,11 @@ def finding_view(
 def load_announcements(
     conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> list[CourseAnnouncements]:
-    from argus.announcements import worth_analyzing
+    from argus.announcements import post_visible, worth_analyzing
 
     courses = course_views(config)
 
-    def shown(post_id: int) -> bool:
-        stored = repo.get_post(conn, post_id)
-        return stored is not None and caps.shows_post(
-            platform=stored.record.platform,
-            kind=stored.record.kind,
-            course=stored.record.course_code,
-        )
-
-    findings = [f for f in repo.list_findings(conn) if shown(f.post_id)]
+    findings = [f for f in repo.list_findings(conn) if post_visible(conn, caps, f.post_id)]
     pending_posts = [
         p
         for p in repo.posts_to_scan(conn, limit=200)

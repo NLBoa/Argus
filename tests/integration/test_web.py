@@ -280,9 +280,7 @@ def test_palette_items(client: TestClient) -> None:
     items = client.get("/palette.json").json()["items"]
     titles = {i["label"] for i in items}
     assert {"Homework 3", "Problem Set 7"} <= titles
-    assert all(
-        i["href"].startswith("/upcoming#item-") for i in items if i["id"].startswith("item-")
-    )
+    assert all(i["href"].startswith("/items/") for i in items if i["id"].startswith("item-"))
 
 
 def test_manifest_service_worker_offline(client: TestClient) -> None:

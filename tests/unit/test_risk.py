@@ -36,7 +36,7 @@ def item(due: timedelta | None, status: ItemStatus = ItemStatus.UPCOMING, **kw: 
     ],
 )
 def test_assess_without_plan(it: Item, expected: RiskLevel) -> None:
-    assert assess(it, NOW) == expected
+    assert assess(it, NOW, tracked=True) == expected
 
 
 @pytest.mark.parametrize(
@@ -50,12 +50,21 @@ def test_assess_without_plan(it: Item, expected: RiskLevel) -> None:
 )
 def test_assess_with_plan(remaining: float, free: float, expected: RiskLevel) -> None:
     it = item(timedelta(days=3))
-    assert assess(it, NOW, remaining_p80_hours=remaining, free_hours_before_due=free) == expected
+    assert (
+        assess(it, NOW, tracked=True, remaining_p80_hours=remaining, free_hours_before_due=free)
+        == expected
+    )
 
 
 def test_overdue_beats_plan() -> None:
     assert (
-        assess(item(timedelta(hours=-1)), NOW, remaining_p80_hours=1, free_hours_before_due=10)
+        assess(
+            item(timedelta(hours=-1)),
+            NOW,
+            tracked=True,
+            remaining_p80_hours=1,
+            free_hours_before_due=10,
+        )
         == RiskLevel.OVERDUE
     )
 
@@ -83,7 +92,6 @@ def test_untracked_past_due_is_unconfirmed_not_overdue() -> None:
     it = item(timedelta(hours=-1))
     assert assess(it, NOW, tracked=False) == RiskLevel.UNCONFIRMED
     assert assess(it, NOW, tracked=True) == RiskLevel.OVERDUE
-    assert assess(it, NOW) == RiskLevel.OVERDUE  # tracked unless told otherwise
     # Not yet due: the usual rules apply.
     assert assess(item(timedelta(hours=20)), NOW, tracked=False) == RiskLevel.WATCH
     assert assess(item(timedelta(hours=-1), ItemStatus.SUBMITTED), NOW, tracked=False) == (
@@ -95,3 +103,11 @@ def test_unconfirmed_label() -> None:
     assert RiskLevel.UNCONFIRMED.label == "Did you submit?"
     assert RiskLevel.UNCONFIRMED.slug == "unconfirmed"
     assert RiskLevel.OK.severity < RiskLevel.UNCONFIRMED.severity < RiskLevel.AT_RISK.severity
+
+
+def test_untracked_in_a_late_window_is_never_overdue() -> None:
+    """Past due but before the late deadline: still workable, and Argus can't tell it was
+    missed, so the strongest marker is Watch (D056)."""
+    late = item(timedelta(hours=-1), late_due_at=NOW + timedelta(days=1))
+    assert assess(late, NOW, tracked=False) == RiskLevel.WATCH
+    assert assess(late, NOW, tracked=True) == RiskLevel.OVERDUE

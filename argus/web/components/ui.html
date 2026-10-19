@@ -66,7 +66,7 @@
   </div>
   {% if actions and v.kind.takes_submission %}
   <div class="item-row__actions">
-    {% if v.actionable %}
+    {% if v.actionable or v.running %}
     <form method="post" action="/items/{{ v.id }}/timer" hx-post="/items/{{ v.id }}/timer" hx-target="#item-{{ v.id }}" hx-swap="outerHTML">
       <input type="hidden" name="action" value="{{ 'stop' if v.running else 'start' }}">
       <button id="timer-{{ v.id }}" class="btn btn-sm {{ 'btn-primary' if v.running else '' }}" type="submit" aria-pressed="{{ 'true' if v.running else 'false' }}">

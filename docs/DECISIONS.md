@@ -371,7 +371,6 @@ student sees. The matrix (pinned by `tests/unit/test_capabilities.py`):
 | Feature | Needs any one of |
 |---|---|
 | calendar | canvas_ical |
-| schedule | umdio |
 | modules, grade, syllabus | canvas_modules (and, per course, a `canvas_id`) |
 | canvas_announcements | canvas_api |
 | gradescope | gradescope |
@@ -398,6 +397,10 @@ one-line fix), including a note on reminder rules that cannot fire (the announce
 Without staff posts, `/announcements` redirects to Today and SMS HELP leaves out OK/NO. Without study notes, the vault
 writes no flashcards note, concept map, or inbox README, and the exam note's study regions stay empty (the markers
 remain, so they fill in if study notes arrive later).
+Stored posts from a removed source also stop *acting*: the AI scan skips them (they are kept unscanned for when the
+source returns, so nothing they say can change a date), and their findings send no "Announced" texts. Study generation
+runs only with `study_generation`. Deliberately kept: items and the scope or logistics already applied to them from
+such findings. An announced quiz is a deadline, and hiding a deadline is the one failure Argus must not have.
 
 ## D056 — No MISSED without a submission source (2026-10-19)
 **Context.** The calendar feed never says whether work was submitted. Without the ELMS API or Gradescope, every

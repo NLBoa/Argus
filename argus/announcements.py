@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from argus.ai.client import AIClient
 from argus.ai.extract import extract
@@ -33,6 +34,9 @@ from argus.reminders.text import when
 from argus.store import repo
 from argus.store.db import transaction
 
+if TYPE_CHECKING:  # capabilities imports the sync runner, which imports this module
+    from argus.capabilities import Capabilities
+
 log = get_logger(__name__)
 RETRY_LATER = frozenset({"unavailable", "budget", "error"})
 
@@ -45,6 +49,17 @@ class ScanReport:
     applied: int = 0
     waiting: int = 0  # pending + conflict
     deferred: int = 0  # AI not available now; retried later
+
+
+SCAN_LOOKAHEAD = 500  # unscanned posts considered per pass, before hidden ones are dropped
+
+
+def post_visible(conn: sqlite3.Connection, caps: Capabilities, post_id: int) -> bool:
+    """Whether a stored post's source is still set up for its course (D055)."""
+    stored = repo.get_post(conn, post_id)
+    return stored is not None and caps.shows_post(
+        platform=stored.record.platform, kind=stored.record.kind, course=stored.record.course_code
+    )
 
 
 def worth_analyzing(post: repo.StoredPost) -> bool:
@@ -98,12 +113,22 @@ async def scan_posts(
     config: AppConfig,
     clock: Clock,
     *,
-    tracking_sources: frozenset[str],
+    caps: Capabilities,
     limit: int = 20,
 ) -> ScanReport:
+    """Posts from a source that is no longer set up are left unscanned (D055): nothing they
+    say may change a date. They are scanned if the source comes back."""
     report = ScanReport()
+    tracking_sources = caps.tracking_sources
     courses = [c.code for c in config.courses]
-    for post in repo.posts_to_scan(conn, limit):
+    visible = [
+        p
+        for p in repo.posts_to_scan(conn, SCAN_LOOKAHEAD)
+        if caps.shows_post(
+            platform=p.record.platform, kind=p.record.kind, course=p.record.course_code
+        )
+    ]
+    for post in visible[:limit]:
         report.scanned += 1
         if not worth_analyzing(post):
             with transaction(conn):

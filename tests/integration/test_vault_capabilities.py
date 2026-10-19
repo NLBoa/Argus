@@ -51,3 +51,7 @@ def test_without_token_no_modules_or_grade(
     assert "Current grade" not in course
     assert not (root / "Courses" / "CMSC351" / "Modules").exists()
     assert "**Due:**" in (root / layout.assignment_note("CMSC351", "Homework 3")).read_text()
+    if seeded is DemoProfile.NO_CANVAS_TOKEN:
+        # Due 3h ago, and no source can say whether it was submitted (D056).
+        lab = (root / layout.assignment_note("MATH240", "Lab report 2")).read_text()
+        assert "**Status:** not marked done" in lab

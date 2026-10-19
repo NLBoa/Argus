@@ -16,7 +16,7 @@ from pydantic import SecretStr
 
 from argus.ai.client import AIClient, Transport, build_transport
 from argus.announcements import scan_posts
-from argus.capabilities import derive
+from argus.capabilities import Feature, derive
 from argus.clock import Clock
 from argus.collectors.http import AuthError, Fetcher, FetchError
 from argus.collectors.runner import SyncRunner
@@ -107,7 +107,7 @@ class Worker:
                     self.ai,
                     self.config,
                     self.clock,
-                    tracking_sources=self.caps.tracking_sources,
+                    caps=self.caps,
                 ),
                 AI_BUDGET,
             ),
@@ -166,7 +166,8 @@ class Worker:
     async def _study(self) -> None:
         now = self.clock.now()
         sync_exams(self.conn, now)
-        await ensure_study(self.conn, self.ai, self.config, self.clock)
+        if self.caps.has(Feature.STUDY_GENERATION):  # course files and AI (D054)
+            await ensure_study(self.conn, self.ai, self.config, self.clock)
         for entry_id, concept_id, text in vault.pending_practice(self.conn):
             if not self.ai.available:
                 break

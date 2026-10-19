@@ -29,7 +29,7 @@ from argus.collectors.piazza_email import PiazzaEmailCollector
 from argus.collectors.schedule import POLICIES, is_due
 from argus.collectors.umdio import UmdioCollector
 from argus.config import AppConfig, Secrets
-from argus.domain.models import SUBMISSION_SOURCES, Source
+from argus.domain.models import Source, submission_sources
 from argus.logging import get_logger, redactor
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
@@ -105,11 +105,7 @@ class SyncRunner:
     def tracking_sources(self, ctx: CollectContext) -> frozenset[str]:
         """This runner's enabled collectors that report submissions (D056). Same rule as
         `Capabilities.tracking_sources`, computed from the collectors actually in use."""
-        return frozenset(
-            c.source.value
-            for c in self.collectors
-            if c.source.value in SUBMISSION_SOURCES and c.enabled(ctx)
-        )
+        return submission_sources(c.source.value for c in self.collectors if c.enabled(ctx))
 
     def _context(self) -> CollectContext:
         return CollectContext(

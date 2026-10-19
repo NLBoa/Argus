@@ -9,7 +9,16 @@ from typing import Any
 
 from argus.clock import to_local
 from argus.config import AppConfig, CourseConfig
-from argus.domain.models import Item, ItemKind, ItemLink, ItemStatus, MeetingRecord, Source, Weekday
+from argus.domain.models import (
+    SUBMISSION_SOURCES,
+    Item,
+    ItemKind,
+    ItemLink,
+    ItemStatus,
+    MeetingRecord,
+    Source,
+    Weekday,
+)
 from argus.planner.freetime import meetings_on
 from argus.planner.risk import RiskLevel
 from argus.web.deps import STATIC_DIR
@@ -56,7 +65,7 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             "title": title,
             "due_at": now + due if due is not None else None,
             "status": ItemStatus.UPCOMING,
-            "links": (ItemLink(Source.CANVAS_ICAL, canvas),),
+            "links": (ItemLink(Source.CANVAS_API, canvas),),
         }
         base.update(kw)
         return Item(**base)
@@ -66,18 +75,21 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             it(1, "Homework 4: dynamic programming", "CMSC351", timedelta(days=3)),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
             estimate=EstimateView(4.5, 3.5),
         ),
         item_view(
             it(2, "Problem Set 6", "MATH240", timedelta(hours=14)),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
             estimate=EstimateView(2.0, is_default=True),
         ),
         item_view(
             it(3, "Essay draft", "ENGL393", timedelta(hours=30), status=ItemStatus.IN_PROGRESS),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
             running_item_id=9003,
             estimate=EstimateView(3.0, 3.0),
         ),
@@ -96,6 +108,7 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             ),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
         ),
         item_view(
             it(
@@ -111,8 +124,14 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             ),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
         ),
-        item_view(it(6, "Lab report 2", "MATH240", timedelta(hours=-3)), now, courses),
+        item_view(
+            it(6, "Lab report 2", "MATH240", timedelta(hours=-3)),
+            now,
+            courses,
+            tracking_sources=SUBMISSION_SOURCES,
+        ),
         item_view(
             it(
                 7,
@@ -123,13 +142,20 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             ),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
         ),
-        item_view(it(8, "Course survey", "ENGL393", None), now, courses),
+        item_view(
+            it(8, "Course survey", "ENGL393", None),
+            now,
+            courses,
+            tracking_sources=SUBMISSION_SOURCES,
+        ),
         # D056: no source reports submissions for it, so Argus asks instead of saying "overdue".
         item_view(
             it(9, "Peer review", "ENGL393", timedelta(hours=-5)),
             now,
             courses,
+            tracking_sources=SUBMISSION_SOURCES,
             risk=RiskLevel.UNCONFIRMED,
         ),
     ]

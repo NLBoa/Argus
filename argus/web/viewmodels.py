@@ -126,15 +126,20 @@ def item_view(
     now: datetime,
     courses: Mapping[str, CourseView],
     *,
+    tracking_sources: frozenset[str],
     running_item_id: int | None = None,
     estimate: EstimateView | None = None,
     risk: RiskLevel | None = None,
 ) -> ItemView:
+    """`risk` comes from the planner when available. Otherwise it is assessed here, with
+    `tracking_sources` (Capabilities.tracking_sources) deciding tracked vs untracked (D056)."""
     conflict = tuple(
         f"{SOURCE_LABELS.get(src, src.value)}: {due_text(when, now)}"
         for src, when in item.date_conflict
     )
-    level = risk if risk is not None else assess(item, now)
+    level = (
+        risk if risk is not None else assess(item, now, tracked=item.tracked_by(tracking_sources))
+    )
     stale = (
         level is RiskLevel.UNCONFIRMED
         and item.due_at is not None

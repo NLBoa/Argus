@@ -108,7 +108,13 @@ class ItemLine:
 
 def _item_line(i: ItemLine) -> str:
     name = layout.link(i.note, i.title) if i.note else i.title
-    done = " (done)" if i.status in ("submitted", "graded") else ""
+    done = (
+        " (done)"
+        if i.status in ("submitted", "graded")
+        else " (not marked done)"
+        if i.status == "not_marked_done"
+        else ""
+    )
     return f"- {name}, {i.kind}, due {_when(i.due_at)}{done}"
 
 

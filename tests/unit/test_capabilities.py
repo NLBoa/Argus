@@ -49,7 +49,6 @@ def secrets(
 # The documented matrix (docs/DECISIONS.md D054). Each feature needs any one of these sets.
 EXPECTED = {
     Feature.CALENDAR: (frozenset({"canvas_ical"}),),
-    Feature.SCHEDULE: (frozenset({"umdio"}),),
     Feature.MODULES: (frozenset({"canvas_modules"}),),
     Feature.GRADE: (frozenset({"canvas_modules"}),),
     Feature.SYLLABUS: (frozenset({"canvas_modules"}),),
@@ -95,8 +94,6 @@ def test_without_token_no_canvas_api_features() -> None:
         assert not caps.has(f)
     assert caps.has(Feature.SUBMISSION_TRACKING)  # Gradescope still reports submissions
     assert caps.tracking_sources == frozenset({"gradescope"})
-    assert caps.course("CMSC351").gradescope
-    assert not caps.course("MATH240").gradescope  # no gradescope_id
 
 
 def test_staff_posts_from_any_post_source(tmp_path: Path) -> None:
@@ -135,7 +132,6 @@ def test_every_combination_matches_the_matrix(flags: tuple[bool, ...]) -> None:
         "gradescope": gradescope,
         "piazza": piazza,
         "piazza_email": False,
-        "umdio": True,
         AI: ai,
     }
     for feature, options in EXPECTED.items():

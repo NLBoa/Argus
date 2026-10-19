@@ -37,6 +37,7 @@ def _row(request: Request, state: AppState, conn: sqlite3.Connection, item_id: i
         item,
         state.clock.now(),
         course_views(state.config),
+        tracking_sources=state.caps.tracking_sources,
         running_item_id=timer.item_id if timer else None,
     )
     macro = templates(request).env.get_template("components/ui.html").module.item_row  # type: ignore[attr-defined]

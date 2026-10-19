@@ -22,6 +22,7 @@ from argus.capabilities import Capabilities, Feature
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, MeetingRecord, Weekday
+from argus.domain.status import awaiting_confirmation
 from argus.domain.titles import normalize_title
 from argus.estimates import effective_estimates
 from argus.exams import PracticeRow, concept_readiness, practice_items
@@ -68,10 +69,10 @@ def item_note_path(item: Item) -> str | None:
     return None
 
 
-def _line(item: Item) -> render.ItemLine:
+def _line(item: Item, status: str) -> render.ItemLine:
     url = next((link.url for link in item.links if link.url), None)
     return render.ItemLine(
-        item.title, item.kind.value, item.due_at, item.status.value, item_note_path(item), url
+        item.title, item.kind.value, item.due_at, status, item_note_path(item), url
     )
 
 
@@ -189,6 +190,16 @@ class Builder:
 
     # -- helpers
 
+    def _status(self, item: Item, now: datetime) -> str:
+        """The status a note shows. Past-due work no source reports submissions for is
+        "not marked done", never "upcoming" or "missed" (D056)."""
+        tracked = item.tracked_by(self.caps.tracking_sources)
+        return (
+            "not_marked_done"
+            if awaiting_confirmation(item, now, tracked=tracked)
+            else item.status.value
+        )
+
     def _write_once(self, rel: str, text: str) -> None:
         """Files outside the region model (the inbox README, canvases): written only if absent or
         still exactly what Argus last wrote; a student-edited copy is left alone."""
@@ -286,7 +297,7 @@ class Builder:
                         title=item.title,
                         kind=item.kind.value,
                         due_at=item.due_at,
-                        status=item.status.value,
+                        status=self._status(item, now),
                         estimate=f"{est.p50:.1f} h (could take {est.p80:.1f} h)" if est else None,
                         links=[
                             (link.source.family.capitalize(), link.url)
@@ -320,7 +331,7 @@ class Builder:
                     ],
                     links=links,
                     items=[
-                        _line(i)
+                        _line(i, self._status(i, now))
                         for i in items
                         if i.kind is not ItemKind.EVENT and (i.due_at is None or i.due_at >= now)
                     ],
@@ -410,7 +421,7 @@ class Builder:
             label = b.label or (f"{item.course_code}: {item.title}" if item else "Work session")
             sessions.append((b.start, b.end, label, item_note_path(item) if item else None))
         due = [
-            _line(i)
+            _line(i, self._status(i, now))
             for i in items
             if i.due_at is not None and start <= i.due_at < end and i.kind is not ItemKind.EVENT
         ]
@@ -421,7 +432,7 @@ class Builder:
         monday = day - timedelta(days=day.weekday())
         start, end = local_datetime(monday, 0), local_datetime(monday + timedelta(days=7), 0)
         due = [
-            _line(i)
+            _line(i, self._status(i, now))
             for i in items
             if i.due_at is not None and start <= i.due_at < end and i.kind is not ItemKind.EVENT
         ]

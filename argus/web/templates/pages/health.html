@@ -83,7 +83,7 @@
     </table>
   </div>
   {% else %}
-  <div class="panel">{{ empty_state("bell", "No reminders yet", "Deadline reminders go out 24 hours and 3 hours before anything you haven't submitted.") }}</div>
+  <div class="panel">{{ empty_state("bell", "No reminders yet", ("Deadline reminders go out 24 hours and 3 hours before anything you haven't submitted." if caps.has("submission_tracking") else "Deadline reminders go out 24 hours and 3 hours before anything you haven't marked done.")) }}</div>
   {% endif %}
 </section>
 {% endif %}

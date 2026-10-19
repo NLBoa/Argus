@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from argus.ai.budget import budget_hit_this_month, month_key
+from argus.announcements import post_visible
 from argus.capabilities import Capabilities
 from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
@@ -160,6 +161,8 @@ class ReminderEngine:
         for f in repo.list_findings(self.conn, ("applied", "conflict", "pending")):
             if f.kind not in ANNOUNCED_KINDS or now - f.created_at > ANNOUNCED_FOR:
                 continue
+            if not post_visible(self.conn, self.caps, f.post_id):
+                continue  # its source is no longer set up (D055)
             item = items.get(f.item_id) if f.item_id is not None else None
             if f.status == "pending" and f.kind != "cancellation":
                 continue  # held for review (student posts): the Announcements page shows them
