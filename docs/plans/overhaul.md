@@ -9,18 +9,21 @@
 | 2: Work windows, queue, risk, window message, exam study time | Done; deployed to the Pi |
 | Settings page for work windows (planned for P3) | Done early, shipped with P2; lead time and theme added in P3 |
 | 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Done; started P4 on the user's go-ahead 2026-10-20 |
-| 4: Visual system pass, workload chart | Done (`make check` green with visual back in it, darwin baselines re-recorded, reviewed); **waiting for the Pi run** |
-| 5: Logo | Not started |
+| 4: Visual system pass, workload chart | Done; P5 started on the user's go-ahead 2026-10-20 |
+| 5: Logo | Done (`make check` green, darwin and linux baselines re-recorded); **waiting for the Pi run** |
 
-**Phase 4 (done 2026-10-20).** Display face Bricolage Grotesque (the user's pick, D066); color roles, markers, and
-the cumulative workload chart (D065); text nav with "More", four phone tabs, and the status line (D067). No
-migration. `make check` runs `test-visual` again; linux baselines are still due once, at the end of the overhaul.
+**Phase 5 (done 2026-10-20).** The user picked direction C, the wordmark (D068): "argus" in Bricolage with the g's
+ear as the bronze needle; the square mark is "a" plus the needle. `components/brand.html` holds it;
+`scripts/make_icons.py` renders the favicon and the maskable PNGs with Playwright (`--check` in a unit test). The
+header shows the wordmark alone; `theme-color` matches the header surface. No migration. This is the last phase of
+the overhaul.
 
-**Before Phase 5 starts:**
-1. The user deploys P4: `git push origin overhaul`, then on the Pi (Pi Connect)
-   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. No migration; the update rebuilds the CSS.
-2. Hand checks: the phone's first screen shows the hero task; the "More" menu and tab bar on the phone; /workload
-   with real windows; the kiosk at room distance (the 96 px clock in Bricolage).
+**After Phase 5:**
+1. The user deploys P5: `git push origin overhaul`, then on the Pi (Pi Connect)
+   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. No migration.
+2. Hand checks: the favicon at 16 px in both themes; on the phone, remove and re-add the home-screen app to pick up
+   the new icon (iOS caches it); the header wordmark on the phone.
+3. Then merge `overhaul` into `main`.
 
 ## Context
 

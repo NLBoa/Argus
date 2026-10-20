@@ -9,7 +9,7 @@ the display face. Everything around it stays quiet.
 
 **Color roles (D065).**
 - Teal (`--brand`) means four things only: now and next, the primary action, the active nav, focus.
-- Bronze (`--needle`) is the "now" needle and nothing else.
+- Bronze (`--needle`) is the "now" needle and nothing else (the mark's needle is the same one).
 - Links are ink with an underline.
 - Course color is used once: a 3 px stripe on rows. Elsewhere the course code is muted text; the chip is for item,
   exam and course headers.
@@ -21,6 +21,10 @@ the display face. Everything around it stays quiet.
 slashed zero keeps 0 and O apart. Bricolage Grotesque, the display face, is for page titles, section titles, the hero
 task, and big numbers (the timer, stats, the kiosk clock). The scale is a perfect fourth: 12.5 / 14 / 16 / 21 / 28 /
 37 / 50, and 96 on the kiosk. Both faces are self-hosted, preloaded, and swap in over metric-matched local fallbacks.
+
+**Mark (D068).** The wordmark is "argus" in the display face, the g's ear a bronze needle; the square mark is the
+"a" plus the needle, light on the night-blue tile. The header shows the wordmark alone. Both live in
+`components/brand.html`; `uv run python scripts/make_icons.py` re-renders the favicon and app icons from it.
 
 **Structure.** Lists are rows with hairline separators, not cards. A row is the title, a muted line (course, the kind
 unless it's an assignment, "~4 h"), the due date and relative time, and a marker only when something is wrong.

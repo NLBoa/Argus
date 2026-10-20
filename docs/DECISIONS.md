@@ -567,3 +567,20 @@ gave way to a status line under the header: a dot and a note, "Gradescope 3h beh
 "1 note edit to review" (on every page but Proposals), and a compact offline line. A full banner is only for a real
 error: a source failing 3 times in a row, the vault failing 3 times in a row, a vault conflict, or a page that
 couldn't load from the database.
+
+## D068 — The mark (2026-10-20)
+**Decision.** The wordmark: "argus" in the display face (Bricolage Grotesque at weight 750, outlined with fonttools,
+so it renders without the font), with the g's ear replaced by a bronze needle, the same needle that marks "now" on
+the day strip. The square mark (favicon, PWA icons) is the "a" with the needle growing from its shoulder, drawn light
+on the night-blue tile. One-color variants draw both parts in `currentColor`. The header shows the wordmark alone.
+Picked by the user over two other directions shown at 16, 28, 64 and 192 px in both themes: **A**, an "A" whose
+crossbar is an eye with a slit pupil (the strongest app icon, but the nearest to the Eye of Providence: an eye in a
+triangle), and **B**, seven eyes on an arc, one bronze for now (a peacock's train; busy at 28 px, and it reads as a
+loading spinner). **Checked against existing marks:** no eye and no triangle, so nothing of the Eye of Providence;
+nothing of the Google Lens or Apple Watch app glyphs (a camera ring, a watch outline). The nearest familiar mark is
+Amazon's "a" with an orange arrow, which is curved and sits under the letter; Argus's needle is straight and leaves
+the shoulder. A steep needle on the lone "a" read as an accent ("á"), so the needle is flatter (about 25°) and touches
+the letter. Source: `components/brand.html` (`mark`, `wordmark`, `mark_shapes`); `scripts/make_icons.py` renders
+`argus.svg` and the 192 and 512 px maskable PNGs with Playwright from `mark_shapes` in the dark tokens, and a unit
+test runs its `--check`. `theme-color` now matches the header surface (white, and `#121b2c` dark) instead of teal,
+which D065 reserves.

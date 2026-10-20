@@ -24,7 +24,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Preview with synthetic data (no credentials) | `uv run argus serve --demo` (add `--no-canvas-token` for the setup without a token) |
 | Always-on loop (sync + reminders) / test a push | `uv run argus worker` / `uv run argus notify-test` |
 | Build CSS (minified) / watch | `make css` / `make css-watch` |
-| Regenerate token blocks (dark media query, font fallbacks) | `uv run python scripts/gen_tokens.py` (`--check` in tests) |
+| Regenerate token blocks / icons from the mark (D068) | `uv run python scripts/gen_tokens.py` / `scripts/make_icons.py` (`--check` in tests) |
 | Lint + format check / auto-fix | `make lint` / `make fmt` |
 | Types | `make types` (mypy --strict on `argus/`) |
 | Unit / integration | `make test-unit` / `make test-int` |
