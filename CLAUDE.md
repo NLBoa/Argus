@@ -24,6 +24,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Preview with synthetic data (no credentials) | `uv run argus serve --demo` (add `--no-canvas-token` for the setup without a token) |
 | Always-on loop (sync + reminders) / test a push | `uv run argus worker` / `uv run argus notify-test` |
 | Build CSS (minified) / watch | `make css` / `make css-watch` |
+| Regenerate token blocks (dark media query, font fallbacks) | `uv run python scripts/gen_tokens.py` (`--check` in tests) |
 | Lint + format check / auto-fix | `make lint` / `make fmt` |
 | Types | `make types` (mypy --strict on `argus/`) |
 | Unit / integration | `make test-unit` / `make test-int` |
@@ -45,7 +46,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
 - `argus/planner/`: work windows, load and risk (C and D), the queue and its forecast, exam study time,
-  calibration, busy time, and `lanes` (layout for the day strip and the kiosk rail). Pure and deterministic.
+  calibration, busy time, `lanes` (layout for the day strip and the kiosk rail), and `workload` (the /workload
+  curve: window time against work due, D065). Pure and deterministic.
 - `argus/reminders/`: rules (what), guards (when and whether), engine (idempotent dispatch), SMS command parser.
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: `layout` (paths, links), `regions`, `ownership` (pure table), `proposals`, `writer` (the only
@@ -61,7 +63,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
   pin, not tonight, move; the notice lead time), `argus/study.py` (materials →
   generate → verify → store), `argus/exams.py` (scope, readiness, attempts), and `argus/demo.py` (the synthetic seed).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
-  routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
+  routes per view, Jinja templates, component macros (`components/`, the header and tab bar in `nav.html`), and static
+  assets (vendored by `scripts/vendor_assets.py`, which also pins the display face with fonttools).
 - `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, and repository functions (including search).
 - `argus/cli.py`: the Typer CLI. `deploy/`: systemd units, installer, kiosk. `scripts/`: dev tooling.
 
@@ -142,9 +145,16 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 ## UI rules
 - Design tokens are CSS custom properties in `argus/web/static/src/tokens.css`, exposed to Tailwind via
   `@theme`. Use tokens, never raw hex. Spacing is a 4px scale. Light and dark themes follow the system,
-  with a manual toggle.
+  with a manual choice in Settings and the palette. Edit the light and `[data-theme="dark"]` blocks only; run
+  `scripts/gen_tokens.py` for the rest.
+- Teal is reserved for now/next, the primary action, the active nav, and focus; links are ink with an underline;
+  course color is the 3px row stripe (chips only in item, exam and course headers); status is icon + label (D065).
+- Bricolage Grotesque (the display face) is for titles, the hero task, and big numbers only; Atkinson for the rest.
+  Type follows the perfect-fourth scale in `@theme` (D066).
 - Components are Jinja macros in `argus/web/components/`. Each appears in every state on `/styleguide`.
-- Every view handles **loading, empty, error, stale** ("Gradescope last synced 3h ago") and **offline**.
+- Every view handles **loading, empty, error, stale** (a status-line note, "Gradescope 3h behind") and **offline**.
+  Full banners are only for real errors: a source or the vault failing 3 times in a row, a vault conflict, a DB error
+  (D067). Nav is Today, Upcoming, Exams, and "More"; phones get four tabs.
 - **Hidden, not empty** (D055): a feature whose source isn't set up renders nothing (no section, nav entry, or copy
   naming the source); only Health says "not set up". Gate on `caps.has(...)` / `caps.course(code)` and mark the
   element `data-requires="<feature>"` so `test_capabilities_web.py` can check it. Stored data from a source that is no

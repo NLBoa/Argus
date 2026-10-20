@@ -8,21 +8,19 @@
 | 1: Capabilities, hiding what isn't set up | Done; deployed to the Pi 2026-10-19 |
 | 2: Work windows, queue, risk, window message, exam study time | Done; deployed to the Pi |
 | Settings page for work windows (planned for P3) | Done early, shipped with P2; lead time and theme added in P3 |
-| 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Done (`make check` green, reviewed; visual snapshots paused); **waiting for the Pi run** |
-| 4: Visual system pass, workload chart | Not started |
+| 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Done; started P4 on the user's go-ahead 2026-10-20 |
+| 4: Visual system pass, workload chart | Done (`make check` green with visual back in it, darwin baselines re-recorded, reviewed); **waiting for the Pi run** |
 | 5: Logo | Not started |
 
-**Before Phase 4 starts:**
-1. The user deploys P3: `git push origin overhaul`, then on the Pi (Pi Connect)
-   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. Migrations 0010 (drops `plan_blocks_legacy`, only once the
-   P2 conversion has run; otherwise it waits and logs "migration held back") and 0011 (`settings`) apply on start.
-2. A real evening with the queue: reorder, pin, "Not tonight", time left, and the confirm line the next morning.
-3. The user runs `make evals` (sms.v2 adds SKIP, FIRST, LEFT; needs `ARGUS_ANTHROPIC_API_KEY`).
-4. Decided 2026-10-20: keep the demand cap (D059) as is.
+**Phase 4 (done 2026-10-20).** Display face Bricolage Grotesque (the user's pick, D066); color roles, markers, and
+the cumulative workload chart (D065); text nav with "More", four phone tabs, and the status line (D067). No
+migration. `make check` runs `test-visual` again; linux baselines are still due once, at the end of the overhaul.
 
-**Phase 3 kickoff (done 2026-10-20).** The lighter testing workflow is in CLAUDE.md "Definition of done" and the
-Workflow section below; `make check` skips `test-visual` until the end of P4 (Makefile comment). At the end of P4:
-add `test-visual` back to `check` and re-record the darwin baselines once (`make visual-update`).
+**Before Phase 5 starts:**
+1. The user deploys P4: `git push origin overhaul`, then on the Pi (Pi Connect)
+   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. No migration; the update rebuilds the CSS.
+2. Hand checks: the phone's first screen shows the hero task; the "More" menu and tab bar on the phone; /workload
+   with real windows; the kiosk at room distance (the 96 px clock in Bricolage).
 
 ## Context
 

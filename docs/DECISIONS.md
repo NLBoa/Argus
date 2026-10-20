@@ -248,6 +248,7 @@ reminders, so reminders never wait on git. Each git call has a 120-second timeou
 cycle: pull first, so the exact-base check sees the student's latest version, then apply, write, commit, and push.
 
 ## D040 — Where proposals and exam prep show up (2026-10-19)
+*Superseded by D067.*
 A banner on Today (not on every page) says when proposals are waiting, and Health shows the vault's sync status and
 proposal count. Exam prep is in the desktop nav (`g e`). On mobile it is reached from exam items, the course page,
 and the palette, so the tab bar keeps its five tabs.
@@ -520,3 +521,49 @@ top of the queue, with focus on Undo. While a timer runs on a card further down,
 its row, so every move swaps with a visible neighbor. An AI reading of `LEFT`, like `SKIP`, asks first.
 SMS adds `SKIP n`, `FIRST n`, and `LEFT n h`; each needs a number.
 The window message's lead time is set in Settings (a `settings` row, 0011); config.yaml's value is only the default.
+
+## D065 — Color roles, markers, and the workload chart (2026-10-20)
+**Decision.** Teal (`--brand`) is reserved for four jobs: now and next (the hero's "Next up", the running timer), the
+primary action, the active nav, and focus. Bronze (`--needle`) is only the "now" needle. Links are ink with an
+underline. Course color appears once, as a 3 px stripe on rows (and the hero); the code is muted text, and the chip is
+kept for item, exam and course headers. Rows show the title, then a muted line (course, the kind unless it is an
+assignment, "~4 h" from the remaining calibrated p80), the due date and relative time, and a marker only for
+creeping, at risk, overdue or "Did you submit?". Sources moved to the item page. Row controls follow D064: hover or
+focus on a mouse, a "..." menu on touch. Markers are always an icon plus a label, and the fill gets heavier with
+severity: creeping has none, at risk a soft fill, overdue a solid one, "Did you submit?" a neutral outline. The
+three status hues were re-picked with the dataviz skill's `validate_palette.js` (light `#756b0a` / `#8a2f00` /
+`#b21a77`; dark `#e8d65a` / `#f78f3c` / `#f871c8`): neighbours are at least 15 OKLab ΔE apart under normal vision
+and 8 under protan and deutan simulation, and every text pair meets AA. `test_tokens_contrast.py` carries a Python
+port of those two checks. The dark set is lighter than the validator's band for chart marks, because these colors
+are text on a dark surface and need 4.5:1. Dark tokens are written once (`[data-theme="dark"]`);
+`scripts/gen_tokens.py` writes the media-query copy and the font fallbacks, and a unit test fails if they are stale.
+/workload replaces the per-day bars ("planned of free") with two cumulative step lines on one hours axis over 14
+days: window time (neutral) and work due (teal; queue work by when it must be done, plus each exam's remaining study
+time by the exam, `planner/workload.py`). Where work due outruns window time the gap is shaded and the worst day is
+labelled ("7 h short"); forced colors get a dashed line and a hatch. A sentence leads ("Next 7 days: 14 h work due,
+16 h window time."); the plot stretches to fit and its text is HTML, so labels never shrink on a phone. A per-day
+readout follows the pointer, or the arrow keys once the plot has focus, and a table has every value.
+
+## D066 — The display face (2026-10-20)
+**Decision.** Bricolage Grotesque (OFL), chosen over Fraunces and Space Grotesk after a side-by-side on real content
+(the hero, a page title, the timer, the kiosk clock): its figures are even and lining, which matters for "42:25" and
+the kiosk clock; Fraunces set "4" old-style and reads as a generated look; Space Grotesk's hooked "1" made "11:08"
+odd. It is vendored from fontsource (pinned by sha512) with fonttools: opsz 48 and wdth 100 pinned, weight cut to
+500–800, latin only, 39 KB. It is used for page titles, section titles, the hero task, and big numbers (timer, stats,
+kiosk clock and headings), and nowhere else; Atkinson Hyperlegible Next stays for body and data. The hero task is the
+one bold thing (37 px on desktop), so Today's date title stays a step smaller. The scale is a perfect fourth: 12.5 /
+14 / 16 / 21 / 28 / 37 / 50, and 96 on the kiosk. Both faces are preloaded (73 KB, under the 90 KB budget) with
+`font-display: swap` and a local Arial or Liberation Sans fallback whose size-adjust and ascent/descent overrides
+match the web font's metrics, so the swap moves nothing.
+
+## D067 — Navigation and the status line (supersedes D040) (2026-10-20)
+**Decision.** The header nav is text only: Today, Upcoming, Exams, and "More" (Workload, Announcements when a staff
+post source is set up, Health, Settings, Proposals with a count). "More" is a `<details>` menu: Enter or a click
+opens it, Esc closes it and returns focus, a click outside or a navigation closes it. Search and Ctrl K stay; the
+theme toggle left the header (Settings and the palette set the theme). Phones get four tabs: Today, Upcoming, Exams,
+More (a menu that opens upward). The viewport is `viewport-fit=cover`; the body's bottom padding is the tab bar plus
+the safe area plus 1rem, and an e2e test checks that the last control on a page is never under the tab bar. Banners
+gave way to a status line under the header: a dot and a note, "Gradescope 3h behind", "Piazza hasn't synced yet",
+"1 note edit to review" (on every page but Proposals), and a compact offline line. A full banner is only for a real
+error: a source failing 3 times in a row, the vault failing 3 times in a row, a vault conflict, or a page that
+couldn't load from the database.
