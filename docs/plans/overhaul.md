@@ -22,6 +22,18 @@
 4. Open decision: the demand cap (D059) can ease an item's level without new logs when earlier, unfinishable
    work stops counting. Keep it, or use a stricter rule where levels only ease after logged time?
 
+**Phase 3 kickoff: do this first, before any Phase 3 code (user's decision, 2026-10-19).**
+The testing workflow gets lighter. Commit it as its own `chore:` commit:
+1. In CLAUDE.md "Definition of done", replace item 2 with: "During a phase, run the tests the change touches
+   (`make test-unit`, `make test-int`, targeted e2e). `make check` is green at the end of each phase." Replace
+   item 3 with: "Any new page is in `tests/e2e/pages.py`. Visual baselines are darwin only, recorded once a
+   phase's UI settles; linux baselines are recorded once, at the end of the overhaul."
+2. Pause visual snapshots during P3 and P4: `make check` skips `test-visual` until P4 ends (a Makefile change,
+   with a comment saying why and when it comes back). Resume them at the end of P4 with one darwin re-record.
+3. One independent review per phase, at its end, not per step.
+4. Keep unchanged: tests first for domain logic, the deadline golden, unit, integration, axe a11y, and coverage floors.
+5. Update the "Workflow" section below to match.
+
 ## Context
 
 Argus works, but it plans like a calendar robot and looks generated.
