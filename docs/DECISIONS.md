@@ -428,8 +428,9 @@ and commitments inside a window are not work time; quiet hours do not cut window
 window across a DST change is 3 or 5 hours long. Each occurrence has a stable id, its local start date and time
 (`2026-10-19T19:00`), so keys survive class and commitment changes. Config seeds the `work_windows` table on the first
 run only, and only when it lists at least one window (so adding windows to config later still seeds); after that
-Settings owns them (Phase 3). Until then, `argus windows --reset` (on the Pi: `sudo argus-admin windows --reset`)
-copies config.yaml's windows again. `/etc/argus/config.yaml` is root-owned and the units run with `ProtectSystem=strict`, so the app
+Settings owns them: the Settings page edits them (days with an "Every day" option, start, end; checked per row, at most
+3 a day; saving replaces them and replans at once). `argus windows --reset` (on the Pi: `sudo argus-admin windows
+--reset`) copies config.yaml's windows again. `/etc/argus/config.yaml` is root-owned and the units run with `ProtectSystem=strict`, so the app
 could not write it anyway. Without any windows, risk falls back to the time-only rule and no window messages are sent.
 `schedule.max_session_minutes` is retired but still accepted, so existing configs load.
 

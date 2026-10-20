@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from argus.capabilities import Capabilities, Feature
@@ -15,6 +15,7 @@ from argus.estimates import effective_estimates, estimate_sources
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
 from argus.planner.risk import RiskLevel
+from argus.planner.windows import hours_between, overlapping_windows, window_spans
 from argus.planning import Planning, busy_windows, compute, explanation, risk_views, workload
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
@@ -22,6 +23,7 @@ from argus.store import repo
 from argus.vault.service import health as vault_health
 from argus.vault.service import item_note_path
 from argus.web.format import clock_time, day_label, due_text, hours, long_date, relative
+from argus.web.settings_form import WindowRow, describe, rows_from_windows
 from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
     UNCONFIRMED_ASK_FOR,
@@ -112,6 +114,7 @@ class TodayGroup(DayGroup):
 
 @dataclass(frozen=True)
 class TodayData:
+    windows_on: bool
     date_text: str
     summary: str
     timeline: TimelineView
@@ -197,6 +200,7 @@ def load_today(
     windows = [(sp.start, sp.end) for sp in busy_windows(plan, start, tomorrow)]
     by_id = {v.id: v for v in views}
     return TodayData(
+        windows_on=plan.windows_on,
         date_text=long_date(today),
         summary=", ".join(parts),
         timeline=timeline(
@@ -271,7 +275,7 @@ def rule_note(rule: Rule, caps: Capabilities, *, windows_on: bool) -> str | None
     if rule is Rule.ANNOUNCED and not (caps.has(Feature.STAFF_POSTS) and caps.has(Feature.AI)):
         return "needs staff posts (ELMS API or Piazza) and AI"
     if rule is Rule.WINDOW_PLAN and not windows_on:
-        return "needs work windows: add them to config.yaml, then run argus windows --reset"
+        return "needs work windows: set them in Settings"
     return None
 
 
@@ -854,6 +858,7 @@ def load_item(
 
 @dataclass(frozen=True)
 class WorkloadData:
+    windows: list[str]  # "Every day, 7 pm to 11 pm"
     days: list[WorkloadDay]
     explanation: str | None
     at_risk: list[ItemView]
@@ -883,6 +888,10 @@ def load_workload(
     ]
     risky.sort(key=lambda v: (-v.risk.severity, v.due_at or now))
     return WorkloadData(
+        windows=[
+            describe(w)
+            for w in sorted(repo.work_windows(conn), key=lambda w: (min(w.days), w.start))
+        ],
         days=days,
         explanation=explanation(conn),
         at_risk=risky,
@@ -1013,3 +1022,46 @@ def ai_spend(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> str:
     from argus.ai.budget import spent_this_month
 
     return f"${spent_this_month(conn, now):.2f} of ${config.ai.monthly_budget_usd:.2f}"
+
+
+# ---------------------------------------------------------------- settings
+
+
+@dataclass(frozen=True)
+class SettingsData:
+    rows: list[WindowRow]  # one per window (plus blank rows the student added)
+    summaries: list[str]  # "Every day, 7 pm to 11 pm"
+    week_hours: float | None  # window time in the next 7 days, after classes and commitments
+    lead_minutes: int
+    error: str | None = None
+    overlaps: list[str] = field(default_factory=list)
+
+
+def load_settings(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    now: datetime,
+    *,
+    rows: list[WindowRow] | None = None,
+    error: str | None = None,
+) -> SettingsData:
+    """The work-window settings: the saved windows, or the rows as the student is editing them."""
+    saved = repo.work_windows(conn)
+    shown = rows if rows is not None else rows_from_windows(saved)
+    s = config.schedule
+    spans = window_spans(
+        now,
+        now + timedelta(days=7),
+        saved,
+        meetings=repo.list_meetings(conn),
+        commitments=s.commitments,
+        buffer_minutes=s.walking_buffer_minutes,
+    )
+    return SettingsData(
+        rows=shown or [WindowRow()],
+        summaries=[describe(w) for w in sorted(saved, key=lambda w: (min(w.days), w.start))],
+        week_hours=hours_between(spans, now, now + timedelta(days=7)) if saved else None,
+        lead_minutes=config.notifications.window_notice_minutes,
+        error=error,
+        overlaps=overlapping_windows(saved),
+    )

@@ -1924,6 +1924,12 @@ def seed_work_windows(
     return True
 
 
+def mark_windows_set(conn: sqlite3.Connection, now: datetime) -> None:
+    """The student set their windows in Settings: config.yaml never seeds them again (D057)."""
+    _plan_state_row(conn, now)
+    conn.execute("UPDATE plan_state SET windows_seeded_at = ? WHERE id = 1", (iso(now),))
+
+
 def queue_prefs(conn: sqlite3.Connection) -> dict[str, Pref]:
     return {
         r["entry"]: Pref(

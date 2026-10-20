@@ -239,8 +239,8 @@ With Pi Connect, `deploy/update-on-pi.sh` does steps 1, 2, and 4 for you.
    before deploying (an invalid `config.yaml` stops the services).
 3. Read the phase's own notes in `docs/plans/overhaul.md` (for example, Phase 2 needs
    `schedule.work_windows` in `/etc/argus/config.yaml` before deploying). Config's work windows seed the first run
-   only; to change them later, edit config.yaml and run `sudo argus-admin windows --reset`
-   (`sudo argus-admin windows` lists them).
+   only; to change them later, use Settings in the app (or edit config.yaml and run
+   `sudo argus-admin windows --reset`; `sudo argus-admin windows` lists them).
 4. From the laptop: `make deploy PI_HOST=argus-pi`. The services migrate on start.
 5. `make logs PI_HOST=argus-pi` for a few minutes, then the phase's hand checks.
 

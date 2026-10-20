@@ -56,7 +56,7 @@ def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     if windows:
         typer.echo(
             f"work windows: {len(windows)} in config.yaml (they seed the first run only; "
-            "after that `argus windows --reset` copies them again)"
+            "after that change them in Settings, or `argus windows --reset` copies these again)"
         )
     else:
         typer.echo("work windows: none in config.yaml (risk uses the time-only rule until set)")

@@ -42,6 +42,7 @@
           <span class="kbd" aria-hidden="true">/</span>
         </form>
         <a class="btn btn-quiet btn-icon header-search-link" href="/search" aria-label="Search">{{ icon("search") }}</a>
+        <a class="btn btn-quiet btn-icon" href="/settings" aria-label="Settings: when you study" title="Settings: when you study"{% if active == "/settings" %} aria-current="page"{% endif %}>{{ icon("calendar-clock") }}</a>
         <button class="btn btn-quiet btn-icon" type="button" @click="$store.palette.show()" aria-label="Open command palette" title="Command palette (Ctrl K)">{{ icon("command") }}</button>
         <button class="btn btn-quiet btn-icon theme-toggle" type="button" x-data @click="$store.theme.cycle()" :aria-label="$store.theme.label" aria-label="Theme: match system" title="Change theme">
           <span x-show="$store.theme.mode === 'light'" x-cloak>{{ icon("sun") }}</span>

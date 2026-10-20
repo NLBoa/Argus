@@ -7,7 +7,7 @@ import sqlite3
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from argus import announcements, estimates, exams
 from argus.domain.models import Item
@@ -376,3 +376,61 @@ def reject_proposal(request: Request, state: State, conn: Conn, proposal_id: int
     if not is_htmx(request):
         return back(request, "/proposals")
     return toast(_proposal_fragment(request, state, conn, proposal_id, message), message)
+
+
+# ---------------------------------------------------------------- settings
+
+MAX_ROWS = 10
+
+
+@router.get("/settings/windows", include_in_schema=False)
+def windows_form_url() -> RedirectResponse:
+    """Without JS, "Add" and "Remove" leave the browser on the POST URL; a reload lands here."""
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/windows")
+async def save_windows(request: Request, state: State, conn: Conn) -> Response:
+    """Edit the work windows (D057). "Add another time" and "Remove" change the form only;
+    "Save" checks every row and replaces the windows, which Settings then owns."""
+    from argus.web.routes.pages import settings_page
+    from argus.web.settings_form import WindowRow, check, read_rows
+
+    form = await request.form()
+    fields = {k: [str(v) for v in form.getlist(k)] for k in form}
+    try:
+        count = min(MAX_ROWS, max(0, int(str(form.get("count", "0")))))
+    except ValueError:
+        count = 0
+    rows = read_rows(fields, count)
+    action = str(form.get("action", "save"))
+    if action == "add":
+        return settings_page(
+            request, state, conn, rows=[*rows, WindowRow()][:MAX_ROWS], unsaved=True
+        )
+    if action.startswith("remove-") and action[7:].isdigit():
+        i = int(action[7:])
+        kept = [r for n, r in enumerate(rows) if n != i]
+        return settings_page(request, state, conn, rows=kept, unsaved=True)
+    result = check(rows)
+    if not result.ok:
+        return settings_page(
+            request,
+            state,
+            conn,
+            rows=result.rows or rows,
+            error=result.error,
+            unsaved=True,
+            status_code=200 if is_htmx(request) else 422,
+        )
+    now = state.clock.now()
+    with transaction(conn):
+        repo.set_work_windows(conn, result.windows, now)
+        repo.mark_windows_set(conn, now)
+    replan(
+        conn, state.config, state.clock, tracking_sources=state.caps.tracking_sources, force=True
+    )
+    if not is_htmx(request):
+        return RedirectResponse("/settings", status_code=303)  # never back to the POST URL
+    message = "Saved your work windows" if result.windows else "Removed your work windows"
+    return toast(settings_page(request, state, conn), message)

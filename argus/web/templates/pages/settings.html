@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, error_banner %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Settings</h1>
+  <p class="page-sub">When you study, so Argus can plan your work into it</p>
+</div>
+{% if error %}
+  {{ error_banner(error, "/settings") }}
+{% else %}
+<section aria-labelledby="windows-heading" class="max-w-3xl">
+  <h2 class="section-title" id="windows-heading">When you study</h2>
+  <form id="windows-form" class="grid gap-4" method="post" action="/settings/windows"
+        hx-post="/settings/windows" hx-target="#windows-form" hx-select="#windows-form" hx-swap="outerHTML">
+    {#- Enter in a time field saves (the first submit button in the form is the default). -#}
+    <button type="submit" name="action" value="save" class="visually-hidden" tabindex="-1" aria-hidden="true">Save</button>
+    <input type="hidden" name="count" value="{{ data.rows|length }}">
+
+    <div class="panel panel-pad" role="status">
+      {% if data.summaries %}
+        <p>Argus plans your work into these times, and texts you {{ data.lead_minutes }} minutes before each one:</p>
+        <ul class="mt-2 m-0 pl-5 grid gap-1">{% for s in data.summaries %}<li>{{ s }}</li>{% endfor %}</ul>
+        {% if data.week_hours is not none %}<p class="mt-2 text-sm text-muted">That's <strong class="tnum">{{ data.week_hours|hours }}</strong> in the next 7 days, after classes and commitments.</p>{% endif %}
+        {% for o in data.overlaps %}<p class="mt-1 text-sm text-muted">{{ o }}: counted once.</p>{% endfor %}
+      {% else %}
+        <p><strong>Tell Argus when you usually study.</strong> It plans your work into these hours, warns you when something won't fit before it's due, and texts you {{ data.lead_minutes }} minutes before each one.</p>
+      {% endif %}
+    </div>
+
+    {% for row in data.rows %}{% set i = loop.index0 %}
+    <fieldset class="panel panel-pad window-row" x-data="{ every: {{ 'true' if row.every_day else 'false' }} }"{% if row.error %} aria-describedby="window-error-{{ i }}"{% endif %}>
+      <legend class="window-row__legend">Time {{ loop.index }}</legend>
+      <label class="window-row__every">
+        <input type="checkbox" name="every_{{ i }}" value="on" x-model="every" {% if row.every_day %}checked{% endif %}>
+        <span>Every day</span>
+      </label>
+      <div class="day-chips" role="group" aria-label="Days for time {{ loop.index }}" x-show="!every">
+        {% for name in days %}
+        <label class="day-chip"><input type="checkbox" name="days_{{ i }}" value="{{ loop.index0 }}" {% if loop.index0 in row.days %}checked{% endif %}><span>{{ name }}</span></label>
+        {% endfor %}
+      </div>
+      <div class="flex flex-wrap items-end gap-3 mt-3">
+        <label class="grid gap-1"><span class="text-sm font-bold">From</span>
+          <input class="field" type="time" name="start_{{ i }}" value="{{ row.start }}" step="900">
+        </label>
+        <label class="grid gap-1"><span class="text-sm font-bold">To</span>
+          <input class="field" type="time" name="end_{{ i }}" value="{{ row.end }}" step="900">
+        </label>
+        <button class="btn btn-quiet" type="submit" name="action" value="remove-{{ i }}">{{ icon("x", "icon-sm") }}Remove<span class="visually-hidden"> time {{ loop.index }}</span></button>
+      </div>
+      {% if row.error %}<p class="field-error" id="window-error-{{ i }}">{{ icon("circle-alert", "icon-sm") }}{{ row.error }}</p>{% endif %}
+    </fieldset>
+    {% endfor %}
+
+    <p class="text-sm text-muted">An end time before the start runs past midnight (for example 10 pm to 1 am).</p>
+    {% if data.error %}<p class="field-error" role="alert">{{ icon("circle-alert", "icon-sm") }}{{ data.error }}</p>{% endif %}
+    <div class="flex flex-wrap items-center gap-3">
+      <button class="btn btn-primary" type="submit" name="action" value="save">Save</button>
+      {% if data.rows|length < 10 %}<button class="btn" type="submit" name="action" value="add">Add another time</button>{% endif %}
+      {% if unsaved %}<span class="text-sm text-muted">Not saved yet</span>{% endif %}
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

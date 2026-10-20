@@ -9,12 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from argus.capabilities import Feature
+from argus.planner.windows import DAYS
 from argus.web.data import (
     load_announcements,
     load_course,
     load_health,
     load_item,
     load_search,
+    load_settings,
     load_today,
     load_upcoming,
     load_workload,
@@ -24,6 +26,7 @@ from argus.web.data import (
 from argus.web.deps import AppState, get_conn, get_state
 from argus.web.routes.common import LOAD_ERROR, log, render
 from argus.web.samples import icon_names, styleguide_samples
+from argus.web.settings_form import WindowRow
 from argus.web.study_data import load_exam, load_exams, load_proposals
 from argus.web.viewmodels import ACCENTS, course_views
 
@@ -372,4 +375,45 @@ def proposals_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
         {"proposals": proposals, "error": None},
         active="/proposals",
         title="Proposals",
+    )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    return settings_page(request, state, conn)
+
+
+def settings_page(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    rows: list[WindowRow] | None = None,
+    error: str | None = None,
+    unsaved: bool = False,
+    status_code: int = 200,
+) -> HTMLResponse:
+    try:
+        data = load_settings(conn, state.config, state.clock.now(), rows=rows, error=error)
+    except sqlite3.Error:
+        log.exception("settings failed")
+        return render(
+            request,
+            state,
+            None,
+            "pages/settings.html",
+            {"error": LOAD_ERROR},
+            active="/settings",
+            title="Settings",
+            status_code=503,
+        )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/settings.html",
+        {"data": data, "error": None, "unsaved": unsaved, "days": DAYS},
+        active="/settings",
+        title="Settings",
+        status_code=status_code,
     )

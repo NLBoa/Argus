@@ -28,6 +28,7 @@
     { id: "go-health", label: "Go to Health", hint: "g h", href: "/health" },
     { id: "go-exams", label: "Go to Exam prep", hint: "g e", href: "/exams" },
     { id: "go-proposals", label: "Review vault proposals", hint: "g p", href: "/proposals" },
+    { id: "go-settings", label: "Go to Settings (when you study)", hint: "", href: "/settings" },
     { id: "go-search", label: "Search", hint: "/", href: "/search" },
     { id: "go-styleguide", label: "Open the styleguide", hint: "", href: "/styleguide" },
     { id: "go-kiosk", label: "Open kiosk view", hint: "", href: "/kiosk" },

@@ -10,6 +10,7 @@
   <h1 class="page-title">{{ data.date_text }}</h1>
   <p class="page-sub">{{ data.summary }}</p>
 </div>
+{% if not data.windows_on %}<p class="panel panel-pad mb-6">{{ icon("calendar-clock", "icon-sm") }} <strong>Tell Argus when you study.</strong> It plans your work into those hours and texts you before each one. <a class="underline underline-offset-2" href="/settings">Set your work windows</a></p>{% endif %}
 {% if data.timer %}
 <section class="timer-bar mb-6" aria-label="Running timer" x-data="timer({{ data.timer.elapsed_seconds|int }})">
   {{ icon("timer", "icon-lg") }}
