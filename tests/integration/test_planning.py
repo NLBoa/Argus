@@ -410,3 +410,21 @@ def test_a_planning_failure_never_blocks_deadline_alerts(
     snap = engine.snapshot(clock.now())
     assert snap.window is None and snap.at_risk == frozenset()
     assert any(r.rule is Rule.DUE_3H for r in candidates(snap))
+
+
+def test_a_failing_morning_brief_waits_instead_of_breaking_the_tick(
+    demo: sqlite3.Connection, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from argus.notify.router import Router
+    from argus.reminders import engine as engine_module
+    from argus.reminders.engine import ReminderEngine
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("brief bug")
+
+    monkeypatch.setattr(engine_module, "today_text", broken)
+    clock.set(local_datetime(to_local(clock.now()).date(), 9))  # after the 8 am brief time
+    engine = ReminderEngine(
+        demo, DEMO_CONFIG, clock, Router([]), caps=derive(DEMO_CONFIG, demo_secrets())
+    )
+    assert engine.snapshot(clock.now()).brief is None
