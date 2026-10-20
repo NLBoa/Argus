@@ -520,3 +520,15 @@ def test_not_tonight_needs_a_window_within_a_day(
     p = compute(demo, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING)
     with pytest.raises(LookupError, match="No work window"), transaction(demo):
         skip_tonight(demo, p, p.queue[0].entry_id, clock.now())
+
+
+def test_the_lead_time_set_in_settings_decides_when_the_split_is_made(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    clock.set(local_datetime(to_local(clock.now()).date(), 18, 20))  # 40 min before Mon 7 pm
+    replan(demo, DEMO_CONFIG, clock, tracking_sources=TRACKING)
+    assert repo.window_plan(demo, f"{to_local(clock.now()).date()}T19:00") is None  # default 20
+    with transaction(demo):
+        repo.set_setting(demo, "window_notice_minutes", "45", clock.now())
+    replan(demo, DEMO_CONFIG, clock, tracking_sources=TRACKING)
+    assert repo.window_plan(demo, f"{to_local(clock.now()).date()}T19:00") is not None

@@ -25,7 +25,7 @@ from argus.notify.router import Router
 from argus.planner.freetime import meetings_on
 from argus.planner.review import review_order
 from argus.planner.risk import RiskLevel
-from argus.planning import Planning, compute
+from argus.planning import Planning, compute, notice_minutes
 from argus.reminders.guards import GuardContext, Verdict, check
 from argus.reminders.rules import (
     Announced,
@@ -124,7 +124,7 @@ class ReminderEngine:
             },
             in_window=in_window,
             window=notice,
-            notice_lead=timedelta(minutes=self.config.notifications.window_notice_minutes),
+            notice_lead=timedelta(minutes=notice_minutes(self.conn, self.config)),
             ai_budget_month=month_key(now) if budget_hit_this_month(self.conn, now) else None,
             now=now,
             items=items,

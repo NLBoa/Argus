@@ -434,3 +434,50 @@ async def save_windows(request: Request, state: State, conn: Conn) -> Response:
         return RedirectResponse("/settings", status_code=303)  # never back to the POST URL
     message = "Saved your work windows" if result.windows else "Removed your work windows"
     return toast(settings_page(request, state, conn), message)
+
+
+@router.post("/settings/notice")
+def save_notice(
+    request: Request, state: State, conn: Conn, minutes: Annotated[str, Form()] = ""
+) -> Response:
+    """How long before each work window its text comes (Settings owns it once set)."""
+    from argus.planning import NOTICE_CHOICES
+    from argus.web.routes.pages import settings_page
+
+    if not minutes.isdigit() or int(minutes) not in NOTICE_CHOICES:
+        return settings_page(
+            request,
+            state,
+            conn,
+            notice_error="Choose one of the times listed.",
+            status_code=200 if is_htmx(request) else 422,
+        )
+    with transaction(conn):
+        repo.set_setting(conn, "window_notice_minutes", minutes, state.clock.now())
+    replan(
+        conn, state.config, state.clock, tracking_sources=state.caps.tracking_sources, force=True
+    )
+    if not is_htmx(request):
+        return RedirectResponse("/settings", status_code=303)
+    n = int(minutes)
+    message = (
+        "Texts now come as each window starts"
+        if n == 0
+        else f"Texts now come {n} minutes before each window"
+    )
+    return toast(settings_page(request, state, conn), message)
+
+
+@router.post("/settings/theme")
+def save_theme(
+    request: Request, state: State, conn: Conn, theme: Annotated[str, Form()] = ""
+) -> Response:
+    """The theme for this browser, kept in a cookie (the palette and header toggle set the same one)."""
+    from argus.web.deps import THEME_COOKIE
+    from argus.web.routes.pages import settings_page
+
+    if theme not in ("system", "light", "dark"):
+        return settings_page(request, state, conn, status_code=422)
+    response = RedirectResponse("/settings", status_code=303)
+    response.set_cookie(THEME_COOKIE, theme, max_age=31_536_000, path="/", samesite="lax")
+    return response

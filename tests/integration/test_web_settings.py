@@ -141,3 +141,45 @@ def test_without_js_save_always_lands_on_settings(client: TestClient) -> None:
     assert r.status_code == 303 and r.headers["location"] == "/settings"
     reload = client.get("/settings/windows", follow_redirects=False)
     assert reload.status_code == 303 and reload.headers["location"] == "/settings"
+
+
+# ---------------------------------------------------------------- notice lead time and theme (P3)
+
+
+def test_notice_lead_time_is_set_here_with_and_without_js(client: TestClient) -> None:
+    from argus.planning import notice_minutes
+
+    r = client.post(
+        "/settings/notice", data={"minutes": "30"}, headers=ORIGIN, follow_redirects=False
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/settings"
+    assert "texts you 30 minutes before each one" in client.get("/settings").text
+    r = client.post("/settings/notice", data={"minutes": "10"}, headers=HX)
+    assert r.status_code == 200
+    assert "10 minutes" in json.loads(r.headers["hx-trigger"])["toast"]["message"]
+    conn = open_db(client.app.state.argus.db_path, client.app.state.argus.clock)  # type: ignore[attr-defined]
+    try:
+        assert notice_minutes(conn, DEMO_CONFIG) == 10
+    finally:
+        conn.close()
+    bad = client.post(
+        "/settings/notice", data={"minutes": "500"}, headers=ORIGIN, follow_redirects=False
+    )
+    assert bad.status_code == 422
+    assert (
+        client.post(
+            "/settings/notice", data={"minutes": "30"}, headers={"origin": "https://evil.example"}
+        ).status_code
+        == 403
+    )
+
+
+def test_theme_is_set_here_and_kept_in_a_cookie(client: TestClient) -> None:
+    html = client.get("/settings").text
+    assert 'name="theme" value="system" checked' in html
+    r = client.post(
+        "/settings/theme", data={"theme": "dark"}, headers=ORIGIN, follow_redirects=False
+    )
+    assert r.status_code == 303 and "argus_theme=dark" in r.headers["set-cookie"]
+    assert '<html lang="en" data-theme="dark">' in client.get("/settings").text
+    assert client.post("/settings/theme", data={"theme": "neon"}, headers=ORIGIN).status_code == 422

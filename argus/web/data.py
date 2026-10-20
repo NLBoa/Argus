@@ -16,7 +16,15 @@ from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
 from argus.planner.risk import RiskLevel
 from argus.planner.windows import hours_between, overlapping_windows, window_spans
-from argus.planning import Planning, busy_windows, compute, explanation, risk_views, workload
+from argus.planning import (
+    Planning,
+    busy_windows,
+    compute,
+    explanation,
+    notice_minutes,
+    risk_views,
+    workload,
+)
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
 from argus.store import repo
@@ -1061,7 +1069,7 @@ def load_settings(
         rows=shown or [WindowRow()],
         summaries=[describe(w) for w in sorted(saved, key=lambda w: (min(w.days), w.start))],
         week_hours=hours_between(spans, now, now + timedelta(days=7)) if saved else None,
-        lead_minutes=config.notifications.window_notice_minutes,
+        lead_minutes=notice_minutes(conn, config),
         error=error,
         overlaps=overlapping_windows(saved),
     )

@@ -86,6 +86,17 @@ def _overlap(start: datetime, end: datetime, a: datetime, b: datetime) -> float:
     return max(0.0, (hi - lo).total_seconds() / 3600)
 
 
+NOTICE_CHOICES = (0, 10, 15, 20, 30, 45, 60)  # minutes; Settings offers these
+
+
+def notice_minutes(conn: sqlite3.Connection, config: AppConfig) -> int:
+    """How long before a work window its text comes: Settings, else config.yaml's default."""
+    stored = repo.get_setting(conn, "window_notice_minutes")
+    if stored is not None and stored.isdigit():
+        return int(stored)
+    return config.notifications.window_notice_minutes
+
+
 def windows_from_config(config: AppConfig) -> list[WorkWindow]:
     return from_config(config.schedule.work_windows)
 
@@ -313,7 +324,7 @@ def replan(
         repo.seed_work_windows(conn, windows_from_config(config), now)
         repo.convert_legacy_blocks(conn, now)
     p = compute(conn, config, now, tracking_sources=tracking_sources)
-    lead = timedelta(minutes=config.notifications.window_notice_minutes)
+    lead = timedelta(minutes=notice_minutes(conn, config))
     fs = facts(p)
     digest = hashlib.sha256(json.dumps(_signature(p)).encode()).hexdigest()
     with transaction(conn):

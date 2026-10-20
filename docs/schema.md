@@ -35,6 +35,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `queue_prefs` | 0009 | Per queue entry (`item:<id>`, `study:<exam id>`): `pin_rank`, `pin_kind` `pin`/`move`, `pin_until` (move pins expire), `skip_window` ("Not tonight") (D058) |
 | `remaining_marks` | 0009 | The student's "about N h left", append-only; the latest counts minus time logged since (D060) |
 | `window_plans` | 0009 | Per work window (`window_id` = local start, e.g. `2026-10-19T19:00`): its split as JSON `[[entry, hours], ...]`, stored just before it starts and frozen once it starts (D061) |
+| `settings` | 0011 | Choices made in Settings that config.yaml only defaults: `window_notice_minutes`. The theme is a per-browser cookie, not stored here |
 | `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 
 | `materials` | 0005 | Text extracted from course files and pages, per page or slide (JSON `pages` `[{ref, text}]`), with the Canvas `url` the student opens. Files themselves are never stored or copied into the vault. `UNIQUE(course_id, url)` |

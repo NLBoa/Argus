@@ -390,9 +390,12 @@ def settings_page(
     *,
     rows: list[WindowRow] | None = None,
     error: str | None = None,
+    notice_error: str | None = None,
     unsaved: bool = False,
     status_code: int = 200,
 ) -> HTMLResponse:
+    from argus.planning import NOTICE_CHOICES
+
     try:
         data = load_settings(conn, state.config, state.clock.now(), rows=rows, error=error)
     except sqlite3.Error:
@@ -412,7 +415,14 @@ def settings_page(
         state,
         conn,
         "pages/settings.html",
-        {"data": data, "error": None, "unsaved": unsaved, "days": DAYS},
+        {
+            "data": data,
+            "error": None,
+            "unsaved": unsaved,
+            "days": DAYS,
+            "notice_choices": NOTICE_CHOICES,
+            "notice_error": notice_error,
+        },
         active="/settings",
         title="Settings",
         status_code=status_code,

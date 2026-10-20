@@ -1943,6 +1943,19 @@ def queue_prefs(conn: sqlite3.Connection) -> dict[str, Pref]:
     }
 
 
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return None if row is None else str(row[0])
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str, now: datetime) -> None:
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (key, value, iso(now)),
+    )
+
+
 def save_queue_pref(conn: sqlite3.Connection, pref: Pref, now: datetime) -> None:
     """Store the student's say over one queue entry (D058); a row with nothing left is removed."""
     if pref.pin_rank is None and pref.skip_window is None:
