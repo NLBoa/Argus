@@ -75,7 +75,9 @@ evals: ## AI evals against the real API (needs ARGUS_ANTHROPIC_API_KEY; not in C
 secrets: ## gitleaks over the full git history
 	gitleaks git --redact --no-banner .
 
-check: lint types secrets cov test-e2e test-a11y test-visual ## Everything CI runs
+# Visual snapshots are paused during overhaul P3 and P4 (the UI is being redesigned; see docs/plans/overhaul.md).
+# Add test-visual back to `check` at the end of P4, after one darwin re-record.
+check: lint types secrets cov test-e2e test-a11y ## Everything CI runs
 	@echo "make check: all green"
 
 deploy: ## Rsync to the Pi and run the installer (PI_HOST=argus-pi)

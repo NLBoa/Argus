@@ -19,8 +19,7 @@
 2. A day or two of real use: the window message arrives 20 min before a window, the confirm line shows the
    next morning, and Workload shows real window hours. 0010 must not ship until the Pi's `legacy` conversion has run.
 3. The user runs `make evals` (plan_note.v2 changed; needs `ARGUS_ANTHROPIC_API_KEY`).
-4. Open decision: the demand cap (D059) can ease an item's level without new logs when earlier, unfinishable
-   work stops counting. Keep it, or use a stricter rule where levels only ease after logged time?
+4. Decided 2026-10-20: keep the demand cap (D059) as is.
 
 **Phase 3 kickoff: do this first, before any Phase 3 code (user's decision, 2026-10-19).**
 The testing workflow gets lighter. Commit it as its own `chore:` commit:
@@ -106,10 +105,13 @@ What they show:
 
 ### Workflow
 - **Branch.** One branch, `overhaul`, with one conventional commit per green step. The first commit adds this plan as `docs/plans/overhaul.md`.
+- **During a phase (from P3):** run only the tests a change touches (`make test-unit`, `make test-int`, targeted e2e).
+  Tests first for domain logic, the deadline golden, axe and coverage floors are unchanged.
 - **End of each phase:**
-  1. `make check` green, plus the deadline golden.
-  2. Darwin and linux baselines.
-  3. Independent review, fixes, then `make check` again.
+  1. `make check` green, plus the deadline golden. Visual snapshots are out of `make check` during P3 and P4;
+     they come back at the end of P4 with one darwin re-record.
+  2. Darwin baselines only, once the phase's UI settles. Linux baselines once, at the end of the overhaul.
+  3. One independent review of the whole phase, fixes, then `make check` again.
   4. A summary with before/after screenshots and the **Pi deploy checklist**.
   5. **Stop for your Pi run.**
 - **Pi deploy checklist.** It goes in `docs/runbook.md` and is repeated in each phase summary:

@@ -176,8 +176,10 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 
 ## Definition of done
 1. Tests written first for domain logic. New behavior has tests at the right layer.
-2. `make check` is green locally (lint, types, gitleaks, coverage floors, e2e, a11y, visual).
-3. Any new page is in `tests/e2e/pages.py`, and baselines are recorded for darwin and linux.
+2. During a phase, run the tests the change touches (`make test-unit`, `make test-int`, targeted e2e).
+   `make check` is green at the end of each phase.
+3. Any new page is in `tests/e2e/pages.py`. Visual baselines are darwin only, recorded once a phase's UI settles;
+   linux baselines are recorded once, at the end of the overhaul.
 4. No secrets, real personal data, or real course content in the diff.
 5. Non-obvious choices are in `docs/DECISIONS.md`, new quirks are in this file, and the schema change is in `docs/schema.md`.
 6. A conventional commit (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), made at a green state.
