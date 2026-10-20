@@ -1,5 +1,7 @@
 /* Argus design tokens. The one source of truth for color, type, space, radius, elevation, motion.
-   Contrast is enforced by tests/unit/test_tokens_contrast.py: edit values, run the test. */
+   Contrast and status separation are enforced by tests/unit/test_tokens_contrast.py: edit values, run
+   the test. Edit the light block and the [data-theme="dark"] block only; `uv run python
+   scripts/gen_tokens.py` writes the generated blocks (the dark media query, the font fallbacks). */
 
 @font-face {
   font-family: "Atkinson Hyperlegible Next";
@@ -20,9 +22,25 @@
     U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
     U+2C60-2C7F, U+A720-A7FF;
 }
+/* The display face (D066): Bricolage Grotesque, opsz 48 and wdth 100 pinned, weight 500 to 800,
+   latin only. Titles, the hero task, and big numbers; nothing else. */
+@font-face {
+  font-family: "Argus Display";
+  font-style: normal;
+  font-weight: 500 800;
+  font-display: swap;
+  src: url("/static/fonts/display-bricolage.woff2") format("woff2");
+}
+
+/* gen_tokens:fallbacks:begin (generated: metric-matched local fallbacks, so the swap shifts nothing) */
+@font-face { font-family: "Atkinson Fallback"; src: local("Arial"), local("Liberation Sans"), local("Helvetica Neue"), local("Helvetica"); size-adjust: 100.06%; ascent-override: 98.34%; descent-override: 31.58%; line-gap-override: 0.00%; }
+@font-face { font-family: "Argus Display Fallback"; src: local("Arial"), local("Liberation Sans"), local("Helvetica Neue"), local("Helvetica"); size-adjust: 107.28%; ascent-override: 86.69%; descent-override: 25.17%; line-gap-override: 0.00%; }
+/* gen_tokens:fallbacks:end */
 
 :root {
   color-scheme: light;
+  --font-body: "Atkinson Hyperlegible Next", "Atkinson Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Argus Display", "Argus Display Fallback", ui-sans-serif, system-ui, sans-serif;
   /* surfaces and ink */
   --paper: #eef2f5;
   --surface: #ffffff;
@@ -31,24 +49,25 @@
   --muted: #4d5a6b;
   --line: #d5dce4;
   --control-line: #7b8797;
-  /* brand: peacock teal; needle: bronze "now" */
+  /* teal is reserved (D065): now and next, the primary action, the active nav, focus */
   --brand: #0b636b;
   --brand-hover: #084c52;
   --brand-ink: #ffffff;
   --brand-soft: #dceff0;
-  --needle: #9a5d00;
   --focus: #0b636b;
-  /* risk */
+  /* bronze: the "now" needle */
+  --needle: #9a5d00;
+  /* status (D065): always an icon and a label; the fill gets heavier with severity */
   --ok: #1d6b45;
   --ok-bg: #e2f2e9;
-  --watch: #7d5100;
-  --watch-bg: #fbefd6;
-  --at-risk: #a53b0c;
-  --at-risk-bg: #fde6da;
-  --overdue: #9e1230;
-  --overdue-bg: #fae0e6;
+  --watch: #756b0a;
+  --watch-bg: #f5f2d9;
+  --at-risk: #8a2f00;
+  --at-risk-bg: #fbe6db;
+  --overdue: #b21a77;
+  --overdue-bg: #fae3f0;
   --overdue-ink: #ffffff;
-  /* course accents: stripe (non-text, 3:1), soft background, ink on soft */
+  /* course accents: the row stripe (non-text, 3:1); chips in item and course headers use bg and ink */
   --c-indigo: #4a50c8; --c-indigo-bg: #e8e9fb; --c-indigo-ink: #2f3496;
   --c-teal: #0f7b7b; --c-teal-bg: #dcf1f0; --c-teal-ink: #0a5757;
   --c-plum: #8a3d8f; --c-plum-bg: #f4e4f5; --c-plum-ink: #6a2b6f;
@@ -78,17 +97,17 @@
   --brand-hover: #7fd6da;
   --brand-ink: #062a2d;
   --brand-soft: #123a40;
-  --needle: #e2b153;
   --focus: #7fd6da;
+  --needle: #e2b153;
   --ok: #6fd4a0;
   --ok-bg: #12352a;
-  --watch: #f0c45c;
-  --watch-bg: #382c10;
-  --at-risk: #ff9a6b;
-  --at-risk-bg: #3d2117;
-  --overdue: #ff8597;
-  --overdue-bg: #3e1621;
-  --overdue-ink: #2a0911;
+  --watch: #e8d65a;
+  --watch-bg: #312e10;
+  --at-risk: #f78f3c;
+  --at-risk-bg: #3b2414;
+  --overdue: #f871c8;
+  --overdue-bg: #3d1734;
+  --overdue-ink: #2a0920;
   --c-indigo: #8f95f2; --c-indigo-bg: #23264d; --c-indigo-ink: #c5c8fb;
   --c-teal: #4cc3c0; --c-teal-bg: #113a3b; --c-teal-ink: #a8e6e4;
   --c-plum: #d38ad8; --c-plum-bg: #3a2140; --c-plum-ink: #efc6f1;
@@ -100,6 +119,7 @@
   --shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.4);
 }
 
+/* gen_tokens:dark-media:begin (generated from the block above) */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
@@ -114,18 +134,17 @@
     --brand-hover: #7fd6da;
     --brand-ink: #062a2d;
     --brand-soft: #123a40;
-    --needle: #e2b153;
     --focus: #7fd6da;
+    --needle: #e2b153;
     --ok: #6fd4a0;
     --ok-bg: #12352a;
-    --watch: #f0c45c;
-    --watch-bg: #382c10;
-    --at-risk: #ff9a6b;
-    --at-risk-bg: #3d2117;
-    --overdue: #ff8597;
-    --overdue-bg: #3e1621;
-    --overdue-ink: #2a0911;
-  --overdue-ink: #2a0911;
+    --watch: #e8d65a;
+    --watch-bg: #312e10;
+    --at-risk: #f78f3c;
+    --at-risk-bg: #3b2414;
+    --overdue: #f871c8;
+    --overdue-bg: #3d1734;
+    --overdue-ink: #2a0920;
     --c-indigo: #8f95f2; --c-indigo-bg: #23264d; --c-indigo-ink: #c5c8fb;
     --c-teal: #4cc3c0; --c-teal-bg: #113a3b; --c-teal-ink: #a8e6e4;
     --c-plum: #d38ad8; --c-plum-bg: #3a2140; --c-plum-ink: #efc6f1;
@@ -137,6 +156,7 @@
     --shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.4);
   }
 }
+/* gen_tokens:dark-media:end */
 
 @media (prefers-reduced-motion: reduce) {
   :root {

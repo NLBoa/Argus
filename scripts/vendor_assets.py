@@ -1,8 +1,9 @@
 """Vendor frontend assets so nothing loads from a CDN at runtime (the Pi may be offline).
 
 Downloads pinned npm tarballs, verifies each against the registry's sha512 integrity,
-extracts the needed files into argus/web/static/, builds the Lucide icon sprite, and writes
-argus/web/static/vendor/MANIFEST.json (versions + sha256 of every output).
+extracts the needed files into argus/web/static/, builds the Lucide icon sprite, pins the
+display face's axes (fonttools; D066), and writes argus/web/static/vendor/MANIFEST.json
+(versions + sha256 of every output).
 
     uv run python scripts/vendor_assets.py
 """
@@ -27,6 +28,7 @@ PACKAGES = {
     "alpinejs": "3.17.4",
     "lucide-static": "1.49.0",
     "@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
 }
 AHN = "atkinson-hyperlegible-next"
 FILES = {
@@ -38,6 +40,18 @@ FILES = {
         "package/LICENSE": "fonts/LICENSE-atkinson-hyperlegible-next.txt",
     },
     "lucide-static": {"package/LICENSE": "icons/LICENSE-lucide.txt"},
+    "@fontsource-variable/bricolage-grotesque": {
+        "package/LICENSE": "fonts/LICENSE-bricolage-grotesque.txt"
+    },
+}
+# The display face: the latin file with every axis but weight pinned, and weight cut to the range
+# titles use, so it stays under 45 KB (D066). package -> (source file, axes, output).
+DISPLAY = {
+    "@fontsource-variable/bricolage-grotesque": (
+        "package/files/bricolage-grotesque-latin-standard-normal.woff2",
+        {"opsz": 48, "wdth": 100, "wght": (500, 800)},
+        "fonts/display-bricolage.woff2",
+    ),
 }
 ICONS = [
     "activity",
@@ -131,6 +145,23 @@ def sprite(tf: tarfile.TarFile) -> str:
     )
 
 
+def display_face(
+    tf: tarfile.TarFile, src: str, axes: dict[str, float | tuple[float, float]]
+) -> bytes:
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib.instancer import instantiateVariableFont
+
+    member = tf.extractfile(src)
+    if member is None:
+        sys.exit(f"{src} missing")
+    font = TTFont(io.BytesIO(member.read()))
+    instantiateVariableFont(font, axes, inplace=True)
+    font.flavor = "woff2"
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
 def main() -> None:
     manifest: dict[str, object] = {"packages": PACKAGES, "files": {}}
     files: dict[str, str] = {}
@@ -143,6 +174,11 @@ def main() -> None:
             out = STATIC / dest
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(member.read())
+            files[dest] = hashlib.sha256(out.read_bytes()).hexdigest()
+        if name in DISPLAY:
+            src, axes, dest = DISPLAY[name]
+            out = STATIC / dest
+            out.write_bytes(display_face(tf, src, axes))
             files[dest] = hashlib.sha256(out.read_bytes()).hexdigest()
         if name == "lucide-static":
             out = STATIC / "icons" / "sprite.svg"

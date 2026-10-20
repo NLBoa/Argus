@@ -3,7 +3,8 @@
     "htmx.org": "2.0.11",
     "alpinejs": "3.17.4",
     "lucide-static": "1.49.0",
-    "@fontsource-variable/atkinson-hyperlegible-next": "5.3.0"
+    "@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0"
   },
   "files": {
     "vendor/htmx.min.js": "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717",
@@ -12,6 +13,8 @@
     "icons/sprite.svg": "5bc16782eee4b2aed0c7fcc0ef5672fdc76ec048d068333c6d04547daa204616",
     "fonts/ahn-latin.woff2": "18b2a1a39a2fa298b0ba5390aca68462669826c90925656f1c1f6796e0e1bbaf",
     "fonts/ahn-latin-ext.woff2": "7dae0c6c66af1aec82e096186aeb1f0e6fa36ab8061ed65422f2b7daf4dd93f3",
-    "fonts/LICENSE-atkinson-hyperlegible-next.txt": "474a034e99845062f661855caaa505880d0e9009deddc2727a92795eab374955"
+    "fonts/LICENSE-atkinson-hyperlegible-next.txt": "474a034e99845062f661855caaa505880d0e9009deddc2727a92795eab374955",
+    "fonts/LICENSE-bricolage-grotesque.txt": "923f4ddf0fd39f9b7794ab0df7332f3d95dc43e8ad7ec2289d6d9e8491177f51",
+    "fonts/display-bricolage.woff2": "8e6a2d1913eac041c3816344845a3b6132e3931b07141198c91a6720a7e15139"
   }
 }

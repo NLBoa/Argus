@@ -46,6 +46,8 @@ dev = [
   "responses>=0.25",
   "types-requests>=2.33.0.20261006",
   "types-python-dateutil>=2.9.0.20260807",
+  "fonttools>=4.67.0",
+  "brotli>=1.2.0",
 ]
 
 [build-system]
