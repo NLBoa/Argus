@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -62,6 +61,18 @@ def test_inside_a_window_only_the_rest_counts_and_due_inside_a_window_cuts_it() 
     assert loads([hw], at(0, 20), SPANS)[1].capacity == 1.0
 
 
+def test_earlier_work_counts_only_up_to_its_own_window_time() -> None:
+    """Two items due tonight need 10 h but the window has 4 h: both are short, and Sunday's item
+    only competes with the 4 h that could actually be spent before tonight's deadline."""
+    hw = Work(1, at(0, 23, 30), 6.0)
+    ps = Work(2, at(0, 23, 59), 4.0)
+    later = Work(3, at(3, 23, 59), 3.0)
+    out = loads([hw, ps, later], NOW, SPANS)
+    assert out[1] == Load(capacity=4.0, demand=6.0, remaining=6.0)
+    assert out[2] == Load(capacity=4.0, demand=8.0, remaining=4.0)  # 4 h can go to HW first
+    assert out[3] == Load(capacity=16.0, demand=7.0, remaining=3.0)  # not 13 h
+
+
 def test_slack() -> None:
     assert Load(capacity=8.0, demand=3.0, remaining=3.0).slack == 5.0
 
@@ -89,4 +100,6 @@ def test_property_capacity_bounded_and_never_rises_with_time(
         window_time = sum(s.hours_between(NOW, w.due) for s in SPANS)
         assert -1e-9 <= b.capacity <= window_time + 1e-9
         assert after[w.item_id].capacity <= b.capacity + 1e-9  # no new logs: never more room
-        assert after[w.item_id].demand == pytest.approx(b.demand)
+        # Earlier work that can no longer fit before its own deadline stops counting, so demand
+        # can only fall; it never rises without new work.
+        assert after[w.item_id].demand <= b.demand + 1e-9

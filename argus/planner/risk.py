@@ -104,23 +104,36 @@ def loads(
 
     C = for each window not skipped for this item, the part before its due time (and after now)
     minus the study time reserved in that window, never below zero.
-    D = its own remaining hours + the remaining hours of every counted item due at or before it.
+
+    D = the earlier work that can still be done before this item's due time, plus this item's
+    remaining hours and those of other counted items due at the same time. Walking the due dates
+    in order, earlier work counts only up to the window time before its own deadline: work that
+    can't fit by then is missed, and doesn't take time from later items (the deadline-
+    feasibility test). Items due at the same time count each other.
     """
     reserved = reserved or {}
     skips = skips or {}
     dated = [w for w in work if w.due is not None]
+
+    def window_time(due: datetime, skip: str | None = None) -> float:
+        return sum(
+            max(0.0, s.hours_between(now, due) - reserved.get(s.window_id, 0.0))
+            for s in spans
+            if s.window_id != skip
+        )
+
+    done_before: dict[datetime, float] = {}
+    running = 0.0
+    for due in sorted({w.due for w in dated if w.due is not None}):
+        done_before[due] = running
+        same = sum(w.remaining for w in dated if w.counts and w.due == due)
+        running = min(running + same, window_time(due))
     out: dict[int, Load] = {}
     for w in dated:
         assert w.due is not None
-        capacity = sum(
-            max(0.0, s.hours_between(now, w.due) - reserved.get(s.window_id, 0.0))
-            for s in spans
-            if s.window_id != skips.get(w.item_id)
+        same = sum(
+            o.remaining for o in dated if o.item_id != w.item_id and o.counts and o.due == w.due
         )
-        demand = w.remaining + sum(
-            o.remaining
-            for o in dated
-            if o.item_id != w.item_id and o.counts and o.due is not None and o.due <= w.due
-        )
-        out[w.item_id] = Load(capacity, demand, w.remaining)
+        demand = done_before[w.due] + same + w.remaining
+        out[w.item_id] = Load(window_time(w.due, skips.get(w.item_id)), demand, w.remaining)
     return out
