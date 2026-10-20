@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Browser, Page, expect
 
 from tests.e2e.conftest import LiveServer
 
@@ -26,7 +26,10 @@ def test_today_leads_with_the_running_timer_and_shows_the_rest(page: Page, base_
     expect(hero).to_contain_text("Working on")
     expect(page.get_by_role("heading", name=re.compile("^Queue"))).to_be_visible()
     expect(page.get_by_role("heading", name=re.compile("^Past due"))).to_be_visible()
-    expect(page.get_by_text("Gradescope last synced 3h ago")).to_be_visible()
+    expect(
+        page.get_by_role("alert").filter(has_text="Gradescope has failed 4 syncs")
+    ).to_be_visible()
+    expect(page.get_by_role("link", name="1 note edit to review")).to_be_visible()
 
 
 def test_timer_start_and_stop(page: Page, fresh_server: Callable[..., LiveServer]) -> None:
@@ -149,8 +152,9 @@ def test_slash_on_mobile_opens_search_page(page: Page, base_url: str) -> None:
 def test_course_page_from_chip_and_modules(page: Page, base_url: str) -> None:
     page.goto(base_url + "/upcoming")
     page.locator("li.item-row", has_text="Homework 3").get_by_role(
-        "link", name="CMSC351", exact=True
+        "link", name=re.compile("^Homework 3")
     ).click()
+    page.locator(".page-head").get_by_role("link", name="CMSC351", exact=True).click()
     expect(page.get_by_role("heading", level=1)).to_contain_text("CMSC351")
     expect(page.get_by_text("91.5% (A-)")).to_be_visible()
     week1 = page.locator("details", has_text="Week 1: Asymptotics")
@@ -168,16 +172,17 @@ def test_search_filter_and_no_results(page: Page, base_url: str) -> None:
     expect(page.get_by_role("heading", name=re.compile("No matches"))).to_be_visible()
 
 
-def test_theme_toggle_persists(page: Page, base_url: str) -> None:
+def test_theme_from_the_palette_and_settings_persists(page: Page, base_url: str) -> None:
+    """The theme left the header (D067): the palette and Settings set it."""
     page.goto(base_url + "/today")
-    toggle = page.get_by_role("button", name=re.compile("^Theme"))
-    toggle.click()
-    expect(page.locator("html")).to_have_attribute("data-theme", "light")
-    toggle.click()
+    page.keyboard.press("Control+k")
+    page.get_by_role("combobox").fill("dark theme")
+    page.keyboard.press("Enter")
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    page.reload()
+    page.goto(base_url + "/settings")
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    page.get_by_role("button", name="Theme: dark").click()
+    page.get_by_label("Match system").check()
+    page.get_by_role("button", name="Save theme").click()
     expect(page.locator("html")).not_to_have_attribute("data-theme", re.compile(".+"))
 
 
@@ -281,20 +286,102 @@ def test_override_estimate_and_log_time(
     expect(page.get_by_text("You set this estimate.")).to_have_count(0)
 
 
-def test_workload_lists_items_needing_attention(page: Page, base_url: str) -> None:
+def test_workload_chart_reads_out_each_day(page: Page, base_url: str) -> None:
+    """D065: a per-day readout on hover, and on focus with the arrow keys; a table with it all."""
     page.goto(base_url + "/workload")
-    expect(page.get_by_role("img", name="Hours needed against free hours")).to_be_visible()
+    expect(
+        page.get_by_text(re.compile(r"^Next 7 days: .* work due, .* window time\.$"))
+    ).to_be_visible()
+    plot = page.get_by_role("group", name=re.compile("^Work due against window time"))
+    tip = page.locator(".wl__tip")
+    expect(tip).to_be_hidden()
+    plot.focus()
+    expect(tip).to_contain_text("By the end of today")
+    page.keyboard.press("ArrowRight")
+    expect(tip).to_contain_text("By the end of tomorrow")
+    page.keyboard.press("End")
+    expect(tip).to_contain_text("window time")
+    page.keyboard.press("Tab")
+    expect(tip).to_be_hidden()
+    box = plot.bounding_box()
+    assert box
+    page.mouse.move(box["x"] + 2, box["y"] + box["height"] / 2)
+    expect(tip).to_contain_text("By the end of today")
+    page.get_by_text("Show as a table").click()
+    expect(page.get_by_role("columnheader", name="Work due so far")).to_be_visible()
     expect(page.get_by_role("heading", name=re.compile("^Needs attention"))).to_be_visible()
 
 
 def test_mobile_tab_bar(page: Page, base_url: str) -> None:
+    """Today, Upcoming, Exams, and More (D067)."""
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(base_url + "/today")
     tabs = page.get_by_role("navigation", name="Main")
-    expect(tabs.get_by_role("link")).to_have_count(5)
-    tabs.get_by_role("link", name="Posts").click()
+    expect(tabs.get_by_role("link")).to_have_count(3)
+    more = tabs.locator("summary", has_text="More")
+    more.click()
+    tabs.get_by_role("link", name="Announcements").click()
     expect(page.get_by_role("heading", level=1)).to_have_text("Announcements")
-    expect(tabs.get_by_role("link", name="Posts")).to_have_attribute("aria-current", "page")
+    expect(more).to_have_attribute("data-active", "true")
+    expect(tabs.locator(".more__menu")).to_be_hidden()  # closed after the navigation
+    more.click()
+    expect(tabs.get_by_role("link", name="Announcements")).to_have_attribute("aria-current", "page")
+
+
+def test_more_menu_keyboard_path(page: Page, base_url: str) -> None:
+    """Enter opens "More"; Esc closes it and returns focus to it (D067)."""
+    page.goto(base_url + "/today")
+    nav = page.locator("header").get_by_role("navigation", name="Main")
+    more = nav.locator("summary")
+    more.focus()
+    page.keyboard.press("Enter")
+    menu = nav.locator(".more__menu")
+    expect(menu).to_be_visible()
+    page.keyboard.press("Tab")
+    expect(nav.get_by_role("link", name="Workload")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu).to_be_hidden()
+    expect(more).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(menu).to_be_visible()
+    page.locator("main").click(position={"x": 5, "y": 400})
+    expect(menu).to_be_hidden()
+    expect(nav.get_by_role("link", name=re.compile("^Proposals"))).to_be_hidden()
+
+
+@pytest.mark.parametrize("path", ["/today", "/upcoming", "/workload", "/settings", "/exams/5"])
+def test_tab_bar_never_covers_the_last_control(page: Page, base_url: str, path: str) -> None:
+    """viewport-fit=cover: padding of tab bar + safe area + 1rem keeps the last control clear."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(base_url + path)
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    bar = page.locator(".tabbar").bounding_box()
+    last = page.locator(
+        "main a:visible, main button:visible, main input:visible, main summary:visible"
+    ).last
+    box = last.bounding_box()
+    assert bar and box
+    assert box["y"] + box["height"] <= bar["y"], f"{path}: last control is under the tab bar"
+
+
+def test_row_controls_sit_in_a_menu_on_touch(
+    browser: Browser, fresh_server: Callable[..., LiveServer]
+) -> None:
+    """D064 on Upcoming: touch gets the "..." menu; after Mark done the menu stays open and focused."""
+    s = fresh_server()
+    ctx = browser.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True
+    )
+    page = ctx.new_page()
+    page.goto(s.url + "/upcoming")
+    row = page.locator("li.item-row", has_text="Problem Set 6")
+    expect(row.get_by_role("button", name=re.compile("^Mark done"))).to_be_hidden()
+    row.locator("summary").click()
+    row.get_by_role("button", name=re.compile("^Mark done")).click()
+    row = page.locator("li.item-row", has_text="Problem Set 6")
+    expect(row).to_have_attribute("data-done", "true")
+    expect(row.get_by_role("button", name=re.compile("^Done"))).to_be_focused()
+    ctx.close()
 
 
 def test_exam_prep_practice_and_self_grading(
@@ -323,15 +410,13 @@ def test_reject_proposal_keeps_my_version(
 ) -> None:
     server = fresh_server()
     page.goto(server.url + "/today")
-    banner = page.get_by_role("status").filter(has_text="Argus wants to change 1 note")
-    expect(banner).to_be_visible()
-    banner.get_by_role("link", name="Review proposals").click()
+    page.get_by_role("link", name="1 note edit to review").click()
     expect(page.get_by_role("heading", level=1)).to_have_text("Proposals")
     expect(page.get_by_text("My own note: c can be any constant.").first).to_be_attached()
     page.get_by_role("button", name="Keep my version").click()
     expect(page.get_by_text("Kept your version.").first).to_be_visible()
     page.goto(server.url + "/today")
-    expect(page.get_by_text("Argus wants to change")).to_have_count(0)
+    expect(page.get_by_role("link", name="1 note edit to review")).to_have_count(0)
 
 
 def test_no_content_security_policy_violations(page: Page, base_url: str) -> None:
@@ -346,7 +431,7 @@ def test_no_content_security_policy_violations(page: Page, base_url: str) -> Non
     expect(page.get_by_role("combobox")).to_be_focused()
     page.keyboard.press("Escape")
     expect(page.get_by_role("combobox")).to_have_count(0)
-    page.locator(".theme-toggle").click()
+    page.locator("header summary", has_text="More").click()
     page.goto(base_url + "/kiosk")
     page.wait_for_timeout(700)
     assert errors == []

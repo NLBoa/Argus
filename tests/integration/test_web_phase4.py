@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -64,11 +65,11 @@ def test_item_detail(client: TestClient) -> None:
     assert client.get("/items/9999").status_code == 404
 
 
-def test_item_rows_show_estimates_and_link_to_detail(client: TestClient) -> None:
+def test_item_rows_show_time_left_and_link_to_detail(client: TestClient) -> None:
     html = client.get("/upcoming").text
     assert f'href="/items/{HW3}"' in html
-    assert "estimated 3.5 h" in html  # raw next to calibrated
-    assert "typical" in html  # Problem Set 6 uses the default
+    assert re.search(r'<span class="tnum">~\d+(\.\d)? h</span>', html)  # remaining p80 (D065)
+    assert "source-link" not in html  # sources live on the item page
 
 
 def test_override_clear_and_replan(client: TestClient) -> None:
@@ -111,7 +112,8 @@ def test_log_time(client: TestClient) -> None:
 
 def test_workload(client: TestClient) -> None:
     html = client.get("/workload").text
-    assert "Work planned in your work windows" in html
+    assert "Work due against window time" in html and "Next 7 days:" in html
+    assert 'class="wl__plot"' in html and "Show as a table" in html
     # Tonight's window (7-11 pm) is 4 h: Homework 3 (due 11:30 pm) and Problem Set 6 (11:59 pm,
     # after Homework 3) don't both fit, so both need attention.
     assert "Homework 3" in html and "Problem Set 6" in html

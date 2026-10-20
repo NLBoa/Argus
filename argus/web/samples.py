@@ -21,25 +21,28 @@ from argus.domain.models import (
 )
 from argus.planner.freetime import meetings_on
 from argus.planner.risk import RiskLevel
+from argus.planner.workload import CurveDay
 from argus.web.deps import STATIC_DIR
 from argus.web.format import due_text
 from argus.web.viewmodels import (
+    Alert,
     ConfirmView,
     CourseView,
     DoneNoticeView,
-    EstimateView,
     FindingView,
     PracticeView,
     QueueEntryFacts,
-    StaleNotice,
+    StatusLine,
+    StatusNote,
     TimerView,
-    WorkloadDay,
     course_views,
     diff_view,
     item_view,
     queue_view,
     strip,
     timeline,
+    workload_chart,
+    workload_days,
 )
 
 SAMPLE_CONFIG = AppConfig(
@@ -82,14 +85,14 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             now,
             courses,
             tracking_sources=SUBMISSION_SOURCES,
-            estimate=EstimateView(4.5, 3.5),
+            left=5.5,
         ),
         item_view(
             it(2, "Problem Set 6", "MATH240", timedelta(hours=14)),
             now,
             courses,
             tracking_sources=SUBMISSION_SOURCES,
-            estimate=EstimateView(2.0, is_default=True),
+            left=2.5,
         ),
         item_view(
             it(3, "Essay draft", "ENGL393", timedelta(hours=30), status=ItemStatus.IN_PROGRESS),
@@ -97,7 +100,7 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             courses,
             tracking_sources=SUBMISSION_SOURCES,
             running_item_id=9003,
-            estimate=EstimateView(3.0, 3.0),
+            left=1.5,
         ),
         item_view(
             it(
@@ -240,12 +243,13 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
         timer_item_id=rows[1].id
     ).hero  # not the main sample's hero: landmarks stay unique
     hero_timer = TimerView(rows[1], now - timedelta(minutes=42), 42 * 60.0)
-    workload = []
-    for d in range(7):
-        date = day + timedelta(days=d)
-        need = [3.5, 5.0, 2.0, 6.5, 1.0, 0.0, 4.0][d]
-        free = [4.0, 3.5, 6.0, 5.0, 3.0, 8.0, 7.5][d]
-        workload.append(WorkloadDay(f"{date:%A}", f"{date:%a}", need, free))
+    window_h = [4.0, 4.0, 4.0, 4.0, 0.0, 0.0, 3.0, 4.0, 4.0, 4.0, 4.0, 0.0, 0.0, 3.0]
+    due_h = [0.0, 3.5, 9.0, 2.0, 0.0, 0.0, 1.0, 4.0, 0.0, 6.0, 1.5, 0.0, 0.0, 2.0]
+    curve_days, wt, dt = [], 0.0, 0.0
+    for d, (w, h) in enumerate(zip(window_h, due_h, strict=True)):
+        wt, dt = wt + w, dt + h
+        curve_days.append(CurveDay(local_datetime(day + timedelta(days=d), 0), w, h, wt, dt))
+    workload = workload_chart(workload_days(curve_days, day))
     post = "https://piazza.com/class/x/post/101"
     findings = [
         FindingView(
@@ -332,9 +336,6 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             CourseView("BMGT110", "ochre"),
         ],
         "risks": list(RiskLevel),
-        "est_default": EstimateView(2.0, is_default=True),
-        "est_cal": EstimateView(4.5, 3.5),
-        "est_same": EstimateView(3.0, 3.0),
         "rows": rows,
         "timeline": tl,
         "strip": day_strip,
@@ -347,5 +348,18 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
         "findings": findings,
         "diff": diff,
         "practice": practice,
-        "stale": [StaleNotice("Gradescope last synced 3h ago", failing=True)],
+        "status": StatusLine(
+            [
+                StatusNote("Gradescope 3h behind", "stale", "/health"),
+                StatusNote("Piazza hasn't synced yet", "failing", "/health"),
+                StatusNote("1 note edit to review", "info", "/proposals"),
+            ],
+            [
+                Alert(
+                    "Gradescope has failed 3 syncs in a row, so its dates may be out of date.",
+                    "/health",
+                    "Check health",
+                )
+            ],
+        ),
     }

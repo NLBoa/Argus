@@ -119,11 +119,11 @@ def test_self_grading(client: TestClient) -> None:
 
 
 def test_proposals_page_and_banner(client: TestClient) -> None:
-    assert "Argus wants to change 1 note you edited." in client.get("/today").text
+    assert "1 note edit to review" in client.get("/today").text  # the status line (D067)
     html = client.get("/proposals").text
     assert NOTE in html and "Approve change" in html and "Keep my version" in html
     assert "Removed: " in html and "Added: " in html  # the diff speaks to screen readers too
-    assert "Argus wants to change" not in html  # no banner on the page itself
+    assert 'data-state="info" href="/proposals"' not in html  # no note on the page itself
 
 
 def test_reject_keeps_the_students_version(client: TestClient) -> None:
@@ -187,10 +187,10 @@ def test_obsidian_links_appear_once_the_note_exists(client: TestClient, config: 
     assert "Open exam prep in Obsidian" in client.get(f"/exams/{exam}").text
 
 
-def test_health_shows_the_vault_and_banner_is_only_on_today(client: TestClient) -> None:
+def test_health_shows_the_vault_and_the_status_line_notes_edits(client: TestClient) -> None:
     html = client.get("/health").text
     assert "Study vault" in html and "Not synced yet" in html and "1 proposal waiting" in html
-    assert "Argus wants to change" not in client.get("/upcoming").text
+    assert "1 note edit to review" in client.get("/upcoming").text
     with db(client) as conn:
         conn.execute(
             "INSERT INTO vault_runs (started_at, finished_at, status, error) VALUES (?, ?, 'error', 'git push failed')",
@@ -198,6 +198,14 @@ def test_health_shows_the_vault_and_banner_is_only_on_today(client: TestClient) 
         )
     html = client.get("/health").text
     assert "Failing (1 in a row)" in html and "git push failed" in html
+    assert "Vault sync has failed" not in client.get("/today").text  # one failure: no banner
+    with db(client) as conn:
+        for minute in (1, 2):
+            conn.execute(
+                "INSERT INTO vault_runs (started_at, finished_at, status, error) VALUES (?, ?, 'error', 'x')",
+                (f"2026-10-19T12:0{minute}:00Z", f"2026-10-19T12:0{minute}:01Z"),
+            )
+    assert "Vault sync has failed 3 times in a row" in client.get("/today").text
 
 
 def test_errors_without_javascript_render_a_page(client: TestClient) -> None:

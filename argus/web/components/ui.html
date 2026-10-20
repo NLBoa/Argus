@@ -13,24 +13,22 @@
 </svg>
 {%- endmacro %}
 
+{#- Course color is used once (D065): the row stripe. The chip is for item, exam and course headers;
+    everywhere else the code is muted text. -#}
 {% macro course_chip(course, href=None) -%}
 {% if href %}<a class="course-chip" data-accent="{{ course.accent }}" href="{{ href }}">{{ course.code }}</a>
 {%- else %}<span class="course-chip" data-accent="{{ course.accent }}">{{ course.code }}</span>{% endif %}
 {%- endmacro %}
 
+{% macro course_code(course, href=None) -%}
+{% if href %}<a class="course-code" href="{{ href }}">{{ course.code }}</a>{% else %}<span class="course-code">{{ course.code }}</span>{% endif %}
+{%- endmacro %}
+
+{#- Markers (D065): an icon and a label, never color alone; the fill gets heavier with severity
+    (creeping: none, at risk: soft, overdue: solid). "Did you submit?" is neutral. -#}
 {% set RISK_ICONS = {"ok": "circle-check", "creeping": "clock", "unconfirmed": "circle-help", "at-risk": "triangle-alert", "overdue": "octagon-alert"} %}
 {% macro risk_badge(risk, label=None) -%}
 <span class="risk-badge" data-risk="{{ risk.slug }}">{{ icon(RISK_ICONS[risk.slug], "icon-sm") }}{{ label or risk.label }}</span>
-{%- endmacro %}
-
-{% macro estimate_pill(est) -%}
-{% if est is none -%}
-<span class="estimate-pill" data-state="none">No estimate yet</span>
-{%- elif est.is_default -%}
-<span class="estimate-pill" data-state="default" title="Typical time for this kind of work in this course"><strong>{{ est.calibrated_hours|hours }}</strong><span class="raw">typical</span></span>
-{%- else -%}
-<span class="estimate-pill" data-state="calibrated"><strong>{{ est.calibrated_hours|hours }}</strong>{% if est.raw_hours is not none and (est.raw_hours - est.calibrated_hours)|abs >= 0.05 %}<span class="raw">estimated {{ est.raw_hours|hours }}</span>{% endif %}</span>
-{%- endif %}
 {%- endmacro %}
 
 {% macro source_links(v) -%}
@@ -43,44 +41,54 @@
 </span>
 {%- endmacro %}
 
-{#- Buttons keep stable ids so htmx returns keyboard focus to them after the row swaps (review R9). -#}
+{#- A row's controls, inline (shown on hover or focus-within) and again in the "..." menu on touch
+    and narrow screens (D064). Ids stay stable so focus returns after the row swaps (review R9). -#}
+{% macro _row_controls(v, sfx) -%}
+{% if v.actionable or v.running %}
+<form method="post" action="/items/{{ v.id }}/timer" hx-post="/items/{{ v.id }}/timer" hx-target="#item-{{ v.id }}" hx-swap="outerHTML">
+  <input type="hidden" name="action" value="{{ 'stop' if v.running else 'start' }}">
+  <button id="timer-{{ v.id }}{{ sfx }}" class="btn btn-sm {{ 'btn-primary' if v.running else 'btn-quiet' }}" type="submit" data-focus-key="timer" aria-pressed="{{ 'true' if v.running else 'false' }}">
+    {% if v.running %}{{ icon("square", "icon-sm") }}Stop timer{% else %}{{ icon("play", "icon-sm") }}Start{% endif %}<span class="visually-hidden"> {{ v.title }}</span>
+  </button>
+</form>
+{% endif %}
+<form method="post" action="/items/{{ v.id }}/done" hx-post="/items/{{ v.id }}/done" hx-target="#item-{{ v.id }}" hx-swap="outerHTML" data-optimistic="done">
+  <input type="hidden" name="done" value="{{ '0' if v.done else '1' }}">
+  <button id="done-{{ v.id }}{{ sfx }}" class="btn btn-sm btn-quiet" type="submit" data-focus-key="done" aria-pressed="{{ 'true' if v.done else 'false' }}">
+    {{ icon("check", "icon-sm") }}{{ "Done" if v.done else "Mark done" }}<span class="visually-hidden"> {{ v.title }}</span>
+  </button>
+</form>
+{%- endmacro %}
+
+{#- A row (D065): the title; a muted line (course, kind unless an assignment, "~4 h"); the due date;
+    a marker only when something is wrong. Sources live on the item page. -#}
 {% macro item_row(v, actions=True) -%}
-<li class="item-row" id="item-{{ v.id }}" data-accent="{{ v.course.accent }}" data-done="{{ 'true' if v.done else 'false' }}" data-running="{{ 'true' if v.running else 'false' }}" data-nav-item>
+{% set controls = actions and v.kind.takes_submission %}
+<li class="item-row" id="item-{{ v.id }}" data-accent="{{ v.course.accent }}" data-done="{{ 'true' if v.done else 'false' }}" data-running="{{ 'true' if v.running else 'false' }}" data-controls="{{ 'true' if controls else 'false' }}" data-nav-item>
   <div class="min-w-0">
     <p class="item-row__title">
       <a href="/items/{{ v.id }}" data-nav-target>{{ v.title }}<span class="visually-hidden">, {{ v.course.code }}</span></a>
     </p>
-    <div class="item-row__meta">
-      {{ course_chip(v.course, "/courses/" ~ v.course.code) }}
-      <span>{{ v.kind_label }}</span>
-      {% if v.done or v.status.value == "in_progress" %}<span>{{ v.status_label }}</span>{% endif %}
-      {% if v.estimate and v.actionable %}{{ estimate_pill(v.estimate) }}{% endif %}
-      {{ source_links(v) }}
-      {% if v.conflict %}<span class="tag-conflict" title="{{ v.conflict|join('; ') }}">{{ icon("git-compare", "icon-sm") }}Dates differ<span class="visually-hidden">: {{ v.conflict|join('; ') }}</span></span>{% endif %}
-    </div>
+    <p class="item-row__meta">
+      <span>{{ v.course.code }}</span>
+      {%- if v.kind.value != "assignment" %}<span>{{ v.kind_label }}</span>{% endif %}
+      {%- if v.done or v.status.value == "in_progress" %}<span>{{ v.status_label }}</span>{% endif %}
+      {%- if v.running %}<span class="item-row__running">{{ icon("timer", "icon-sm") }}Timer running</span>{% endif %}
+      {%- if v.left_text and v.actionable %}<span class="tnum">{{ v.left_text }}</span>{% endif %}
+      {%- if v.conflict %}<span class="tag-conflict" title="{{ v.conflict|join('; ') }}">{{ icon("git-compare", "icon-sm") }}Dates differ<span class="visually-hidden">: {{ v.conflict|join('; ') }}</span></span>{% endif %}
+    </p>
   </div>
   <div class="item-row__side">
     {% if v.due_text %}<span class="item-row__due">{{ v.due_text }}</span><span class="item-row__rel">{{ v.due_relative }}</span>
     {% else %}<span class="item-row__rel">No due date</span>{% endif %}
     {% if not v.done and v.risk.slug != "ok" %}{{ risk_badge(v.risk, v.risk_label) }}{% endif %}
   </div>
-  {% if actions and v.kind.takes_submission %}
-  <div class="item-row__actions">
-    {% if v.actionable or v.running %}
-    <form method="post" action="/items/{{ v.id }}/timer" hx-post="/items/{{ v.id }}/timer" hx-target="#item-{{ v.id }}" hx-swap="outerHTML">
-      <input type="hidden" name="action" value="{{ 'stop' if v.running else 'start' }}">
-      <button id="timer-{{ v.id }}" class="btn btn-sm {{ 'btn-primary' if v.running else '' }}" type="submit" aria-pressed="{{ 'true' if v.running else 'false' }}">
-        {% if v.running %}{{ icon("square", "icon-sm") }}Stop timer{% else %}{{ icon("play", "icon-sm") }}Start{% endif %}<span class="visually-hidden"> {{ v.title }}</span>
-      </button>
-    </form>
-    {% endif %}
-    <form method="post" action="/items/{{ v.id }}/done" hx-post="/items/{{ v.id }}/done" hx-target="#item-{{ v.id }}" hx-swap="outerHTML" data-optimistic="done">
-      <input type="hidden" name="done" value="{{ '0' if v.done else '1' }}">
-      <button id="done-{{ v.id }}" class="btn btn-sm btn-quiet" type="submit" aria-pressed="{{ 'true' if v.done else 'false' }}">
-        {{ icon("check", "icon-sm") }}{{ "Done" if v.done else "Mark done" }}<span class="visually-hidden"> {{ v.title }}</span>
-      </button>
-    </form>
-  </div>
+  {% if controls %}
+  <div class="item-row__actions">{{ _row_controls(v, "") }}</div>
+  <details class="item-row__menu">
+    <summary class="btn btn-sm btn-quiet btn-icon">{{ icon("ellipsis", "icon-sm") }}<span class="visually-hidden">Actions for {{ v.title }}</span></summary>
+    <div class="item-row__menu-body">{{ _row_controls(v, "-m") }}</div>
+  </details>
   {% endif %}
 </li>
 {%- endmacro %}
@@ -108,30 +116,27 @@
 </div>
 {%- endmacro %}
 
-{% macro stale_banner(notices, link=True) -%}
-{% if notices %}
-<div class="banner banner--stale" role="status">
-  {{ icon("triangle-alert") }}
-  <p class="banner__text">{% for n in notices %}<strong>{{ n.text }}</strong>{% if not loop.last %}. {% endif %}{% endfor %}. Dates from {{ "it" if notices|length == 1 else "them" }} may be out of date.</p>
-  {% if link %}<a class="btn btn-sm" href="/health">Check health</a>{% endif %}
+{#- The status line (D067): quiet notes under the header ("Gradescope 3h behind", "1 note edit to
+    review", offline), and a full banner only for a real error. -#}
+{% macro alert_banner(a) -%}
+<div class="banner banner--error" role="alert">
+  {{ icon("circle-alert") }}
+  <p class="banner__text">{{ a.text }}</p>
+  {% if a.href %}<a class="btn btn-sm" href="{{ a.href }}">{{ a.action }}</a>{% endif %}
 </div>
-{% endif %}
 {%- endmacro %}
 
-{% macro proposals_banner(count) -%}
-{% if count %}
-<div class="banner banner--offline" role="status">
-  {{ icon("git-compare") }}
-  <p class="banner__text"><strong>Argus wants to change {{ count }} note{{ "" if count == 1 else "s" }} you edited.</strong> Nothing changes until you approve.</p>
-  <a class="btn btn-sm" href="/proposals">Review proposals</a>
-</div>
-{% endif %}
+{% macro offline_note(static=False) -%}
+<p class="status-note" data-state="offline" role="status" {% if not static %}x-data x-show="$store.net.offline" x-cloak{% endif %}>You're offline. Showing what was last loaded; changes won't save until you're back.</p>
 {%- endmacro %}
 
-{% macro offline_banner(static=False) -%}
-<div class="banner banner--offline" role="status" {% if not static %}x-data x-show="$store.net.offline" x-cloak{% endif %}>
-  {{ icon("wifi-off") }}
-  <p class="banner__text"><strong>You're offline.</strong> Showing what was last loaded; changes will fail until the connection is back.</p>
+{% macro status_line(status, static_offline=False) -%}
+{% if status.alerts %}<div class="grid gap-2 mb-4">{% for a in status.alerts %}{{ alert_banner(a) }}{% endfor %}</div>{% endif %}
+<div class="status-line">
+  {{ offline_note(static_offline) }}
+  {%- for n in status.notes %}
+  {% if n.href %}<a class="status-note" data-state="{{ n.state }}" href="{{ n.href }}">{{ n.text }}</a>{% else %}<span class="status-note" data-state="{{ n.state }}">{{ n.text }}</span>{% endif %}
+  {%- endfor %}
 </div>
 {%- endmacro %}
 

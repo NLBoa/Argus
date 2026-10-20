@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/ui.html" import icon, logo, course_chip, risk_badge, estimate_pill, item_row, empty_state, skeleton, error_banner, stale_banner, offline_banner, toast %}
+{% from "components/ui.html" import icon, logo, course_chip, course_code, risk_badge, item_row, empty_state, skeleton, error_banner, status_line, toast %}
 {% from "components/timeline.html" import day_rail %}
 {% from "components/queue.html" import queue_region, hero %}
 {% from "components/strip.html" import day_strip %}
@@ -27,15 +27,19 @@
 
 <section aria-labelledby="sg-type">
   <h2 class="section-title" id="sg-type">Type</h2>
-  <div class="panel panel-pad grid gap-2">
-    <p class="text-4xl font-extrabold tracking-tight">Display 48</p>
-    <p class="text-3xl font-bold">Title 36</p>
-    <p class="text-2xl font-bold">Page title 28</p>
-    <p class="text-xl font-bold">Section 22</p>
-    <p class="text-lg">Lead 18: the quick brown fox studies before the quiz.</p>
-    <p>Body 16: Atkinson Hyperlegible Next, chosen for legibility at a glance and from across a room.</p>
+  <div class="panel panel-pad grid gap-3">
+    <p class="text-sm text-muted">Display: Bricolage Grotesque, for titles, the hero task and big numbers only (D066)</p>
+    <p class="display text-4xl tnum" style="line-height: 0.95">11:08</p>
+    <p class="display text-3xl">Display 50</p>
+    <p class="display text-2xl">Page title 37</p>
+    <p class="display text-xl">Hero on a phone 28</p>
+    <p class="section-title m-0">Section 21</p>
+    <p class="text-sm text-muted mt-3">Body: Atkinson Hyperlegible Next, for everything else</p>
+    <p>Body 16: chosen for legibility at a glance and from across a room.</p>
     <p class="text-sm text-muted">Small 14, muted</p>
-    <p class="tnum text-xl">Tabular 0123456789 11:30 pm</p>
+    <p class="text-xs text-muted">Caption 12.5</p>
+    <p class="tnum">Tabular 0123456789 11:30 pm</p>
+    <p>A link reads as ink with an underline: <a href="/styleguide">open the styleguide</a>.</p>
   </div>
 </section>
 
@@ -55,17 +59,18 @@
 </section>
 
 <section aria-labelledby="sg-chips">
-  <h2 class="section-title" id="sg-chips">Course chip, risk badge, estimate pill</h2>
+  <h2 class="section-title" id="sg-chips">Course chip, course code, markers</h2>
+  <p class="text-sm text-muted mb-2">The chip is for item and course headers only; elsewhere the code is muted text and the row stripe carries the color. Markers: creeping, at risk, overdue, did you submit.</p>
   <div class="flex flex-wrap gap-3 items-center">
     {% for c in sample.courses %}{{ course_chip(c) }}{% endfor %}
+    {% for c in sample.courses %}{{ course_code(c) }}{% endfor %}
     {% for r in sample.risks %}{{ risk_badge(r) }}{% endfor %}
-    {{ estimate_pill(none) }}{{ estimate_pill(sample.est_default) }}{{ estimate_pill(sample.est_cal) }}{{ estimate_pill(sample.est_same) }}
   </div>
 </section>
 
 <section aria-labelledby="sg-rows">
   <h2 class="section-title" id="sg-rows">Item row</h2>
-  <p class="text-sm text-muted mb-2">Not started, creeping, running timer, announced, dates differ, overdue, submitted, no due date, did you submit.</p>
+  <p class="text-sm text-muted mb-2">Not started, creeping, running timer, a quiz, dates differ, overdue, submitted, no due date, did you submit. Controls show on hover or focus; on touch they sit in the "..." menu.</p>
   <ul class="item-list m-0 p-0 list-none">{% for v in sample.rows %}{{ item_row(v) }}{% endfor %}</ul>
 </section>
 
@@ -100,8 +105,8 @@
 
 <section aria-labelledby="sg-workload">
   <h2 class="section-title" id="sg-workload">Workload and readiness</h2>
-  <div class="grid gap-6 md:grid-cols-2">
-    <div class="panel panel-pad">{{ workload_chart(sample.workload) }}</div>
+  <div class="grid gap-6">
+    <div class="panel panel-pad">{{ workload_chart(sample.workload, "sg-wl") }}</div>
     <div class="panel panel-pad grid gap-6 content-start">
       {{ readiness_meter(7, 3, 2, "CMSC351 midterm") }}
       {{ readiness_meter(0, 0, 9, "Untested exam") }}
@@ -126,13 +131,12 @@
 </section>
 
 <section aria-labelledby="sg-feedback">
-  <h2 class="section-title" id="sg-feedback">Loading, empty, error, stale, offline, toast</h2>
+  <h2 class="section-title" id="sg-feedback">Loading, empty, error, status line, offline, toast</h2>
   <div class="grid gap-4 md:grid-cols-2">
     <div class="panel panel-pad">{{ skeleton(4, "Loading example") }}</div>
     <div class="panel">{{ empty_state("inbox", "Nothing due today", "Enjoy it, or get ahead on something from Upcoming.", "/upcoming", "See upcoming") }}</div>
     {{ error_banner("Couldn't load your items: the database did not respond.", "/styleguide") }}
-    {{ stale_banner(sample.stale) }}
-    {{ offline_banner(static=True) }}
+    <div class="panel panel-pad">{{ status_line(sample.status, static_offline=True) }}</div>
     <div class="grid gap-2">{{ toast("Marked Homework 3 done") }}{{ toast("Couldn't reach the Pi. Your change was undone.", "error") }}</div>
   </div>
 </section>

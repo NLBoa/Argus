@@ -1,4 +1,4 @@
-{% from "components/ui.html" import course_chip, risk_badge %}
+{% from "components/ui.html" import course_code, risk_badge %}
 {% from "components/timeline.html" import day_rail %}
 <section aria-label="Clock">
   <p class="kiosk__clock" id="kiosk-clock" data-clock>{{ k.time_text }}</p>
@@ -19,7 +19,7 @@
   <div class="kiosk__deadline" data-accent="{{ v.course.accent }}">
     <span class="kiosk__deadline-title">{{ v.title }}</span>
     <span class="kiosk__deadline-when">{{ v.due_relative }}</span>
-    <span class="kiosk__deadline-meta">{{ course_chip(v.course) }}{{ v.due_text }}</span>
+    <span class="kiosk__deadline-meta">{{ course_code(v.course) }}{{ v.due_text }}</span>
     <span class="text-right">{% if v.risk.slug != "ok" %}{{ risk_badge(v.risk) }}{% endif %}</span>
   </div>
   {% else %}

@@ -1,5 +1,6 @@
 // Argus client. Small on purpose: theme, keyboard, palette, toasts, optimistic updates,
-// offline state, and the running timer. Everything else is server-rendered HTML over HTMX.
+// offline state, the running timer, the "More" menus, and the workload readout. Everything
+// else is server-rendered HTML over HTMX.
 (() => {
   "use strict";
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -216,13 +217,39 @@
     if (window.Alpine) window.Alpine.store("net").offline = true;
     toast("Couldn't reach Argus. Your change was undone.", "error");
   });
+  // A row's "..." menu copy of a control: after the row swaps, reopen the menu and refocus it
+  // (htmx's own focus-by-id fails quietly inside a closed <details>).
+  let menuFocus = null;
+  document.addEventListener("htmx:beforeSwap", () => {
+    const a = document.activeElement;
+    menuFocus = a?.id && a.closest?.(".item-row__menu") ? a.id : null;
+  });
   document.addEventListener("htmx:afterSettle", (e) => {
     document.body.classList.remove("is-loading");
+    if (menuFocus) {
+      const el = document.getElementById(menuFocus);
+      menuFocus = null;
+      const menu = el?.closest("details");
+      if (menu) menu.open = true;
+      el?.focus();
+    }
     if (e.detail.boosted || e.detail.target?.id === "main") {
       const path = window.location.pathname;
-      $$(".nav-link, .tabbar__link").forEach((a) => {
+      $$(".nav-link, .tabbar__link, .more__link").forEach((a) => {
         if (a.getAttribute("href") === path) a.setAttribute("aria-current", "page");
         else a.removeAttribute("aria-current");
+      });
+      // The header sits outside <main>: its proposal count follows the page just loaded.
+      const count = Number($("#main")?.dataset.proposals || 0);
+      $$("[data-proposal-count]").forEach((b) => { b.textContent = count; b.hidden = !count; });
+      $$("[data-proposal-label]").forEach((l) => {
+        l.textContent = count ? `, ${count} note edit${count === 1 ? "" : "s"} to review` : "";
+      });
+      $$("details[data-more]").forEach((d) => {
+        d.open = false;
+        const here = !!$(".more__link[aria-current]", d);
+        if (here) d.firstElementChild.dataset.active = "true";
+        else delete d.firstElementChild.dataset.active;
       });
       const main = $("#main");
       if (main && e.detail.boosted) main.focus({ preventScroll: true });
@@ -245,6 +272,70 @@
       const el = usable();
       (el || box?.querySelector("a, button:not([disabled])") || queue.querySelector("button:not([disabled])"))?.focus();
     }
+  });
+
+  // ---------------------------------------------------------------- "More" menus (D067)
+  // A <details>: Enter or a click opens it; Esc closes it and returns focus to "More"; a click
+  // outside closes it; opening one closes the other.
+  const closeMore = (except) => $$("details[data-more][open]").forEach((d) => { if (d !== except) d.open = false; });
+  document.addEventListener("toggle", (e) => {
+    if (e.target.matches?.("details[data-more]") && e.target.open) closeMore(e.target);
+  }, true);
+  document.addEventListener("click", (e) => { if (!e.target.closest?.("details[data-more]")) closeMore(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const menu = e.target.closest?.("details[data-more][open]");
+    if (menu) { menu.open = false; menu.firstElementChild.focus(); } else closeMore();
+  });
+
+  // ---------------------------------------------------------------- workload chart (D065)
+  // One readout for the day under the pointer, or the day picked with the arrow keys.
+  const tips = new WeakMap();
+  const tipsOf = (plot) => {
+    if (!tips.has(plot)) { try { tips.set(plot, JSON.parse(plot.dataset.tips || "[]")); } catch { tips.set(plot, []); } }
+    return tips.get(plot);
+  };
+  const wlShow = (plot, i) => {
+    const days = tipsOf(plot);
+    if (!days.length) return;
+    i = Math.max(0, Math.min(days.length - 1, i));
+    plot.dataset.i = i;
+    const [day, due, win, short] = days[i];
+    const tip = $(".wl__tip", plot), cross = $(".wl__cross", plot);
+    const when = `By the end of ${/^(Today|Tomorrow)$/.test(day) ? day.toLowerCase() : day}`;
+    $(".wl__tip-day", tip).textContent = when;
+    $(".wl__tip-due", tip).textContent = due;
+    $(".wl__tip-window", tip).textContent = win;
+    $(".wl__tip-winrow", tip).hidden = !win;
+    const sh = $(".wl__tip-short", tip);
+    sh.hidden = !short;
+    $("strong", sh).textContent = short;
+    // The visual readout is aria-hidden; this always-present live region speaks it.
+    const live = $("[data-wl-live]", plot.closest(".wl"));
+    if (live) live.textContent = `${when}: ${due} work due${win ? `, ${win} window time` : ""}${short ? `, ${short} short` : ""}.`;
+    cross.style.left = tip.style.left = `${((i + 0.5) / days.length) * 100}%`;
+    tip.dataset.edge = i < 2 ? "start" : i > days.length - 3 ? "end" : "";
+    tip.hidden = cross.hidden = false;
+  };
+  const wlHide = (plot) => { $(".wl__tip", plot).hidden = $(".wl__cross", plot).hidden = true; };
+  document.addEventListener("pointermove", (e) => {
+    const plot = e.target.closest?.(".wl__plot");
+    if (!plot) return;
+    const r = plot.getBoundingClientRect();
+    wlShow(plot, Math.floor(((e.clientX - r.left) / r.width) * tipsOf(plot).length));
+  });
+  document.addEventListener("pointerout", (e) => {
+    const plot = e.target.closest?.(".wl__plot");
+    if (plot && !plot.contains(e.relatedTarget) && document.activeElement !== plot) wlHide(plot);
+  });
+  document.addEventListener("focusin", (e) => { if (e.target.matches?.(".wl__plot")) wlShow(e.target, +(e.target.dataset.i || 0)); });
+  document.addEventListener("focusout", (e) => { if (e.target.matches?.(".wl__plot")) wlHide(e.target); });
+  document.addEventListener("keydown", (e) => {
+    const plot = e.target.matches?.(".wl__plot") ? e.target : null;
+    const step = { ArrowLeft: -1, ArrowRight: 1, Home: -99, End: 99 }[e.key];
+    if (!plot || step === undefined) return;
+    e.preventDefault();
+    wlShow(plot, +(plot.dataset.i || 0) + step);
   });
 
   // ---------------------------------------------------------------- offline

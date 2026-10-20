@@ -1,4 +1,4 @@
-"""Shared rendering: theme cookie, stale banners, boot data, HTMX toasts."""
+"""Shared rendering: theme cookie, the status line (D067), boot data, HTMX toasts."""
 
 from __future__ import annotations
 
@@ -15,9 +15,10 @@ from argus.ai.budget import spent_this_month
 from argus.ai.client import AIClient, build_transport
 from argus.capabilities import Capabilities, Feature
 from argus.logging import get_logger
-from argus.web.data import notices
+from argus.vault.service import health as vault_health
+from argus.web.data import source_statuses
 from argus.web.deps import THEME_COOKIE, AppState
-from argus.web.study_data import open_proposal_count
+from argus.web.viewmodels import StatusLine, status_line
 
 log = get_logger(__name__)
 LOAD_ERROR = (
@@ -42,20 +43,27 @@ def render(
     status_code: int = 200,
 ) -> HTMLResponse:
     now = state.clock.now()
-    stale = []
+    status = StatusLine([], [])
     proposals = 0
     if conn is not None:
         try:
-            stale = notices(conn, state.caps.sources, now)
-            proposals = open_proposal_count(conn)
+            vault = vault_health(conn)
+            proposals = vault.open_proposals
+            status = status_line(
+                source_statuses(conn, state.caps.sources, now),
+                proposals=proposals,
+                vault_failures=vault.failures,
+                vault_conflict=vault.last_status == "conflict",
+                page=active,
+            )
         except sqlite3.Error:
-            log.exception("could not load source health for banners")
+            log.exception("could not load source health for the status line")
     ctx = {
         "caps": page_caps(state, conn, now),
         "page_title": title,
         "active": active,
         "theme": request.cookies.get(THEME_COOKIE, "system"),
-        "stale": stale,
+        "status": status,
         "open_proposals": proposals,
         "boot": {"now": now.isoformat(), "page": active, "pages": hidden_pages(state.caps)},
         **context,

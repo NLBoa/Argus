@@ -1,19 +1,16 @@
-{% from "components/ui.html" import icon, logo, stale_banner, offline_banner, proposals_banner %}
-{#- Nav entries: (href, label, short label, icon, required feature). A page the setup can't
-    support is left out, never shown empty (D055). -#}
-{% set ALL_NAV = [("/today", "Today", "Today", "house", None), ("/upcoming", "Upcoming", "Upcoming", "calendar-days", None), ("/announcements", "Announcements", "Posts", "megaphone", "staff_posts"), ("/workload", "Workload", "Workload", "chart-column", None), ("/health", "Health", "Health", "activity", None)] %}
-{% set NAV = [] %}{% for n in ALL_NAV %}{% if n[4] is none or caps.has(n[4]) %}{% set _ = NAV.append(n) %}{% endif %}{% endfor %}
-{% set DESKTOP_NAV = NAV[:-1] + [("/exams", "Exam prep", "Exams", "graduation-cap", None)] + NAV[-1:] %}
+{% from "components/ui.html" import icon, logo, status_line %}
+{% from "components/nav.html" import header_nav, tabbar %}
 <!doctype html>
 <html lang="en"{% if theme in ("light", "dark") %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{{ page_title }}{% endblock %} | Argus</title>
   <meta name="description" content="Argus: your courses, deadlines, and study plan.">
   <meta name="theme-color" content="#0b636b" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
   <link rel="preload" href="/static/fonts/ahn-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/display-bricolage.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ asset('dist/app.css') }}">
   <link rel="icon" href="{{ asset('icons/argus.svg') }}" type="image/svg+xml">
   <link rel="apple-touch-icon" href="{{ asset('icons/argus-192.png') }}">
@@ -29,11 +26,7 @@
   <header class="app-header">
     <div class="app-header__inner">
       <a class="brand" href="/today" aria-label="Argus, go to Today">{{ logo() }}<span>Argus</span></a>
-      <nav class="nav" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
-        {% for href, label, short, ico, needs in DESKTOP_NAV %}
-        <a class="nav-link" href="{{ href }}" {% if needs %}data-requires="{{ needs }}" {% endif %}{% if active == href %}aria-current="page"{% endif %}>{{ icon(ico, "icon-sm") }}{{ label }}</a>
-        {% endfor %}
-      </nav>
+      {{ header_nav(caps, active, open_proposals) }}
       <div class="header-tools">
         <form class="header-search" action="/search" method="get" role="search">
           {{ icon("search", "icon-sm") }}
@@ -42,25 +35,15 @@
           <span class="kbd" aria-hidden="true">/</span>
         </form>
         <a class="btn btn-quiet btn-icon header-search-link" href="/search" aria-label="Search">{{ icon("search") }}</a>
-        <a class="btn btn-quiet btn-icon" href="/settings" aria-label="Settings: when you study" title="Settings: when you study"{% if active == "/settings" %} aria-current="page"{% endif %}>{{ icon("calendar-clock") }}</a>
-        <button class="btn btn-quiet btn-icon" type="button" @click="$store.palette.show()" aria-label="Open command palette" title="Command palette (Ctrl K)">{{ icon("command") }}</button>
-        <button class="btn btn-quiet btn-icon theme-toggle" type="button" x-data @click="$store.theme.cycle()" :aria-label="$store.theme.label" aria-label="Theme: match system" title="Change theme">
-          <span x-show="$store.theme.mode === 'light'" x-cloak>{{ icon("sun") }}</span>
-          <span x-show="$store.theme.mode === 'dark'" x-cloak>{{ icon("moon") }}</span>
-          <span x-show="$store.theme.mode === 'system'">{{ icon("monitor") }}</span>
-        </button>
+        <button class="btn btn-quiet btn-icon palette-button" type="button" @click="$store.palette.show()" aria-label="Open command palette" title="Command palette (Ctrl K)">{{ icon("command") }}</button>
       </div>
     </div>
   </header>
-  <main id="main" class="page" tabindex="-1" data-page="{{ active }}">
-    <div class="grid gap-2 mb-4 empty:hidden" id="banners">{{ offline_banner() }}{{ stale_banner(stale, link=active != '/health') }}{% if active == '/today' %}{{ proposals_banner(open_proposals) }}{% endif %}</div>
+  <main id="main" class="page" tabindex="-1" data-page="{{ active }}" data-proposals="{{ open_proposals }}">
+    {{ status_line(status) }}
     {% block content %}{% endblock %}
   </main>
-  <nav class="tabbar" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
-    {% for href, label, short, ico, needs in NAV %}
-    <a class="tabbar__link" href="{{ href }}" {% if needs %}data-requires="{{ needs }}" {% endif %}{% if active == href %}aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ short }}</span></a>
-    {% endfor %}
-  </nav>
+  {{ tabbar(caps, active, open_proposals) }}
   <div class="toast-region" aria-live="polite" aria-atomic="false" x-data>
     <template x-for="t in $store.toasts.items" :key="t.id">
       <div class="toast toast-enter" :data-kind="t.kind">

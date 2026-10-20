@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -26,7 +26,7 @@ from argus.planning import (
     pending_confirmation,
     risk_views,
     skipped,
-    workload,
+    workload_curve,
 )
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
@@ -34,7 +34,7 @@ from argus.reminders.text import window_phrase
 from argus.store import repo
 from argus.vault.service import health as vault_health
 from argus.vault.service import item_note_path
-from argus.web.format import clock_time, day_label, due_text, hours, long_date, relative
+from argus.web.format import clock_time, due_text, hours, long_date, relative
 from argus.web.settings_form import WindowRow, describe, rows_from_windows
 from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
@@ -43,7 +43,6 @@ from argus.web.viewmodels import (
     CourseView,
     DayGroup,
     DoneNoticeView,
-    EstimateView,
     FindingView,
     ItemView,
     QueueEntryFacts,
@@ -53,6 +52,7 @@ from argus.web.viewmodels import (
     StripView,
     TimelineView,
     TimerView,
+    WorkloadChart,
     WorkloadDay,
     confirm_choices,
     confirm_when,
@@ -65,6 +65,8 @@ from argus.web.viewmodels import (
     strip,
     timeline,
     timer_view,
+    workload_chart,
+    workload_days,
 )
 
 PAST_DUE_WINDOW = timedelta(days=3)
@@ -96,7 +98,6 @@ def _views(
     courses = course_views(config)
     timer = repo.running_timer(conn)
     running = timer.item_id if timer else None
-    estimates = estimate_views(conn, now)
     plan = plan or compute(conn, config, now, tracking_sources=caps.tracking_sources)
     risk = risk_views(plan)
     return [
@@ -106,25 +107,11 @@ def _views(
             courses,
             tracking_sources=caps.tracking_sources,
             running_item_id=running,
-            estimate=estimates.get(i.id),
             risk=risk[i.id].level if i.id in risk else None,
+            left=plan.items[i.id].remaining if i.id in plan.items else None,
         )
         for i in repo.list_items(conn, **filters)  # type: ignore[arg-type]
     ]
-
-
-def estimate_views(conn: sqlite3.Connection, now: datetime) -> dict[int, EstimateView]:
-    eff = effective_estimates(conn, now)
-    sources = estimate_sources(conn)
-    return {
-        item_id: EstimateView(
-            calibrated_hours=e.p50,
-            raw_hours=e.raw_p50,
-            is_default=sources.get(item_id) == "default",
-            is_override=e.overridden,
-        )
-        for item_id, e in eff.items()
-    }
 
 
 @dataclass(frozen=True)
@@ -913,28 +900,25 @@ def load_item(
 @dataclass(frozen=True)
 class WorkloadData:
     windows: list[str]  # "Every day, 7 pm to 11 pm"
-    days: list[WorkloadDay]
+    chart: WorkloadChart
+    summary: str  # "Next 7 days: 14 h of work, 16 h of window time."
     explanation: str | None
     at_risk: list[ItemView]
-    total_need: float
-    total_free: float
+
+
+def workload_summary(days: Sequence[WorkloadDay], *, windows_on: bool) -> str:
+    week = days[min(6, len(days) - 1)]
+    work = f"Next 7 days: {hours(week.due_total) if week.due_total else 'no'} work due"
+    if not windows_on:
+        return work + "."
+    return f"{work}, {hours(week.window_total) if week.window_total else 'no'} window time."
 
 
 def load_workload(
     conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> WorkloadData:
     plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
-    rows = workload(plan)
-    today = to_local(now).date()
-    days = [
-        WorkloadDay(
-            day_label(to_local(r.day).date(), today),
-            f"{to_local(r.day):%a}",
-            round(r.need_hours, 2),
-            round(r.free_hours, 2),
-        )
-        for r in rows
-    ]
+    days = workload_days(workload_curve(plan), to_local(now).date())
     risky = [
         v
         for v in _views(conn, config, now, caps=caps, plan=plan, open_only=True)
@@ -946,11 +930,10 @@ def load_workload(
             describe(w)
             for w in sorted(repo.work_windows(conn), key=lambda w: (min(w.days), w.start))
         ],
-        days=days,
+        chart=workload_chart(days, windows_on=plan.windows_on),
+        summary=workload_summary(days, windows_on=plan.windows_on),
         explanation=explanation(conn),
         at_risk=risky,
-        total_need=sum(d.need_hours for d in days),
-        total_free=sum(d.free_hours for d in days),
     )
 
 

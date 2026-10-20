@@ -9,11 +9,14 @@
 {% if error %}
   {{ error_banner(error, "/workload") }}
 {% else %}
-{% if data.explanation %}<p class="panel panel-pad mb-6 text-lg">{{ data.explanation }}</p>{% endif %}
-<p class="mb-6 text-sm">{% if data.windows %}Your work windows: {{ data.windows|join("; ") }}. <a class="underline underline-offset-2" href="/settings">Change</a>{% else %}No work windows yet, so Argus can't tell how much time you have. <a class="underline underline-offset-2" href="/settings">Set when you study</a>{% endif %}</p>
+{% if data.explanation %}<p class="panel panel-pad mb-6">{{ data.explanation }}</p>{% endif %}
 <section aria-labelledby="chart-heading" class="mb-8">
-  <h2 class="section-title" id="chart-heading">Work planned in your work windows <span class="section-count">{{ data.total_need|hours }} of {{ data.total_free|hours }}</span></h2>
-  <div class="panel panel-pad">{{ workload_chart(data.days) }}</div>
+  <h2 class="section-title" id="chart-heading">Work due against window time</h2>
+  <div class="panel panel-pad grid gap-4">
+    <p class="wl-summary">{{ data.summary }}</p>
+    {{ workload_chart(data.chart) }}
+    <p class="text-sm text-muted">{% if data.windows %}Your work windows: {{ data.windows|join("; ") }}. <a href="/settings">Change them</a>{% else %}No work windows yet, so Argus can't tell how much time you have. <a href="/settings">Set when you study</a>{% endif %}</p>
+  </div>
 </section>
 <section aria-labelledby="risk-heading">
   <h2 class="section-title" id="risk-heading">Needs attention <span class="section-count">{{ data.at_risk|length }}</span></h2>

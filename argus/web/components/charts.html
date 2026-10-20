@@ -1,31 +1,48 @@
 {#- Hand-built SVG charts. Each has a text equivalent for assistive tech. -#}
-{% macro workload_chart(days, title="Hours needed against free hours") -%}
-{%- set width = 640 -%}{%- set height = 220 -%}{%- set pad_l = 32 -%}{%- set pad_b = 28 -%}
-{%- set top = [((days|map(attribute="free_hours")|max) if days else 0), ((days|map(attribute="need_hours")|max) if days else 0), 4]|max -%}
-{%- set scale = (height - pad_b - 8) / top -%}
-{%- set slot = (width - pad_l) / ([days|length, 1]|max) -%}
-<figure class="m-0">
-  <svg class="workload" viewBox="0 0 {{ width }} {{ height }}" role="img" aria-labelledby="wl-title">
-    <title id="wl-title">{{ title }}</title>
-    {% for tick in range(0, (top|round(0, 'ceil')|int) + 1, ((top / 4)|round(0, 'ceil')|int) or 1) %}
-      {%- set y = height - pad_b - tick * scale -%}
-      <line class="grid" x1="{{ pad_l }}" x2="{{ width }}" y1="{{ y }}" y2="{{ y }}"/>
-      <text class="axis" x="{{ pad_l - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ tick }}</text>
-    {% endfor %}
-    {% for d in days %}
-      {%- set x = pad_l + loop.index0 * slot + slot * 0.18 -%}
-      {%- set w = slot * 0.64 -%}
-      <rect class="bar-free" x="{{ x }}" y="{{ height - pad_b - d.free_hours * scale }}" width="{{ w }}" height="{{ d.free_hours * scale }}" rx="3"/>
-      <rect class="bar-need" data-over="{{ 'true' if d.need_hours > d.free_hours else 'false' }}" x="{{ x + w * 0.2 }}" y="{{ height - pad_b - d.need_hours * scale }}" width="{{ w * 0.6 }}" height="{{ d.need_hours * scale }}" rx="2"/>
-      <text class="axis" x="{{ x + w / 2 }}" y="{{ height - 8 }}" text-anchor="middle">{{ d.short_label }}</text>
-    {% endfor %}
-  </svg>
-  <figcaption class="legend mt-2"><span><i style="background: var(--brand)"></i>Work planned</span><span><i style="background: var(--at-risk)"></i>More than window time</span><span><i style="background: var(--surface-2); border: 1px solid var(--control-line)"></i>Work-window hours</span></figcaption>
-  <table class="visually-hidden">
-    <caption>{{ title }}</caption>
-    <tr><th scope="col">Day</th><th scope="col">Needed</th><th scope="col">Free</th></tr>
-    {% for d in days %}<tr><th scope="row">{{ d.label }}</th><td>{{ d.need_hours|hours }}</td><td>{{ d.free_hours|hours }}</td></tr>{% endfor %}
-  </table>
+{#- The workload chart (D065): two cumulative step lines on one hours axis (window time, neutral;
+    work due, teal), the stretch where work due outruns window time shaded and labelled. The plot
+    stretches to fit; its text is HTML so it never scales. A per-day readout on hover, or on focus
+    with the arrow keys (app.js), and a table with every value. -#}
+{% macro workload_chart(c, cid="wl") -%}
+{%- set n = c.days|length -%}
+<figure class="wl" id="{{ cid }}">
+  <div class="wl__frame">
+    <div class="wl__y" aria-hidden="true">{% for t in c.ticks %}<span class="tnum" style="bottom: {{ t.pct }}%">{{ t.text }}</span>{% endfor %}</div>
+    <div class="wl__plot" tabindex="0" role="group" aria-label="Work due against window time, by day. Use the left and right arrow keys to read each day; the table below has every value."
+         data-tips='{{ c.tips|tojson }}'>
+      <svg viewBox="0 0 {{ c.width }} 1000" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <defs><pattern id="{{ cid }}-hatch" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line class="wl__hatch" x1="0" y1="0" x2="0" y2="24"/></pattern></defs>
+        {% for t in c.ticks %}<line class="wl__grid" x1="0" x2="{{ c.width }}" y1="{{ 1000 - t.pct * 10 }}" y2="{{ 1000 - t.pct * 10 }}"/>{% endfor %}
+        {% for r in c.short %}<rect class="wl__short" x="{{ r.x }}" y="{{ r.y }}" width="{{ r.w }}" height="{{ r.h }}" style="--hatch: url(#{{ cid }}-hatch)"/>{% endfor %}
+        {% if c.window_path %}<path class="wl__line wl__line--window" d="{{ c.window_path }}"/>{% endif %}
+        <path class="wl__line wl__line--due" d="{{ c.due_path }}"/>
+      </svg>
+      {% if c.short_label %}<span class="wl__short-label" aria-hidden="true"{% if c.short_label.left < 15 %} data-edge="start"{% elif c.short_label.left > 85 %} data-edge="end"{% endif %} style="left: {{ c.short_label.left }}%; bottom: {{ c.short_label.bottom }}%">{{ c.short_label.text }}</span>{% endif %}
+      <span class="wl__cross" hidden></span>
+      <div class="wl__tip" hidden aria-hidden="true">
+        <p class="wl__tip-day"></p>
+        <p><i class="wl-key wl-key--due"></i><strong class="wl__tip-due tnum"></strong> work due</p>
+        <p class="wl__tip-winrow"><i class="wl-key wl-key--window"></i><strong class="wl__tip-window tnum"></strong> window time</p>
+        <p class="wl__tip-short"><strong class="tnum"></strong> short</p>
+      </div>
+    </div>
+    <p class="visually-hidden" aria-live="polite" data-wl-live></p>
+    <div class="wl__ends" aria-hidden="true">{% for e in c.ends %}<span style="bottom: {{ e.bottom }}%">{{ e.text }}</span>{% endfor %}</div>
+    <div class="wl__x" aria-hidden="true" style="--days: {{ n }}">{% for d in c.days %}<span>{{ d.short_label }}</span>{% endfor %}</div>
+  </div>
+  <figcaption class="wl__legend">
+    {% if c.windows_on %}<span><i class="wl-key wl-key--window"></i>Window time so far</span>{% endif %}
+    <span><i class="wl-key wl-key--due"></i>Work due so far</span>
+    {% if c.short %}<span><i class="wl-key wl-key--short"></i>More work due than window time</span>{% endif %}
+  </figcaption>
+  <details class="wl__table">
+    <summary>Show as a table</summary>
+    <table class="data-table mt-2">
+      <caption class="visually-hidden">Work due and window time per day, and so far</caption>
+      <thead><tr><th scope="col">Day</th><th scope="col">Work due</th><th scope="col">Window time</th><th scope="col">Work due so far</th><th scope="col">Window time so far</th></tr></thead>
+      <tbody>{% for d in c.days %}<tr><th scope="row">{{ d.label }}</th><td class="tnum">{{ d.due_hours|hours if d.due_hours else "-" }}</td><td class="tnum">{{ d.window_hours|hours if d.window_hours else "-" }}</td><td class="tnum">{{ d.due_total|hours if d.due_total else "-" }}</td><td class="tnum">{{ d.window_total|hours if d.window_total else "-" }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </details>
 </figure>
 {%- endmacro %}
 

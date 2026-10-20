@@ -1,8 +1,8 @@
-{% from "components/ui.html" import icon, course_chip %}
+{% from "components/ui.html" import icon, course_code %}
 {% macro finding_card(f) -%}
 <article class="panel finding-card" data-accent="{{ f.course.accent }}" id="finding-{{ f.id }}" aria-labelledby="finding-{{ f.id }}-title">
   <div class="finding-card__head">
-    {{ course_chip(f.course) }}
+    {{ course_code(f.course) }}
     <span class="text-sm text-muted">{{ f.kind_label }}</span>
     {% if f.state == "conflict" %}<span class="tag-conflict">{{ icon("git-compare", "icon-sm") }}Disagrees with {{ f.official_name }}</span>{% endif %}
     {% if f.state == "applied" %}<span class="tag-announced">{{ icon("megaphone", "icon-sm") }}Applied</span>{% endif %}

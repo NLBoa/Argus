@@ -44,12 +44,16 @@ def _row(request: Request, state: AppState, conn: sqlite3.Connection, item_id: i
     if item is None:
         raise HTTPException(404, "No such item")
     timer = repo.running_timer(conn)
+    now = state.clock.now()
+    plan = compute(conn, state.config, now, tracking_sources=state.caps.tracking_sources).items
     view = item_view(
         item,
-        state.clock.now(),
+        now,
         course_views(state.config),
         tracking_sources=state.caps.tracking_sources,
         running_item_id=timer.item_id if timer else None,
+        risk=plan[item_id].level if item_id in plan else None,
+        left=plan[item_id].remaining if item_id in plan else None,
     )
     macro = templates(request).env.get_template("components/ui.html").module.item_row  # type: ignore[attr-defined]
     return HTMLResponse(str(macro(view)))
@@ -697,7 +701,7 @@ def save_notice(
 def save_theme(
     request: Request, state: State, conn: Conn, theme: Annotated[str, Form()] = ""
 ) -> Response:
-    """The theme for this browser, kept in a cookie (the palette and header toggle set the same one)."""
+    """The theme for this browser, kept in a cookie (the command palette sets the same one)."""
     from argus.web.deps import THEME_COOKIE
     from argus.web.routes.pages import settings_page
 

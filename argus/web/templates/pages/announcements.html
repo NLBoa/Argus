@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/ui.html" import icon, course_chip, empty_state, error_banner %}
+{% from "components/ui.html" import icon, empty_state, error_banner %}
 {% from "components/findings.html" import finding_card %}
 {% block content %}
 <div class="page-head">
@@ -13,7 +13,7 @@
 <div class="grid gap-10">
 {% for c in courses %}
   <section aria-labelledby="ann-{{ c.course.code }}">
-    <h2 class="section-title" id="ann-{{ c.course.code }}">{{ course_chip(c.course, "/courses/" ~ c.course.code) }}</h2>
+    <h2 class="section-title" id="ann-{{ c.course.code }}"><a href="/courses/{{ c.course.code }}">{{ c.course.code }}</a></h2>
     {% if c.waiting %}
       <h3 class="font-bold mb-2">Waiting for you</h3>
       <div class="grid gap-4 md:grid-cols-2 mb-6">{% for f in c.waiting %}{{ finding_card(f) }}{% endfor %}</div>

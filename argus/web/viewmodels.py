@@ -12,8 +12,9 @@ from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, ItemStatus, Source
 from argus.planner.freetime import Busy
 from argus.planner.risk import RiskLevel, assess
+from argus.planner.workload import CurveDay
 from argus.store.repo import SourceHealth, TimeLog
-from argus.web.format import clock_time, day_label, due_text, relative
+from argus.web.format import clock_time, day_label, due_text, hours, relative
 
 ACCENTS = ("indigo", "teal", "plum", "ochre", "rose", "sky", "olive", "slate")
 SOURCE_LABELS = {
@@ -65,14 +66,6 @@ class SourceLabel:
     url: str | None
 
 
-@dataclass(frozen=True, slots=True)
-class EstimateView:
-    calibrated_hours: float
-    raw_hours: float | None = None
-    is_default: bool = False
-    is_override: bool = False
-
-
 # "Did you submit?" asks for this long after the deadline; after that the item is only
 # labelled "Not marked done" where it is still listed (the course page). D056.
 UNCONFIRMED_ASK_FOR = timedelta(days=7)
@@ -94,13 +87,18 @@ class ItemView:
     sources: tuple[SourceLabel, ...]
     announced: bool
     conflict: tuple[str, ...]  # "Canvas: Thu 11:59 pm"
-    estimate: EstimateView | None = None
     running: bool = False
     risk_label: str | None = None  # overrides risk.label ("Not marked done", D056)
+    left_hours: float | None = None  # remaining calibrated p80 ("~4 h"); None without an estimate
 
     @property
     def done(self) -> bool:
         return self.status in (ItemStatus.SUBMITTED, ItemStatus.GRADED)
+
+    @property
+    def left_text(self) -> str | None:
+        """'~4.5 h': the queue's rounding and 15-minute floor, so a row and its card agree."""
+        return None if self.left_hours is None else _hours(max(self.left_hours, MIN_LEFT))
 
     @property
     def actionable(self) -> bool:
@@ -128,8 +126,8 @@ def item_view(
     *,
     tracking_sources: frozenset[str],
     running_item_id: int | None = None,
-    estimate: EstimateView | None = None,
     risk: RiskLevel | None = None,
+    left: float | None = None,
 ) -> ItemView:
     """`risk` comes from the planner when available. Otherwise it is assessed here, with
     `tracking_sources` (Capabilities.tracking_sources) deciding tracked vs untracked (D056)."""
@@ -161,8 +159,8 @@ def item_view(
         sources=_sources(item),
         announced=item.announced,
         conflict=conflict,
-        estimate=estimate,
         running=running_item_id == item.id,
+        left_hours=left,
     )
 
 
@@ -440,6 +438,89 @@ def stale_notices(statuses: Iterable[SourceStatusView]) -> list[StaleNotice]:
 
 
 @dataclass(frozen=True, slots=True)
+class StatusNote:
+    text: str
+    state: str  # stale | failing | info: the dot's color
+    href: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Alert:
+    text: str
+    href: str | None
+    action: str
+
+
+@dataclass(frozen=True, slots=True)
+class StatusLine:
+    notes: list[StatusNote]  # the quiet line under the header
+    alerts: list[Alert]  # full banners: only real errors (D067)
+
+
+ALERT_AFTER = 3  # failures in a row before a source or the vault gets a banner
+
+
+def status_line(
+    statuses: Iterable[SourceStatusView],
+    *,
+    proposals: int,
+    vault_failures: int,
+    vault_conflict: bool,
+    page: str,
+) -> StatusLine:
+    """'Gradescope 3h behind' and '1 note edit to review' as quiet notes; a banner only when a
+    source or the vault keeps failing, or the vault hit a conflict (D067)."""
+    health = None if page == "/health" else "/health"
+    notes: list[StatusNote] = []
+    alerts: list[Alert] = []
+    for s in statuses:
+        if s.state == "failing" and s.failures >= ALERT_AFTER:
+            alerts.append(
+                Alert(
+                    f"{s.name} has failed {s.failures} syncs in a row, so its dates may be out of date.",
+                    health,
+                    "Check health",
+                )
+            )
+            continue
+        slow = s.source in ("umdio", "canvas_modules")
+        if s.state not in ("stale", "failing") or (slow and s.state == "stale"):
+            continue
+        if s.last_success is None:
+            behind = "hasn't synced yet"
+        elif s.last_success.endswith(" ago"):
+            behind = f"{s.last_success.removesuffix(' ago')} behind"
+        else:  # "just now": it synced, then failed
+            behind = "didn't sync"
+        notes.append(StatusNote(f"{s.name} {behind}", s.state, health))
+    if vault_failures >= ALERT_AFTER:
+        alerts.append(
+            Alert(
+                f"Vault sync has failed {vault_failures} times in a row, so your notes aren't being updated.",
+                health,
+                "Check health",
+            )
+        )
+    elif vault_conflict:
+        alerts.append(
+            Alert(
+                "Vault sync hit a conflict and kept your version. It tries again in 15 minutes.",
+                health,
+                "Check health",
+            )
+        )
+    if proposals and page != "/proposals":
+        notes.append(
+            StatusNote(
+                f"{proposals} note edit{'' if proposals == 1 else 's'} to review",
+                "info",
+                "/proposals",
+            )
+        )
+    return StatusLine(notes, alerts)
+
+
+@dataclass(frozen=True, slots=True)
 class TimerView:
     item: ItemView
     started_at: datetime
@@ -459,10 +540,146 @@ def timer_view(
 
 @dataclass(frozen=True, slots=True)
 class WorkloadDay:
-    label: str
-    short_label: str
-    need_hours: float
-    free_hours: float
+    label: str  # "Today", "Thursday", "Mon, Nov 2"
+    short_label: str  # "Thu"
+    window_hours: float
+    due_hours: float
+    window_total: float
+    due_total: float
+
+    @property
+    def shortfall(self) -> float:
+        return max(0.0, self.due_total - self.window_total)
+
+
+def workload_days(days: Sequence[CurveDay], today: date) -> list[WorkloadDay]:
+    return [
+        WorkloadDay(
+            day_label(to_local(d.start).date(), today),
+            f"{to_local(d.start):%a}",
+            round(d.window_hours, 2),
+            round(d.due_hours, 2),
+            round(d.window_total, 2),
+            round(d.due_total, 2),
+        )
+        for d in days
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class Tick:
+    text: str
+    pct: float  # from the bottom
+
+
+@dataclass(frozen=True, slots=True)
+class ChartRect:
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+@dataclass(frozen=True, slots=True)
+class ChartLabel:
+    text: str
+    left: float  # % of the plot width
+    bottom: float  # % of the plot height
+
+
+@dataclass(frozen=True, slots=True)
+class WorkloadChart:
+    """The /workload plot in a 100-per-day by 1000 box, stretched to fit; text is HTML, placed
+    by percentage, so it never scales with the plot (D065)."""
+
+    days: list[WorkloadDay]
+    top: float
+    ticks: list[Tick]
+    window_path: str
+    due_path: str
+    short: list[ChartRect]
+    short_label: ChartLabel | None
+    ends: list[ChartLabel]  # direct labels at the right end; left out when they'd collide
+    windows_on: bool = True  # without work windows there is no window line and no shortfall
+
+    @property
+    def width(self) -> int:
+        return DAY_W * len(self.days)
+
+    @property
+    def tips(self) -> list[list[str]]:
+        """Per day, for the hover readout: label, work due so far, window time so far, short."""
+        return [
+            [
+                d.label,
+                _h(d.due_total),
+                _h(d.window_total) if self.windows_on else "",
+                hours(d.shortfall) if d.shortfall and self.windows_on else "",
+            ]
+            for d in self.days
+        ]
+
+
+DAY_W, PLOT_H = 100, 1000
+NICE_STEPS = (1, 2, 5, 10, 20, 50, 100, 200)
+END_LABEL_GAP = 12.0  # % of the plot height
+
+
+def _h(v: float) -> str:
+    return hours(v) if v > 0 else "0 h"
+
+
+def _n(v: float) -> str:
+    return f"{v:.1f}".rstrip("0").rstrip(".")
+
+
+def workload_chart(days: Sequence[WorkloadDay], *, windows_on: bool = True) -> WorkloadChart:
+    high = max([4.0] + [max(d.window_total, d.due_total) for d in days])
+    step = next((s for s in NICE_STEPS if high / s <= 4 + 1e-9), NICE_STEPS[-1])
+    top = step * -(-high // step)
+
+    def y(v: float) -> float:
+        return PLOT_H - v / top * PLOT_H
+
+    def path(totals: list[float]) -> str:
+        return f"M0 {PLOT_H}" + "".join(
+            f" V{_n(y(t))} H{DAY_W * (n + 1)}" for n, t in enumerate(totals)
+        )
+
+    short = [
+        ChartRect(n * DAY_W, y(d.due_total), DAY_W, y(d.window_total) - y(d.due_total))
+        for n, d in enumerate(days)
+        if d.shortfall > 0 and windows_on
+    ]
+    worst = max(range(len(days)), key=lambda n: days[n].shortfall, default=None)
+    short_label = None
+    if windows_on and worst is not None and days[worst].shortfall > 0:
+        d = days[worst]
+        short_label = ChartLabel(
+            f"{hours(d.shortfall)} short", (worst + 0.5) / len(days) * 100, d.due_total / top * 100
+        )
+    ends: list[ChartLabel] = []
+    if days:
+        last = days[-1]
+        a, b = last.window_total / top * 100, last.due_total / top * 100
+        if not windows_on:
+            ends = [ChartLabel(f"Work due {_h(last.due_total)}", 100, b)]
+        elif abs(a - b) >= END_LABEL_GAP:
+            ends = [
+                ChartLabel(f"Window time {_h(last.window_total)}", 100, a),
+                ChartLabel(f"Work due {_h(last.due_total)}", 100, b),
+            ]
+    return WorkloadChart(
+        list(days),
+        top,
+        [Tick("0" if v == 0 else hours(v), v / top * 100) for v in range(0, int(top) + 1, step)],
+        path([d.window_total for d in days]) if windows_on else "",
+        path([d.due_total for d in days]),
+        short,
+        short_label,
+        ends,
+        windows_on,
+    )
 
 
 @dataclass(frozen=True, slots=True)

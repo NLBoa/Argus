@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/ui.html" import icon, empty_state, error_banner, course_chip %}
+{% from "components/ui.html" import icon, empty_state, error_banner, course_code %}
 {% block content %}
 <div class="page-head"><h1 class="page-title">Search</h1></div>
 <form class="search-form mb-6" action="/search" method="get" role="search">
@@ -32,7 +32,7 @@
         {% for hit, course in g.hits %}
         <li class="search-hit" data-nav-item>
           <p class="font-bold">{% if hit.url %}<a href="{{ hit.url }}" data-nav-target {% if hit.url.startswith("http") %}rel="noopener" target="_blank"{% endif %}>{{ hit.title }}{% if hit.url.startswith("http") %}<span class="visually-hidden"> (opens in a new tab)</span>{% endif %}</a>{% else %}<span data-nav-target tabindex="-1">{{ hit.title }}</span>{% endif %}</p>
-          <p class="flex flex-wrap items-center gap-2 mt-1">{{ course_chip(course, "/courses/" ~ course.code) }}</p>
+          <p class="flex flex-wrap items-center gap-2 mt-1">{{ course_code(course, "/courses/" ~ course.code) }}</p>
           {% if hit.snippet %}<p class="search-hit__snippet">{{ hit.snippet|safe }}</p>{% endif %}
         </li>
         {% endfor %}

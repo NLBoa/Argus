@@ -41,6 +41,7 @@ from argus.planner.windows import (
     from_config,
     window_spans,
 )
+from argus.planner.workload import CurveDay, curve
 from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 
@@ -509,29 +510,17 @@ def risk_map(
     return risk_views(compute(conn, config, now, tracking_sources=tracking_sources))
 
 
-@dataclass(frozen=True)
-class WorkloadDayData:
-    day: datetime
-    need_hours: float  # work and study forecast into that day's windows
-    free_hours: float  # work-window hours left that day
-
-
-def workload(p: Planning, days: int = 14) -> list[WorkloadDayData]:
-    """Per local day: work-window hours and the work forecast into them."""
-    today = to_local(p.now).date()
-    out = []
-    for n in range(days):
-        start = local_datetime(today + timedelta(days=n), 0)
-        end = local_datetime(today + timedelta(days=n + 1), 0)
-        on_day = [sp for sp in p.spans if start <= sp.start < end]
-        out.append(
-            WorkloadDayData(
-                start,
-                sum(h for sp in on_day for _, h in p.allocation(sp.window_id)),
-                sum(sp.hours_between(max(p.now, start), sp.end) for sp in on_day),
-            )
-        )
-    return out
+def workload_curve(p: Planning, days: int = 14) -> list[CurveDay]:
+    """Window time against work due, per local day (D065): each queue item's remaining hours by
+    when it must be done, and each exam's study time still to do by the exam."""
+    dues = [(e.due, e.remaining) for e in p.queue if e.kind == "work" and e.due is not None]
+    for exam_id in p.study.total:
+        left = sum(q.get(exam_id, 0.0) for q in p.study.quota.values())
+        left += p.study.shortfall.get(exam_id, 0.0)
+        at = p.items[exam_id].item.due_at if exam_id in p.items else None
+        if at is not None and left > 0:
+            dues.append((at, left))
+    return curve(p.spans, dues, p.now, days=days)
 
 
 @dataclass(frozen=True)

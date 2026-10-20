@@ -122,8 +122,12 @@ def test_search_states(client: TestClient, mode: str) -> None:
     assert re.search(r"[2-9] results for lab", client.get("/search?q=lab").text)
 
 
-def test_chips_link_to_course_pages(client: TestClient) -> None:
-    assert 'href="/courses/CMSC351"' in client.get("/upcoming").text
+def test_item_headers_link_to_course_pages(client: TestClient) -> None:
+    # Rows show the code as text (D065); the item header's chip links to the course.
+    assert re.search(
+        r'class="course-chip" data-accent="\w+" href="/courses/CMSC351"',
+        client.get("/items/2").text,
+    )
 
 
 def test_palette_lists_courses(client: TestClient) -> None:

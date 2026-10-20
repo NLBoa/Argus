@@ -79,7 +79,9 @@ def test_today_with_data(client: TestClient) -> None:
     html = r.text
     assert "Monday, October 19" in html
     assert "2 due today, 1 tomorrow, 1 past due" in html
-    assert "Gradescope last synced 3h ago" in html  # stale state
+    # Four failures in a row: a banner, not a quiet note (D067)
+    assert "Gradescope has failed 4 syncs in a row" in html
+    assert "1 note edit to review" in html  # the status line
     assert "Essay draft: technical description" in html  # running timer
     assert 'aria-current="page"' in html
     assert "MATH240 lecture" in html  # day strip
@@ -108,7 +110,10 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
     for marker in [
         "course-chip",
         "risk-badge",
-        "estimate-pill",
+        "course-code",
+        "status-line",
+        "status-note",
+        "wl__plot",
         "item-row",
         "day-rail",
         "q-card",
@@ -124,8 +129,6 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
         "empty-state",
         "skeleton",
         "banner--error",
-        "banner--stale",
-        "banner--offline",
         "toast",
     ]:
         assert marker in html, marker
@@ -325,8 +328,28 @@ def test_js_and_css_under_150kb_gzipped() -> None:
     assert total < 150 * 1024, f"{total / 1024:.1f} KB gzipped"
 
 
+def test_fonts_fit_their_budget(client: TestClient) -> None:
+    """D066: the display face is at most 45 KB, and the fonts a page preloads at most 90 KB."""
+    assert (STATIC_DIR / "fonts/display-bricolage.woff2").stat().st_size <= 45 * 1024
+    for path in ["/today", "/kiosk"]:
+        preloads = re.findall(
+            r'<link rel="preload" href="/static/([^"]+)" as="font"', client.get(path).text
+        )
+        assert "fonts/display-bricolage.woff2" in preloads
+        total = sum((STATIC_DIR / f).stat().st_size for f in preloads)
+        assert total <= 90 * 1024, f"{path}: {total / 1024:.1f} KB of preloaded fonts"
+
+
 def test_main_views_render_fast(client: TestClient) -> None:
-    for path in ["/today", "/upcoming", "/health"]:
+    for path in [
+        "/today",
+        "/upcoming",
+        "/health",
+        "/workload",
+        "/exams",
+        "/courses/CMSC351",
+        "/settings",
+    ]:
         client.get(path)  # warm
         samples = []
         for _ in range(9):

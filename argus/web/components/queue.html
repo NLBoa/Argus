@@ -96,7 +96,7 @@
   {% if timer %}
   <p class="hero__eyebrow">{{ icon("timer", "icon-sm") }}Working on</p>
   <h2 class="hero__title" id="{{ hid }}-title"><a href="/items/{{ timer.item.id }}">{{ c.title if c else timer.item.title }}</a></h2>
-  <p class="hero__meta">{{ timer.item.course.code }}{% if c and c.left_text %} · <span class="tnum">{{ c.left_text }}</span>{% endif %}{% if timer.item.due_text %} · due {{ timer.item.due_text }}{% endif %}</p>
+  <p class="hero__meta"><span>{{ timer.item.course.code }}</span>{% if c and c.left_text %}<span class="tnum">{{ c.left_text }}</span>{% endif %}{% if timer.item.due_text %}<span>due {{ timer.item.due_text }}</span>{% endif %}</p>
   <div class="hero__go" x-data="timer({{ timer.elapsed_seconds|int }})">
     <span class="hero__elapsed tnum" x-text="text" aria-label="Elapsed time">{{ timer.elapsed_seconds|elapsed }}</span>
     <form method="post" action="/items/{{ timer.item.id }}/timer" hx-post="/items/{{ timer.item.id }}/timer" {{ _hx() }}>
@@ -105,9 +105,9 @@
     </form>
   </div>
   {% else %}
-  <p class="hero__eyebrow">Next up{% if c.position and c.total > 1 %} · 1 of {{ c.total }}{% endif %}</p>
+  <p class="hero__eyebrow">Next up{% if c.position and c.total > 1 %}<span class="hero__count">1 of {{ c.total }}</span>{% endif %}</p>
   <h2 class="hero__title" id="{{ hid }}-title"><a href="/items/{{ c.item.id }}">{{ c.title }}</a></h2>
-  <p class="hero__meta">{{ _meta(c) }}{% if c.item.due_text %}<span>due {{ c.item.due_text }} · {{ c.item.due_relative }}</span>{% endif %}</p>
+  <p class="hero__meta">{{ _meta(c) }}{% if c.item.due_text %}<span>due {{ c.item.due_text }}, {{ c.item.due_relative }}</span>{% endif %}</p>
   {% if c.reason or c.marker %}<p class="hero__reason">{% if c.marker %}{{ risk_badge(c.marker) }}{% endif %}{{ c.reason or "" }}</p>{% endif %}
   <div class="hero__go">
     <form method="post" action="/items/{{ c.item.id }}/timer" hx-post="/items/{{ c.item.id }}/timer" {{ _hx() }}>

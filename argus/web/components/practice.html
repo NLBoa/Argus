@@ -1,7 +1,7 @@
-{% from "components/ui.html" import icon, course_chip %}
+{% from "components/ui.html" import icon, course_code %}
 {% macro practice_card(q) -%}
 <article class="panel practice-card" id="practice-{{ q.id }}" {% if q.result %}data-result="{{ q.result }}"{% endif %} aria-labelledby="practice-{{ q.id }}-q">
-  <div class="flex flex-wrap items-center gap-2 text-sm text-muted">{{ course_chip(q.course) }}<span>{{ q.concept }}</span></div>
+  <div class="flex flex-wrap items-center gap-2 text-sm text-muted">{{ course_code(q.course) }}<span>{{ q.concept }}</span></div>
   <p class="practice-card__q mt-2" id="practice-{{ q.id }}-q">{{ q.question }}</p>
   <details>
     <summary>Show answer</summary>

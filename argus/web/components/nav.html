@@ -1,0 +1,42 @@
+{% from "components/ui.html" import icon %}
+{#- Navigation (D067): Today, Upcoming and Exams are primary; the rest sit in "More", a <details>
+    menu (Enter opens it, Esc closes it and returns focus, see app.js). A page the setup can't
+    support is left out, never shown empty (D055). -#}
+
+{% set PRIMARY = [("/today", "Today", "house"), ("/upcoming", "Upcoming", "calendar-days"), ("/exams", "Exams", "graduation-cap")] %}
+
+{% macro more_menu(caps, active, proposals, cls, mid) -%}
+{%- set items = [("/workload", "Workload", None)] -%}
+{%- if caps.has("staff_posts") %}{% set _ = items.append(("/announcements", "Announcements", "staff_posts")) %}{% endif -%}
+{%- set _ = items.extend([("/health", "Health", None), ("/settings", "Settings", None), ("/proposals", "Proposals", None)]) -%}
+<details class="more more--{{ cls }}" data-more>
+  <summary class="{{ cls }}__more" id="{{ mid }}"{% if active in items|map(attribute=0)|list %} data-active="true"{% endif %}>
+    {%- if cls == "tabbar" %}{{ icon("ellipsis") }}{% endif %}<span>More</span>
+    <span class="count-badge" data-proposal-count aria-hidden="true"{% if not proposals %} hidden{% endif %}>{{ proposals }}</span><span class="visually-hidden" data-proposal-label>{% if proposals %}, {{ proposals }} note edit{{ "" if proposals == 1 else "s" }} to review{% endif %}</span>
+    {%- if cls != "tabbar" %}{{ icon("chevron-down", "icon-sm more__chevron") }}{% endif %}
+  </summary>
+  <ul class="more__menu" role="list">
+    {% for href, label, needs in items %}
+    <li><a class="more__link" href="{{ href }}" {% if needs %}data-requires="{{ needs }}" {% endif %}{% if active == href %}aria-current="page"{% endif %}>{{ label }}{% if href == "/proposals" %}<span class="count-badge" data-proposal-count{% if not proposals %} hidden{% endif %}>{{ proposals }}</span>{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+</details>
+{%- endmacro %}
+
+{% macro header_nav(caps, active, proposals) -%}
+<nav class="nav" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+  {% for href, label, ico in PRIMARY %}
+  <a class="nav-link" href="{{ href }}" {% if active == href or (href == "/exams" and active.startswith("/exams")) %}aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+  {{ more_menu(caps, active, proposals, "nav", "more-header") }}
+</nav>
+{%- endmacro %}
+
+{% macro tabbar(caps, active, proposals) -%}
+<nav class="tabbar" aria-label="Main" hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+  {% for href, label, ico in PRIMARY %}
+  <a class="tabbar__link" href="{{ href }}" {% if active == href or (href == "/exams" and active.startswith("/exams")) %}aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span></a>
+  {% endfor %}
+  {{ more_menu(caps, active, proposals, "tabbar", "more-tabbar") }}
+</nav>
+{%- endmacro %}
