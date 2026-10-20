@@ -115,6 +115,11 @@ def test_legacy_sessions_convert_once_and_only_without_real_logs(
     now = clock.now()
     with transaction(demo):
         demo.execute("UPDATE plan_state SET legacy_converted_at = NULL")
+        # A fresh database applies 0010 at once; an upgraded one still has the table as 0009 left it.
+        demo.execute(
+            "CREATE TABLE plan_blocks_legacy (id INTEGER PRIMARY KEY, item_id INTEGER, kind TEXT,"
+            " start_at TEXT, end_at TEXT, created_at TEXT)"
+        )
         for item, start, hours in (
             (hw4, now - timedelta(hours=5), 2),
             (quiz, now - timedelta(hours=3), 1),
@@ -261,7 +266,9 @@ def test_without_windows_risk_falls_back_to_the_time_only_rule(
     assert all(ip.load is None for ip in plan.items.values())
 
 
-def test_migration_0009_rebuilt_time_logs_and_retired_start_nudges(db: sqlite3.Connection) -> None:
+def test_migrations_0009_and_0010_rebuilt_time_logs_and_retired_planned_sessions(
+    db: sqlite3.Connection,
+) -> None:
     names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
     assert {"time_logs_item", "time_logs_one_running", "time_logs_checkin"} <= names
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -270,9 +277,8 @@ def test_migration_0009_rebuilt_time_logs_and_retired_start_nudges(db: sqlite3.C
         "queue_prefs",
         "remaining_marks",
         "window_plans",
-        "plan_blocks_legacy",
     } <= tables
-    assert "plan_blocks" not in tables
+    assert not {"plan_blocks", "plan_blocks_legacy"} & tables  # 0010: nothing to convert
     with pytest.raises(sqlite3.IntegrityError):
         db.execute(
             "INSERT INTO time_logs (item_id, started_at, source, created_at) VALUES (1, 'x', 'assumed', 'x')"

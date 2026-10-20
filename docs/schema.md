@@ -29,7 +29,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `item_overrides` | 0004 | Student decisions: a confirmed due date that wins over sources, or a confirmed cancellation (item hidden) |
 | `items.scope`, `items.logistics` | 0004 | Text applied from staff findings |
 | `estimates` | 0004 | Versioned, append-only: `source` (`ai`, `default`, `user`), p50/p80 hours, confidence, breakdown and assumptions (JSON), reasoning, input hash, model, prompt version. User overrides can be retracted (`retracted_at`), never rewritten |
-| `plan_blocks` | 0004 | Removed in 0009: renamed `plan_blocks_legacy`, converted once to `legacy` time, dropped in 0010 (D060) |
+| `plan_blocks` | 0004 | Removed in 0009: renamed `plan_blocks_legacy`, converted once to `legacy` time, dropped in 0010 (D060). `migrate()` holds 0010 back until the conversion has run |
 | `plan_state` | 0004, 0009 | The facts hash of the plan, its one-line explanation, when it was made; `model_since`, `legacy_converted_at`, `windows_seeded_at` (D057) |
 | `work_windows` | 0009 | When the student works: one row per start day (`day` Mon=0, `start_time`, `end_time` local `HH:MM`; end at or before start runs past midnight). Seeded once from config, then owned by Settings (D057) |
 | `queue_prefs` | 0009 | Per queue entry (`item:<id>`, `study:<exam id>`): `pin_rank`, `pin_kind` `pin`/`move`, `pin_until` (move pins expire), `skip_window` ("Not tonight") (D058) |

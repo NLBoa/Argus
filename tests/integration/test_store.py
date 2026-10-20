@@ -369,3 +369,82 @@ def test_sync_runs_health_and_consecutive_failures(
     run("unchanged")
     assert repo.consecutive_failures(db, "gradescope") == 0
     assert repo.recent_sync_runs(db, "gradescope", limit=1)[0].status == "unchanged"
+
+
+# ---------------------------------------------------------------- 0010: the legacy drop waits
+
+
+def _upgrade_db_with_legacy_blocks(tmp_path: Path, clock: FakeClock) -> sqlite3.Connection:
+    """A database at 0009 with one planned work block not yet converted (as on the Pi)."""
+    import shutil
+
+    from argus.store.db import MIGRATIONS_DIR
+
+    old = tmp_path / "old"
+    old.mkdir()
+    for f in sorted(MIGRATIONS_DIR.glob("000[1-9]_*.sql")):
+        shutil.copy(f, old / f.name)
+    conn = connect(tmp_path / "upgrade.db")
+    migrate(conn, clock, old)
+    now = iso(clock.now())
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO courses (code, section, created_at, updated_at) VALUES ('CMSC351', '0101', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO items (course_id, kind, title, due_at, created_at, updated_at)"
+            " VALUES (1, 'assignment', 'HW', ?, ?, ?)",
+            (now, now, now),
+        )
+        conn.execute(
+            "INSERT INTO plan_blocks_legacy (item_id, kind, start_at, end_at, created_at)"
+            " VALUES (1, 'work', ?, ?, ?)",
+            (iso(clock.now() - timedelta(hours=2)), iso(clock.now() - timedelta(hours=1)), now),
+        )
+    return conn
+
+
+def _tables(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def test_0010_stays_pending_until_the_legacy_conversion_has_run(
+    tmp_path: Path, clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    import argus.store.db as db_module
+
+    conn = _upgrade_db_with_legacy_blocks(tmp_path, clock)
+    db_module._held.clear()
+    caplog.set_level("INFO", logger="argus.store.db")
+    assert migrate(conn, clock) == []  # never raises, so the services can't crash-loop
+    assert migrate(conn, clock) == []
+    assert "plan_blocks_legacy" in _tables(conn)
+    held = [r for r in caplog.records if getattr(r, "migration", "").startswith("0010")]
+    assert len(held) == 1  # logged once, not on every start
+    with transaction(conn):
+        assert repo.convert_legacy_blocks(conn, clock.now()) == 1
+    assert migrate(conn, clock) == [10]
+    assert "plan_blocks_legacy" not in _tables(conn)
+    assert conn.execute("SELECT source FROM time_logs").fetchone()[0] == "legacy"
+
+
+def test_0010_does_not_hold_back_later_migrations(tmp_path: Path, clock: FakeClock) -> None:
+    import shutil
+
+    from argus.store.db import MIGRATIONS_DIR
+
+    conn = _upgrade_db_with_legacy_blocks(tmp_path, clock)
+    later = tmp_path / "later"
+    later.mkdir()
+    for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        shutil.copy(f, later / f.name)
+    (later / "0011_next.sql").write_text("CREATE TABLE next_thing (x INTEGER);")
+    assert migrate(conn, clock, later) == [11]
+    assert {"next_thing", "plan_blocks_legacy"} <= _tables(conn)
+
+
+def test_a_fresh_database_has_nothing_to_convert_and_applies_0010(
+    db: sqlite3.Connection,
+) -> None:
+    assert "plan_blocks_legacy" not in _tables(db)

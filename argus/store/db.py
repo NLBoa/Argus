@@ -17,6 +17,9 @@ from itertools import count
 from pathlib import Path
 
 from argus.clock import Clock, ensure_utc
+from argus.logging import get_logger
+
+log = get_logger(__name__)
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _MIGRATION_NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
@@ -91,6 +94,27 @@ def available_migrations(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, Pa
     return found
 
 
+def _legacy_converted(conn: sqlite3.Connection) -> bool:
+    """0010 drops the planned sessions, so it waits until the worker has converted them (D060).
+    A database with none (a fresh install) has nothing to wait for."""
+    if (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'plan_blocks_legacy'"
+        ).fetchone()
+        is None
+        or conn.execute("SELECT 1 FROM plan_blocks_legacy LIMIT 1").fetchone() is None
+    ):
+        return True
+    row = conn.execute("SELECT legacy_converted_at FROM plan_state WHERE id = 1").fetchone()
+    return row is not None and row[0] is not None
+
+
+# Migrations that must wait for a condition. One that isn't ready stays pending (logged, never
+# raised, so a service can't crash-loop on it) and later migrations still apply.
+_READY = {10: _legacy_converted}
+_held: set[int] = set()
+
+
 def migrate(conn: sqlite3.Connection, clock: Clock, directory: Path = MIGRATIONS_DIR) -> list[int]:
     """Apply pending migrations in order, each atomically. Returns the versions applied."""
     conn.execute(
@@ -101,6 +125,12 @@ def migrate(conn: sqlite3.Connection, clock: Clock, directory: Path = MIGRATIONS
     applied: list[int] = []
     for version, path in available_migrations(directory):
         if version in done:
+            continue
+        ready = _READY.get(version)
+        if ready is not None and not ready(conn):
+            if version not in _held:
+                _held.add(version)
+                log.info("migration held back", extra={"migration": path.name})
             continue
         sql = path.read_text(encoding="utf-8")
         # Safe to inline: the name matched _MIGRATION_NAME and the timestamp is generated here.
