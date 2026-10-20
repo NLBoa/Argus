@@ -188,8 +188,10 @@ class VerificationOut(_Out):
 class CommandOut(_Out):
     """What a free-text reply most likely means, as one command. Code validates and acts."""
 
-    command: Literal["DONE", "LOG", "SNOOZE", "EST", "OK", "NO", "TODAY", "UNCLEAR"]
+    command: Literal[
+        "DONE", "LOG", "SNOOZE", "EST", "LEFT", "SKIP", "FIRST", "OK", "NO", "TODAY", "UNCLEAR"
+    ]
     number: int | None = Field(description="The [n] item number the student means, or null")
-    hours: float | None = Field(description="Hours for LOG or EST, or null")
+    hours: float | None = Field(description="Hours for LOG, EST, or LEFT, or null")
     minutes: int | None = Field(description="Snooze length in minutes, or null")
     confidence: float = Field(ge=0, le=1)

@@ -23,7 +23,7 @@ from argus.clock import Clock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item
 from argus.logging import get_logger
-from argus.planning import compute, replan
+from argus.planning import compute, pin_to_top, replan, skip_tonight
 from argus.reminders.commands import Command, Verb, is_reserved, parse
 from argus.reminders.text import fit, short, when, window_phrase
 from argus.store import repo
@@ -34,11 +34,15 @@ AI_CONFIDENCE = 0.8
 ASK_BACK_WINDOW = timedelta(minutes=30)
 AMBIGUOUS = timedelta(minutes=10)  # two numbered texts this close: [n] could mean either
 # An AI reading never silences reminders or changes dates by itself (review R16).
-CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE)
-HELP = "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, OK 1, NO 1, or TODAY. Numbers are the [n] in my last text."
+CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE, Verb.SKIP)
+HELP = (
+    "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, LEFT 1 2h, SKIP 1, FIRST 1, OK 1, NO 1, or TODAY."
+    " Numbers are the [n] in my last text."
+)
 # Without a source of staff posts there are no announcement questions to answer OK/NO to (D055).
 HELP_NO_POSTS = (
-    "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, or TODAY. Numbers are the [n] in my last text."
+    "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, LEFT 1 2h, SKIP 1, FIRST 1, or TODAY."
+    " Numbers are the [n] in my last text."
 )
 
 
@@ -188,7 +192,7 @@ class Inbox:
         canonical: str = out.command
         if out.number is not None:
             canonical += f" {out.number}"
-        if out.command in ("LOG", "EST") and out.hours is not None:
+        if out.command in ("LOG", "EST", "LEFT") and out.hours is not None:
             canonical += f" {out.hours:g}h"
         if out.command == "SNOOZE" and out.minutes is not None:
             canonical += f" {out.minutes}m"
@@ -294,7 +298,33 @@ class Inbox:
                 force=True,
             )
             return f"Set {label} to {cmd.hours:g}h. Plan updated.", ()
+        if cmd.verb in (Verb.SKIP, Verb.FIRST, Verb.LEFT):
+            return self._queue(cmd, item, label, now), ()
         return self._answer(cmd, item, label), ()
+
+    def _queue(self, cmd: Command, item: Item, label: str, now: datetime) -> str:
+        """SKIP, FIRST, and LEFT: the same changes as the queue's buttons on Today (D058)."""
+        tracking = self.caps.tracking_sources
+        if not (item.status.is_open and item.kind.takes_submission):
+            raise LookupError(f"{label} isn't in the queue.")
+        entry = f"item:{item.id}"
+        with transaction(self.conn):
+            if cmd.verb is Verb.SKIP:
+                p = compute(self.conn, self.config, now, tracking_sources=tracking)
+                w = skip_tonight(self.conn, p, entry, now)
+                phrase = window_phrase(w.start, w.end, now)
+                if phrase.startswith(("Tonight", "This")):
+                    phrase = phrase[0].lower() + phrase[1:]
+                reply = f"Skipped {label} for {phrase}. It's back in the queue after that window."
+            elif cmd.verb is Verb.FIRST:
+                pin_to_top(self.conn, entry, now)
+                reply = f"Pinned {label} to the top of the queue until it's done."
+            else:
+                assert cmd.hours is not None
+                repo.add_remaining_mark(self.conn, item.id, cmd.hours, now, "sms")
+                reply = f"Set {label} to about {cmd.hours:g}h left. Plan updated."
+        replan(self.conn, self.config, self.clock, tracking_sources=tracking, force=True)
+        return reply
 
     def _answer(self, cmd: Command, item: Item, label: str) -> str:
         """OK/NO: the open question about this item (an announced change waiting for a decision)."""

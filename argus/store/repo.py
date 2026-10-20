@@ -1943,6 +1943,29 @@ def queue_prefs(conn: sqlite3.Connection) -> dict[str, Pref]:
     }
 
 
+def save_queue_pref(conn: sqlite3.Connection, pref: Pref, now: datetime) -> None:
+    """Store the student's say over one queue entry (D058); a row with nothing left is removed."""
+    if pref.pin_rank is None and pref.skip_window is None:
+        conn.execute("DELETE FROM queue_prefs WHERE entry = ?", (pref.entry_id,))
+        return
+    conn.execute(
+        """INSERT INTO queue_prefs (entry, item_id, pin_rank, pin_kind, pin_until, skip_window, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (entry) DO UPDATE SET pin_rank = excluded.pin_rank, pin_kind = excluded.pin_kind,
+             pin_until = excluded.pin_until, skip_window = excluded.skip_window,
+             updated_at = excluded.updated_at""",
+        (
+            pref.entry_id,
+            int(pref.entry_id.split(":", 1)[1]),
+            pref.pin_rank,
+            pref.pin_kind,
+            iso_or_none(pref.pin_until),
+            pref.skip_window,
+            iso(now),
+        ),
+    )
+
+
 def latest_remaining_marks(conn: sqlite3.Connection) -> dict[int, tuple[float, datetime]]:
     """Per item, the student's latest "about N h left" and when it was given."""
     out: dict[int, tuple[float, datetime]] = {}

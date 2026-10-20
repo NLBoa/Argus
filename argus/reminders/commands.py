@@ -7,9 +7,13 @@ Commands (case-insensitive, extra spaces ignored):
   EST n h         set my estimate for item n
   OK n / Y n      yes to the question Argus asked about item n (YES / Y / OK)
   NO n / N n      no to it
+  SKIP n          not tonight: item n waits until after the current or next work window
+  FIRST n         pin item n to the top of the queue
+  LEFT n h        about h hours of work left on item n (the same amounts as EST)
   TODAY           what's due and planned today
   ? / COMMANDS    the command list
 The number is optional for DONE, OK, and NO; the service fills it in when only one item fits.
+SKIP, FIRST, and LEFT always need one, so chatter like "skip it tonight" goes to the AI instead.
 Opt-out and help keywords (STOP, START, HELP, ...) belong to Twilio and are never commands.
 """
 
@@ -48,6 +52,9 @@ class Verb(StrEnum):
     EST = "EST"
     YES = "OK"
     NO = "NO"
+    SKIP = "SKIP"
+    FIRST = "FIRST"
+    LEFT = "LEFT"
     TODAY = "TODAY"
     HELP = "HELP"
 
@@ -82,6 +89,9 @@ _VERBS = {
     "yes": Verb.YES,
     "no": Verb.NO,
     "n": Verb.NO,
+    "skip": Verb.SKIP,
+    "first": Verb.FIRST,
+    "left": Verb.LEFT,
     "today": Verb.TODAY,
     "?": Verb.HELP,
     "commands": Verb.HELP,
@@ -116,7 +126,7 @@ def _duration(text: str) -> timedelta | None:
 
 
 def _with_amount(verb: Verb, number: int, rest: list[str]) -> Command | None:
-    """SNOOZE, LOG, and EST: the amount after the number."""
+    """SNOOZE, LOG, EST, and LEFT: the amount after the number."""
     amount = _duration(" ".join(rest)) if rest else None
     if verb is Verb.SNOOZE:
         if not rest:
@@ -149,4 +159,6 @@ def parse(text: str) -> Command | None:
         number, rest = int(m.group(1)), rest[1:]
     if verb in (Verb.DONE, Verb.YES, Verb.NO):
         return None if rest else Command(verb, number)
+    if verb in (Verb.SKIP, Verb.FIRST):
+        return None if rest or number is None else Command(verb, number)
     return None if number is None else _with_amount(verb, number, rest)

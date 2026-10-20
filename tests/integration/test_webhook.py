@@ -232,6 +232,37 @@ def test_snooze_and_estimate(client: TestClient, db_path: Path) -> None:
     assert row[0] == 4.0
 
 
+def test_skip_first_and_left_change_the_queue_once_even_when_replayed(
+    client: TestClient, db_path: Path
+) -> None:
+    out = reply(text(client, "SKIP 1", sid="SMskip"))
+    assert out.startswith("Skipped [1] CMSC351 Homework 3 for tonight 7-11pm.")
+    assert reply(text(client, "SKIP 1", sid="SMskip")) == out  # Twilio's retry: same answer
+    rows = db(db_path).execute("SELECT entry, skip_window FROM queue_prefs").fetchall()
+    assert [(r["entry"], r["skip_window"]) for r in rows] == [(f"item:{HW3}", "2026-10-19T19:00")]
+
+    assert reply(text(client, "FIRST 2")).startswith("Pinned [2] ")
+    pin = (
+        db(db_path)
+        .execute("SELECT pin_rank, pin_kind FROM queue_prefs WHERE entry = ?", (f"item:{PS6}",))
+        .fetchone()
+    )
+    assert (pin["pin_rank"], pin["pin_kind"]) == (0, "pin")
+
+    assert reply(text(client, "LEFT 1 2h")).startswith(
+        "Set [1] CMSC351 Homework 3 to about 2h left."
+    )
+    marks = db(db_path).execute("SELECT item_id, hours, source FROM remaining_marks").fetchall()
+    assert [tuple(m) for m in marks] == [(HW3, 2.0, "sms")]
+
+
+def test_queue_verbs_without_a_number_go_to_the_ai_and_ask_back(
+    client: TestClient, db_path: Path
+) -> None:
+    assert reply(text(client, "skip it tonight")).startswith("Not sure what you meant.")
+    assert db(db_path).execute("SELECT COUNT(*) FROM queue_prefs").fetchone()[0] == 0
+
+
 def test_today_renumbers_and_ok_no_answer_the_waiting_question(
     client: TestClient, db_path: Path
 ) -> None:

@@ -189,9 +189,10 @@ def test_source_names_for_copy() -> None:
 
 
 def test_sms_help_lists_ok_no_only_with_staff_posts() -> None:
+    from argus.reminders.text import SEGMENT, gsm_length
     from argus.sms import help_text
 
     assert "OK 1, NO 1" in help_text(derive(CONFIG, secrets(piazza=True)))
     assert "OK 1" not in help_text(derive(CONFIG, secrets(ical=True)))
     for caps in (derive(CONFIG, secrets(piazza=True)), derive(CONFIG, secrets(ical=True))):
-        assert len(help_text(caps)) <= 160
+        assert gsm_length(help_text(caps)) <= SEGMENT  # one segment: [ and ] count twice

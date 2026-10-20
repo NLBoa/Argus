@@ -17,7 +17,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from argus.ai import prompts
@@ -30,8 +30,9 @@ from argus.domain.status import awaiting_confirmation, effective_deadline
 from argus.estimates import effective_estimates
 from argus.planner.calibration import DEFAULT_HOURS, DEFAULT_P80_RATIO, Effective
 from argus.planner.exam_time import ExamStudy, StudyPlan, study_plan
-from argus.planner.queue import Entry, forecast, order
+from argus.planner.queue import Entry, Pref, forecast, order, pinned
 from argus.planner.queue import Tier as QueueTier
+from argus.planner.queue import move as move_order
 from argus.planner.risk import Load, RiskLevel, Work, assess, loads
 from argus.planner.windows import (
     WindowSpan,
@@ -375,6 +376,97 @@ async def explain(
 def explanation(conn: sqlite3.Connection) -> str | None:
     row = conn.execute("SELECT explanation FROM plan_state WHERE id = 1").fetchone()
     return str(row[0]) if row and row[0] else None
+
+
+# ---------------------------------------------------------------- the student's say (D058, D064)
+# Writes only; callers hold the transaction and replan afterwards.
+
+
+def _active_pins(prefs: dict[str, Pref], now: datetime) -> list[str]:
+    live = [p for p in prefs.values() if pinned(p, now)]
+    return [p.entry_id for p in sorted(live, key=lambda p: (p.pin_rank or 0, p.entry_id))]
+
+
+def _explicit(pref: Pref | None, now: datetime) -> bool:
+    return pref is not None and pinned(pref, now) and pref.pin_kind == "pin"
+
+
+def pin_to_top(conn: sqlite3.Connection, entry: str, now: datetime) -> None:
+    """Pin an entry first (the web's Pin, SMS FIRST). It stays until done or unpinned, and is
+    wanted tonight, so a "Not tonight" on it is cleared. Other pins keep their order below it."""
+    prefs = repo.queue_prefs(conn)
+    for rank, e in enumerate([entry, *(x for x in _active_pins(prefs, now) if x != entry)]):
+        old = prefs.get(e, Pref(e))
+        if e == entry:
+            repo.save_queue_pref(
+                conn,
+                replace(old, pin_rank=rank, pin_kind="pin", pin_until=None, skip_window=None),
+                now,
+            )
+        else:
+            repo.save_queue_pref(conn, replace(old, pin_rank=rank), now)
+
+
+def unpin(conn: sqlite3.Connection, entry: str, now: datetime) -> None:
+    old = repo.queue_prefs(conn).get(entry)
+    if old is not None:
+        repo.save_queue_pref(conn, replace(old, pin_rank=None, pin_kind="pin", pin_until=None), now)
+
+
+def skip_tonight(conn: sqlite3.Connection, p: Planning, entry: str, now: datetime) -> WindowSpan:
+    """ "Not tonight": the entry waits until the current window, or the next one within a day,
+    is over. Returns that window. Raises LookupError when there is none."""
+    if p.window is None:
+        raise LookupError("No work window in the next 24 hours, so there's no tonight to skip.")
+    old = repo.queue_prefs(conn).get(entry, Pref(entry))
+    repo.save_queue_pref(conn, replace(old, skip_window=p.window.window_id), now)
+    return p.window
+
+
+def unskip(conn: sqlite3.Connection, entry: str, now: datetime) -> None:
+    old = repo.queue_prefs(conn).get(entry)
+    if old is not None:
+        repo.save_queue_pref(conn, replace(old, skip_window=None), now)
+
+
+def skipped(p: Planning, prefs: dict[str, Pref], entry: str) -> bool:
+    pref = prefs.get(entry)
+    return p.window is not None and pref is not None and pref.skip_window == p.window.window_id
+
+
+def move_entry(
+    conn: sqlite3.Connection,
+    p: Planning,
+    entry: str,
+    direction: str,
+    *,
+    before: str | None,
+    now: datetime,
+) -> bool:
+    """Move Up / Move down (D064) in tonight's list as shown (entries not skipped): everything
+    from the top down to the moved pair is pinned in that order. Pins made this way expire when
+    tonight's window ends (or at the end of the day without windows); explicit pins stay pins.
+    False, changing nothing, when `before` is no longer the neighbor it swaps with."""
+    prefs = repo.queue_prefs(conn)
+    shown = [e.entry_id for e in p.queue if not skipped(p, prefs, e.entry_id)]
+    new = move_order(shown, entry, direction, before)
+    if new is None:
+        return False
+    until = (
+        p.window.end
+        if p.window is not None
+        else local_datetime(to_local(now).date() + timedelta(days=1), 0)
+    )
+    rest = [e for e in _active_pins(prefs, now) if e not in new]
+    for rank, e in enumerate(new + rest):
+        old = prefs.get(e, Pref(e))
+        if _explicit(old, now) or e in rest:
+            repo.save_queue_pref(conn, replace(old, pin_rank=rank), now)
+        else:
+            repo.save_queue_pref(
+                conn, replace(old, pin_rank=rank, pin_kind="move", pin_until=until), now
+            )
+    return True
 
 
 # ---------------------------------------------------------------- views of the plan

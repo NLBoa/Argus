@@ -41,6 +41,13 @@ from argus.reminders.commands import Command, Verb, is_reserved, parse
         ("COMMANDS", Command(Verb.HELP)),
         ("?", Command(Verb.HELP)),
         ("DONE", Command(Verb.DONE, None)),  # number filled from context when only one item is open
+        ("SKIP 1", Command(Verb.SKIP, 1)),
+        ("skip 2", Command(Verb.SKIP, 2)),
+        ("FIRST 3", Command(Verb.FIRST, 3)),
+        ("first #1", Command(Verb.FIRST, 1)),
+        ("LEFT 1 2h", Command(Verb.LEFT, 1, hours=2.0)),
+        ("left 2 90m", Command(Verb.LEFT, 2, hours=1.5)),
+        ("LEFT 1 150", Command(Verb.LEFT, 1, hours=150.0)),
     ],
 )
 def test_parses(text: str, expected: Command) -> None:
@@ -66,6 +73,15 @@ def test_parses(text: str, expected: Command) -> None:
         "DONE 1 2 3",
         "LOG 1 2h extra words",
         "DONE 99999999999999999999",
+        "SKIP",  # each queue verb needs a number, so chatter falls through to the AI
+        "skip it tonight",
+        "skip 1 tonight",
+        "FIRST",
+        "first thing tomorrow",
+        "LEFT 1",
+        "LEFT 1 0",
+        "LEFT 1 201h",
+        "left 2 to go",
         "STOP",  # Twilio handles opt-out and help keywords itself
         "HELP",
         "start",

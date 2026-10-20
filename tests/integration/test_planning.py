@@ -13,7 +13,17 @@ from argus.capabilities import derive
 from argus.clock import FakeClock, local_datetime, to_local
 from argus.config import AppConfig
 from argus.demo import DEMO_CONFIG, DemoProfile, demo_secrets, seed_demo
-from argus.planning import compute, pending_confirmation, replan
+from argus.planner.queue import pinned
+from argus.planning import (
+    Planning,
+    compute,
+    move_entry,
+    pending_confirmation,
+    pin_to_top,
+    replan,
+    skip_tonight,
+    unpin,
+)
 from argus.store import repo
 from argus.store.db import iso, open_db, transaction
 
@@ -434,3 +444,79 @@ def test_a_failing_morning_brief_waits_instead_of_breaking_the_tick(
         demo, DEMO_CONFIG, clock, Router([]), caps=derive(DEMO_CONFIG, demo_secrets())
     )
     assert engine.snapshot(clock.now()).brief is None
+
+
+# ---------------------------------------------------------------- the student's say (D058, D064)
+
+
+def _queue(conn: sqlite3.Connection, clock: FakeClock) -> list[str]:
+    return [
+        e.entry_id for e in compute(conn, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING).queue
+    ]
+
+
+def _plan(conn: sqlite3.Connection, clock: FakeClock) -> Planning:
+    replan(conn, DEMO_CONFIG, clock, tracking_sources=TRACKING)
+    return compute(conn, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING)
+
+
+def test_move_swaps_with_the_neighbor_shown_and_expires_with_the_window(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    p = _plan(demo, clock)
+    before = [e.entry_id for e in p.queue]
+    a, b = before[0], before[1]
+    with transaction(demo):
+        assert move_entry(demo, p, b, "up", before=a, now=clock.now())
+    after = _queue(demo, clock)
+    assert after[:2] == [b, a] and after[2:] == before[2:]
+    prefs = repo.queue_prefs(demo)
+    assert {prefs[a].pin_kind, prefs[b].pin_kind} == {"move"}
+    assert p.window is not None and prefs[b].pin_until == p.window.end
+    clock.set(p.window.end)  # tonight's window is over: the automatic order comes back
+    assert not pinned(repo.queue_prefs(demo)[b], clock.now())
+
+
+def test_a_stale_move_is_refused_and_changes_nothing(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    p = _plan(demo, clock)
+    ids = [e.entry_id for e in p.queue]
+    with transaction(demo):
+        assert not move_entry(demo, p, ids[2], "up", before=ids[0], now=clock.now())
+        assert not move_entry(demo, p, ids[0], "up", before=None, now=clock.now())  # at the top
+    assert repo.queue_prefs(demo) == {}
+
+
+def test_pin_to_top_keeps_explicit_pins_and_clears_not_tonight(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    p = _plan(demo, clock)
+    ids = [e.entry_id for e in p.queue]
+    with transaction(demo):
+        skip_tonight(demo, p, ids[2], clock.now())
+    assert _queue(demo, clock)[-1] == ids[2]  # not tonight goes last
+    with transaction(demo):
+        pin_to_top(demo, ids[3], clock.now())
+        pin_to_top(demo, ids[2], clock.now())
+    assert _queue(demo, clock)[:2] == [ids[2], ids[3]]
+    p = compute(demo, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING)
+    with transaction(demo):  # moving below an explicit pin keeps it a pin, not a move pin
+        assert move_entry(demo, p, ids[3], "up", before=ids[2], now=clock.now())
+    prefs = repo.queue_prefs(demo)
+    assert prefs[ids[2]].pin_kind == "pin" and prefs[ids[3]].pin_kind == "pin"
+    assert prefs[ids[2]].skip_window is None
+    with transaction(demo):
+        unpin(demo, ids[3], clock.now())
+        unpin(demo, ids[2], clock.now())
+    assert repo.queue_prefs(demo) == {}  # rows with nothing left are removed
+
+
+def test_not_tonight_needs_a_window_within_a_day(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    with transaction(demo):
+        repo.set_work_windows(demo, [], clock.now())
+    p = compute(demo, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING)
+    with pytest.raises(LookupError, match="No work window"), transaction(demo):
+        skip_tonight(demo, p, p.queue[0].entry_id, clock.now())
