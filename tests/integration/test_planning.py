@@ -319,3 +319,36 @@ def test_migration_0009_keeps_logs_and_blocks_and_expires_old_start_nudges(
     assert conn.execute("SELECT source FROM time_logs").fetchall()[0][0] == "timer"
     assert conn.execute("SELECT COUNT(*) FROM plan_blocks_legacy").fetchone()[0] == 1
     assert repo.retryable_notifications(conn, clock.now()) == []  # never retried
+
+
+def test_the_window_message_skips_work_done_since_the_split_was_stored(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    from argus.notify.router import Router
+    from argus.reminders.engine import ReminderEngine
+
+    window_id, _ = window_tonight(demo, clock)
+    stored = repo.window_plan(demo, window_id)
+    assert stored is not None
+    hw4, quiz = item_id(demo, "Homework 4"), item_id(demo, "Quiz 2")
+    with transaction(demo):
+        repo.save_window_plan(
+            demo,
+            window_id,
+            starts_at=stored.starts_at,
+            ends_at=stored.ends_at,
+            allocation=[(f"item:{quiz}", 1.0), ("item:999999", 1.0), (f"item:{hw4}", 2.0)],
+            now=clock.now(),
+        )
+        repo.set_user_done(demo, quiz, True, clock.now())  # done since the split was made
+    with transaction(demo):
+        repo.refresh_statuses(demo, clock.now(), tracking_sources=TRACKING)
+    engine = ReminderEngine(
+        demo, DEMO_CONFIG, clock, Router([]), caps=derive(DEMO_CONFIG, demo_secrets())
+    )
+    snap = engine.snapshot(clock.now())
+    assert snap.window is not None
+    assert [e.item_id for e in snap.window.entries] == [hw4]  # done and unknown items dropped
+    assert snap.in_window == frozenset()  # the window hasn't started yet
+    clock.set(stored.starts_at + timedelta(minutes=5))
+    assert engine.snapshot(clock.now()).in_window == frozenset({hw4})
