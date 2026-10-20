@@ -169,3 +169,26 @@ def test_practice_self_grading(
         "SELECT COUNT(*) FROM practice_attempts WHERE result = 'correct'"
     )
     assert count.fetchone()[0] >= 1
+
+
+def test_on_a_phone_focus_stays_in_the_rows_menu_after_a_move(
+    browser: Browser, fresh_server: Callable[..., LiveServer]
+) -> None:
+    s = fresh_server()
+    ctx = browser.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True
+    )
+    page = ctx.new_page()
+    page.goto(s.url + "/today")
+    card = page.locator("#q-item-4")  # Homework 4 is 4th
+    card.locator("summary").focus()
+    page.keyboard.press("Enter")
+    up = card.get_by_role("button", name="Move Homework 4 up", exact=True)
+    up.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#queue ol .q-card").nth(2)).to_contain_text("Homework 4")
+    expect(page.locator("#q-item-4 .q-card__menu")).to_have_attribute("open", "")
+    expect(
+        page.locator("#q-item-4").get_by_role("button", name="Move Homework 4 up", exact=True)
+    ).to_be_focused()
+    ctx.close()

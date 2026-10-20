@@ -141,7 +141,7 @@ Until Twilio verification finishes, leave the Twilio credentials out: reminders 
 Numbers refer to the `[n]` in Argus's latest text. Anything else goes to the AI, which may only pick one of these
 commands, and the reply says how your text was read. If Argus still doesn't understand, it asks once. `STOP`,
 `START`, and `HELP` are handled by Twilio itself. `SKIP`, `FIRST`, and `LEFT` always need a number, so chatter
-like "skip it tonight" goes to the AI, and an AI reading of `SKIP` asks before acting.
+like "skip it tonight" goes to the AI, and an AI reading of `SKIP` or `LEFT` asks before acting.
 
 **Testing a reply without Twilio.** Run `argus serve-webhook` and send it a request signed the way Twilio signs
 (the auth token and `notifications.webhook_url` must be the ones it runs with; the From number must be yours):

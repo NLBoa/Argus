@@ -19,7 +19,7 @@
 {% macro _pin(c, sfx, wide=False) -%}
 <form method="post" action="/queue/{{ c.entry_id }}/pin" hx-post="/queue/{{ c.entry_id }}/pin" {{ _hx() }}>
   <input type="hidden" name="pin" value="{{ '0' if c.pinned else '1' }}">
-  <button class="btn btn-sm btn-quiet {{ '' if wide else 'btn-icon' }}" type="submit" data-focus-key="pin" id="{{ c.dom_id }}-pin{{ sfx }}" aria-pressed="{{ 'true' if c.pinned else 'false' }}">
+  <button class="btn btn-sm btn-quiet {{ '' if wide else 'btn-icon' }}" type="submit" data-focus-key="pin" id="{{ c.dom_id }}-pin{{ sfx }}">
     {{ icon("pin-off" if c.pinned else "pin", "icon-sm") }}<span class="{{ '' if wide else 'visually-hidden' }}">{{ "Unpin" if c.pinned else "Pin to top" }}</span><span class="visually-hidden"> {{ c.title }}</span>
   </button>
 </form>
@@ -51,7 +51,7 @@
 {% if c.kind == "work" %}
 <form class="q-left" method="post" action="/items/{{ c.item.id }}/left" hx-post="/items/{{ c.item.id }}/left" {{ _hx() }}>
   <label class="visually-hidden" for="{{ c.dom_id }}-hours{{ sfx }}">Hours left on {{ c.title }}</label>
-  <input class="field field-sm tnum" id="{{ c.dom_id }}-hours{{ sfx }}" name="hours" type="number" inputmode="decimal" min="0" max="200" step="0.25" value="{{ '%g'|format((c.left_hours or 0)|round(2)) }}" required>
+  <input class="field field-sm tnum" id="{{ c.dom_id }}-hours{{ sfx }}" name="hours" type="number" inputmode="decimal" min="0" max="200" step="any" value="{{ '%g'|format(c.left_hours|round(2)) if c.left_hours is not none else '' }}" required>
   <button class="btn btn-sm btn-quiet" type="submit" data-focus-key="left" id="{{ c.dom_id }}-left{{ sfx }}">h left<span class="visually-hidden">: set for {{ c.title }}</span></button>
 </form>
 {% endif %}

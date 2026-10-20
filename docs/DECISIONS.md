@@ -515,6 +515,8 @@ tonight's window ends (at midnight without windows); explicit pins stay pins. A 
 with (`before`); if that is no longer the neighbor the move is refused and the list is shown again with "The list
 changed". Moves act on tonight's list only (skipped entries are listed apart). Every control is a form: with HTMX it
 swaps `#queue` and the server names the control that keeps focus (the opposite arrow at an edge); without JS it
-redirects to `/today#q-<entry>`. Mark done from the queue leaves "Marked X done. Undo" in place of the card.
-SMS adds `SKIP n`, `FIRST n`, and `LEFT n h`; each needs a number, and an AI reading of `SKIP` asks first.
+redirects to `/today#q-<entry>`. Mark done from the queue removes the card and puts "Marked X done. Undo" at the
+top of the queue, with focus on Undo. While a timer runs on a card further down, that card is the hero and also keeps
+its row, so every move swaps with a visible neighbor. An AI reading of `LEFT`, like `SKIP`, asks first.
+SMS adds `SKIP n`, `FIRST n`, and `LEFT n h`; each needs a number.
 The window message's lead time is set in Settings (a `settings` row, 0011); config.yaml's value is only the default.

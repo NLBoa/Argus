@@ -702,7 +702,9 @@ def queue_view(
         0 if timer_item_id is None else None,
     )
     hero = cards[hero_i] if hero_i is not None and cards else None
-    rest = tuple(c for c in cards if c is not hero)
+    # The hero leaves the list only when it is first; a timed card further down stays in its row
+    # too, so every Move swaps with a neighbor the student can see.
+    rest = tuple(c for c in cards if not (c is hero and c.position == 1))
     target = None
     if focus is not None:
         where, key = focus

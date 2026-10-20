@@ -1,37 +1,28 @@
 # Argus overhaul: plan (amended 2026-10-19)
 
-## Status (updated 2026-10-19)
+## Status (updated 2026-10-20)
 
 | Phase | State |
 |---|---|
 | Step 0: deadline golden | Done |
 | 1: Capabilities, hiding what isn't set up | Done; deployed to the Pi 2026-10-19 |
-| 2: Work windows, queue, risk, window message, exam study time | Done (`make check` green, reviewed, darwin and linux baselines); **waiting for the Pi run** |
-| Settings page for work windows (planned for P3) | Done early, ships with P2. Notice lead time and the theme move are still P3 |
-| 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Not started |
+| 2: Work windows, queue, risk, window message, exam study time | Done; deployed to the Pi |
+| Settings page for work windows (planned for P3) | Done early, shipped with P2; lead time and theme added in P3 |
+| 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Done (`make check` green, reviewed; visual snapshots paused); **waiting for the Pi run** |
 | 4: Visual system pass, workload chart | Not started |
 | 5: Logo | Not started |
 
-**Before Phase 3 starts:**
-1. The user deploys P2: `git push origin overhaul`, then on the Pi (via Pi Connect, not SSH)
-   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. Work windows are then set at `/settings`;
-   `/etc/argus/config.yaml` no longer needs `schedule.work_windows`.
-2. A day or two of real use: the window message arrives 20 min before a window, the confirm line shows the
-   next morning, and Workload shows real window hours. 0010 must not ship until the Pi's `legacy` conversion has run.
-3. The user runs `make evals` (plan_note.v2 changed; needs `ARGUS_ANTHROPIC_API_KEY`).
+**Before Phase 4 starts:**
+1. The user deploys P3: `git push origin overhaul`, then on the Pi (Pi Connect)
+   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. Migrations 0010 (drops `plan_blocks_legacy`, only once the
+   P2 conversion has run; otherwise it waits and logs "migration held back") and 0011 (`settings`) apply on start.
+2. A real evening with the queue: reorder, pin, "Not tonight", time left, and the confirm line the next morning.
+3. The user runs `make evals` (sms.v2 adds SKIP, FIRST, LEFT; needs `ARGUS_ANTHROPIC_API_KEY`).
 4. Decided 2026-10-20: keep the demand cap (D059) as is.
 
-**Phase 3 kickoff: do this first, before any Phase 3 code (user's decision, 2026-10-19).**
-The testing workflow gets lighter. Commit it as its own `chore:` commit:
-1. In CLAUDE.md "Definition of done", replace item 2 with: "During a phase, run the tests the change touches
-   (`make test-unit`, `make test-int`, targeted e2e). `make check` is green at the end of each phase." Replace
-   item 3 with: "Any new page is in `tests/e2e/pages.py`. Visual baselines are darwin only, recorded once a
-   phase's UI settles; linux baselines are recorded once, at the end of the overhaul."
-2. Pause visual snapshots during P3 and P4: `make check` skips `test-visual` until P4 ends (a Makefile change,
-   with a comment saying why and when it comes back). Resume them at the end of P4 with one darwin re-record.
-3. One independent review per phase, at its end, not per step.
-4. Keep unchanged: tests first for domain logic, the deadline golden, unit, integration, axe a11y, and coverage floors.
-5. Update the "Workflow" section below to match.
+**Phase 3 kickoff (done 2026-10-20).** The lighter testing workflow is in CLAUDE.md "Definition of done" and the
+Workflow section below; `make check` skips `test-visual` until the end of P4 (Makefile comment). At the end of P4:
+add `test-visual` back to `check` and re-record the darwin baselines once (`make visual-update`).
 
 ## Context
 

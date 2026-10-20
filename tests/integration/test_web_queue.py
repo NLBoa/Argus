@@ -240,3 +240,51 @@ def test_estimate_and_log_forms_answer_htmx_with_a_toast(
         follow_redirects=False,
     )
     assert plain.status_code == 303 and plain.headers["location"] == "/items/2"
+
+
+def test_the_time_left_field_accepts_any_amount_and_starts_empty_without_an_estimate(
+    client: TestClient,
+) -> None:
+    html = client.get("/today").text
+    field = html[html.index('id="q-item-2-hours"') :][:300]
+    assert 'step="any"' in field  # a pre-filled 2.4 must not block its own submit (review)
+    survey = html[html.index('id="q-item-11-hours"') :][:300]  # no estimate: nothing pre-filled
+    assert 'value=""' in survey
+
+
+def test_a_config_lead_time_outside_the_choices_is_shown_and_kept(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    cfg = DEMO_CONFIG.model_copy(
+        update={
+            "notifications": DEMO_CONFIG.notifications.model_copy(
+                update={"window_notice_minutes": 25}
+            )
+        }
+    )
+    path = tmp_path / "n.db"
+    conn = open_db(path, clock)
+    seed_demo(conn, clock.now(), DemoProfile.FULL)
+    conn.close()
+    app = create_app(
+        cfg, demo_secrets(), clock, db_path=path, runner_factory=lambda c, f: OfflineRunner()
+    )
+    with TestClient(app) as c:
+        html = c.get("/settings").text
+        assert '<option value="25" selected>25 minutes before</option>' in html
+        r = c.post(
+            "/settings/notice", data={"minutes": "25"}, headers=ORIGIN, follow_redirects=False
+        )
+        assert r.status_code == 303
+
+
+def test_the_timer_without_js_replans(client: TestClient, db_path: Path, clock: FakeClock) -> None:
+    conn = db(db_path, clock)
+    conn.execute("UPDATE plan_state SET planned_at = '2000-01-01T00:00:00Z'")
+    client.post(
+        "/items/6/timer",
+        data={"action": "start", "view": "queue"},
+        headers=ORIGIN,
+        follow_redirects=False,
+    )
+    assert conn.execute("SELECT planned_at FROM plan_state").fetchone()[0] != "2000-01-01T00:00:00Z"

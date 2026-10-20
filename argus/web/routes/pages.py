@@ -427,7 +427,8 @@ def settings_page(
             "error": None,
             "unsaved": unsaved,
             "days": DAYS,
-            "notice_choices": NOTICE_CHOICES,
+            # config.yaml may give a lead time the list doesn't have: offer it, so Save keeps it.
+            "notice_choices": sorted({*NOTICE_CHOICES, data.lead_minutes}),
             "notice_error": notice_error,
         },
         active="/settings",

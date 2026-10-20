@@ -111,6 +111,8 @@ def timer(
             repo.start_timer(conn, item_id, now)
             stopped = None
         _refresh_status(conn, state)
+    if view == "queue":
+        _replan(conn, state)  # the hero and the window's split follow the timer
     if not is_htmx(request):
         return back(request)
     if action == "stop" and stopped:
@@ -118,7 +120,6 @@ def timer(
     else:
         msg = "Timer started"
     if view == "queue":
-        _replan(conn, state)
         return toast(_queue(request, state, conn, focus=("hero", "timer")), msg)
     response = toast(_row(request, state, conn, item_id), msg)
     response.headers["HX-Trigger-After-Settle"] = "argus:timer"
@@ -667,7 +668,8 @@ def save_notice(
     from argus.planning import NOTICE_CHOICES
     from argus.web.routes.pages import settings_page
 
-    if not minutes.isdigit() or int(minutes) not in NOTICE_CHOICES:
+    allowed = {*NOTICE_CHOICES, state.config.notifications.window_notice_minutes}
+    if not minutes.isdigit() or int(minutes) not in allowed:
         return settings_page(
             request,
             state,

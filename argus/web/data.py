@@ -293,31 +293,6 @@ def load_today(
     )
 
 
-def _running_extra(
-    conn: sqlite3.Connection,
-    config: AppConfig,
-    now: datetime,
-    known: dict[int, ItemView],
-    tracking_sources: frozenset[str],
-) -> dict[int, ItemView]:
-    """The running item may be due later than tomorrow; fetch it so the timer bar can show it."""
-    timer = repo.running_timer(conn)
-    if timer is None or timer.item_id in known:
-        return {}
-    item = repo.get_item(conn, timer.item_id)
-    if item is None:
-        return {}
-    return {
-        item.id: item_view(
-            item,
-            now,
-            course_views(config),
-            tracking_sources=tracking_sources,
-            running_item_id=item.id,
-        )
-    }
-
-
 def load_upcoming(
     conn: sqlite3.Connection,
     config: AppConfig,

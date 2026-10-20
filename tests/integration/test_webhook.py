@@ -323,6 +323,13 @@ def test_free_text_goes_to_the_llm_and_the_reply_says_how_it_was_read(
     assert reply(text(client, "spent 45 min on the problem set")).startswith(
         "Read as LOG 2 0.75h. Logged"
     )
+    transport.responder = lambda req: ok(
+        {"command": "LEFT", "number": 1, "hours": 2, "minutes": None, "confidence": 0.9}
+    )
+    # "only 2 left" often counts problems, not hours: an AI reading of LEFT asks first (review).
+    out = reply(text(client, "only 2 left on the hw"))
+    assert out.startswith("Did you mean LEFT 1 2h ([1] CMSC351 Homework 3)?")
+    assert db(db_path).execute("SELECT COUNT(*) FROM remaining_marks").fetchone()[0] == 0
 
 
 def test_llm_output_is_validated_like_typed_commands(

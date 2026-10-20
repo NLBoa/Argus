@@ -34,7 +34,8 @@ AI_CONFIDENCE = 0.8
 ASK_BACK_WINDOW = timedelta(minutes=30)
 AMBIGUOUS = timedelta(minutes=10)  # two numbered texts this close: [n] could mean either
 # An AI reading never silences reminders or changes dates by itself (review R16).
-CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE, Verb.SKIP)
+# LEFT too: "only 2 left" usually counts problems, not hours, and a lower E can end an at-risk alert.
+CONFIRM_FIRST = (Verb.DONE, Verb.YES, Verb.NO, Verb.SNOOZE, Verb.SKIP, Verb.LEFT)
 HELP = (
     "Reply DONE 1, LOG 1 2h, SNOOZE 1 2h, EST 1 3h, LEFT 1 2h, SKIP 1, FIRST 1, OK 1, NO 1, or TODAY."
     " Numbers are the [n] in my last text."

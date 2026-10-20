@@ -87,9 +87,13 @@ def test_the_hero_is_first_and_the_rest_keep_their_numbers_and_neighbors() -> No
 
 
 def test_while_a_timer_runs_its_card_is_the_hero() -> None:
-    v = q([fact(1), fact(2), fact(3)], timer_item_id=3)
+    v = q([fact(1), fact(2), fact(3), fact(4)], timer_item_id=3)
     assert v.hero is not None and v.hero.entry_id == "item:3" and v.hero.position == 3
-    assert [c.entry_id for c in v.cards] == ["item:1", "item:2"]
+    # Mid-list, the timed card stays in the list too, so no row's neighbor is hidden (review).
+    assert [c.entry_id for c in v.cards] == ["item:1", "item:2", "item:3", "item:4"]
+    assert v.cards[3].up_before == "item:3"
+    first = q([fact(1), fact(2)], timer_item_id=1)
+    assert first.hero is not None and [c.entry_id for c in first.cards] == ["item:2"]
     elsewhere = q([fact(1), fact(2)], timer_item_id=9)  # timing something not in the queue
     assert elsewhere.hero is None and len(elsewhere.cards) == 2
 
