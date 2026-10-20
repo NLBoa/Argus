@@ -67,13 +67,13 @@
   <form id="notice-form" class="panel panel-pad grid gap-3" method="post" action="/settings/notice"
         hx-post="/settings/notice" hx-target="#notice-form" hx-select="#notice-form" hx-swap="outerHTML">
     <label class="grid gap-1 max-w-xs"><span class="text-sm font-bold">Text me</span>
-      <select class="field" name="minutes"{% if notice_error %} aria-invalid="true" aria-describedby="notice-error"{% endif %}>
+      <select class="field w-auto" name="minutes"{% if notice_error %} aria-invalid="true" aria-describedby="notice-error"{% endif %}>
         {% for m in notice_choices %}<option value="{{ m }}" {% if m == data.lead_minutes %}selected{% endif %}>{{ "When it starts" if m == 0 else m ~ " minutes before" }}</option>{% endfor %}
       </select>
     </label>
     <p class="text-sm text-muted">The text lists what to work on, in order. It never counts toward the daily limit, so deadline warnings still come.</p>
     {% if notice_error %}<p class="field-error" id="notice-error" role="alert">{{ icon("circle-alert", "icon-sm") }}{{ notice_error }}</p>{% endif %}
-    <div><button class="btn" type="submit">Save</button></div>
+    <div><button class="btn" type="submit">Save text time</button></div>
   </form>
 </section>
 
@@ -88,7 +88,7 @@
         {% endfor %}
       </div>
     </fieldset>
-    <div><button class="btn" type="submit">Save</button></div>
+    <div><button class="btn" type="submit">Save theme</button></div>
   </form>
 </section>
 {% endif %}
