@@ -3,7 +3,8 @@
 ## What this is
 Argus is a personal, always-on course hub for one UMD student, running on a Raspberry Pi 4B.
 It pulls deadlines, announcements, and course resources from ELMS (Canvas), Gradescope, Piazza, and
-umd.io. It estimates effort, plans work into free time, and builds an Obsidian study vault.
+umd.io. It estimates effort, ranks the work into a queue for the student's work windows, and builds an
+Obsidian study vault.
 It reminds the student over SMS (Twilio) or ntfy, and accepts commands by reply.
 Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices: `docs/DECISIONS.md`.
 
@@ -43,7 +44,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/logging.py`: JSON logs and the redactor. Call `configure_logging(secrets=…)` at every entry point.
 - `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
-- `argus/planner/`: free time, EDF scheduler, risk, calibration. Pure and deterministic.
+- `argus/planner/`: work windows, load and risk (C and D), the queue and its forecast, exam study time,
+  calibration, busy time. Pure and deterministic.
 - `argus/reminders/`: rules (what), guards (when and whether), engine (idempotent dispatch), SMS command parser.
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: `layout` (paths, links), `regions`, `ownership` (pure table), `proposals`, `writer` (the only
@@ -54,7 +56,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault,
   each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
-  overrides), `argus/planning.py` (replan with work and review blocks, risk, workload), `argus/study.py` (materials →
+  overrides), `argus/planning.py` (`compute`: remaining, load, risk, queue, study time, window forecast; `replan`:
+  seed windows, legacy conversion, the window's split; the confirm question), `argus/study.py` (materials →
   generate → verify → store), `argus/exams.py` (scope, readiness, attempts), and `argus/demo.py` (the synthetic seed).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
   routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
@@ -67,7 +70,8 @@ SQLite with WAL and FTS5. Full schema: [docs/schema.md](docs/schema.md).
 `item_sources` per-source links · `posts` Piazza posts / Canvas announcements · `findings` extracted
 facts + applied state · `modules` Canvas modules · `concepts` concept notes · `practice_items`
 questions/flashcards · `practice_attempts` results + confidence · `exams` scope/logistics ·
-`estimates` versioned, never overwritten · `time_logs` actuals · `plan_blocks` work/review sessions ·
+`estimates` versioned, never overwritten · `time_logs` actuals and check-ins · `work_windows` when the student works ·
+`queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
 path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health.
 
@@ -76,7 +80,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   display or when evaluating local-time rules (quiet hours, waking window). Never call
   `datetime.now()` (ruff bans it); take a `Clock`. Naive datetimes are bugs; `ensure_utc` rejects them.
 - **Idempotency.** Every side effect has a key, stored with a UNIQUE constraint. Notifications:
-  `item_id:rule:due_at_iso`, so a moved due date re-arms reminders. Proposals apply once by
+  `item_id:rule:due_at_iso`, so a moved due date re-arms reminders; the work-window message is `window:<window id>`
+  (once per window). Check-ins are unique per item and window. Proposals apply once by
   id + diff hash. Collectors upsert by `(source, external_id)`.
 - **Errors.** Collectors and AI calls return `Result`-style outcomes and record `sync_runs`. They do
   not raise into the scheduler. Domain functions raise `ValueError` on invalid input. Web routes render the

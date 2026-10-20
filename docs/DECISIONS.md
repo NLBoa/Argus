@@ -95,6 +95,7 @@ No credentials were available when Phase 1 finished, so `tests/integration/test_
 Run it once credentials exist. Its first run is also the check on the Piazza email format.
 
 ## D015 — Interim risk until the planner exists (2026-10-18)
+*Superseded by D059.*
 **Decision.** `planner/risk.py:assess` implements the spec rule (at risk when the free hours before the due time are fewer than
 the remaining p80) once the planner supplies those numbers (Phase 4). Until then, an open item past due is
 overdue, a missed item is overdue, and an item due within 24 hours that hasn't been started is "watch". The signature is already final.
@@ -184,12 +185,14 @@ a date expression and the date falls in [posted − 7 days, posted + 200 days]. 
 compared by local day. These guards make "never invent a date" a code property, not just a prompt request.
 
 ## D030 — Passed sessions count as progress unless the student logs time (2026-10-18)
+*Superseded by D060.*
 **Context.** The simulated week showed that with progress = time logged only, a student who never logs time got the
 same work re-planned (and re-nudged) every hour, forever.
 **Decision.** If an item has any time logs, they are the truth. Otherwise planned sessions that have already passed
 count as done. The student corrects with `LOG n h` or `EST n h`. Calibration still uses logged actuals only.
 
 ## D031 — Plan quality rules (2026-10-18)
+*Superseded by D058 and D059: there are no sessions.*
 Sessions are 30 to 120 minutes on a 15-minute grid, followed by a 15-minute break. They are trimmed so no remainder under 30 minutes is left over.
 The plan is earliest deadline first, with no daily cap yet. It replans when inputs change or hourly, and blocks that have started are never moved. Items that fit
 alone but are squeezed out by earlier deadlines are shown as Watch. "At risk" stays exactly the spec rule.
@@ -224,6 +227,7 @@ they are missing or still byte-identical to what it last wrote (hash in `vault_r
 student edits one, Argus leaves it alone for good, with no proposal: a diff of canvas JSON isn't useful to review.
 
 ## D037 — Exam review: horizon, order, and nudges (2026-10-19)
+*Placement and nudges superseded by D061 and D062; the readiness order stays for Exam prep.*
 Review sessions (45 minutes, 3 concepts) sit 7, 5, 3, 2, and 1 days before an exam, in free time left after work
 sessions. They are planned for exams inside the 14-day planning horizon; days already past are skipped. Concepts
 go weakest first (shaky, meaning missed or unsure, then untested, then solid; inbox confusion raises priority) and interleave across
@@ -413,3 +417,72 @@ deadline stays open: `RiskLevel.UNCONFIRMED`, "Did you submit?" on Today with Ma
 "Not marked done" where it is still listed (the course page). It is never OVERDUE. The 24-hour and 3-hour warnings keep
 their timing, keys, and guards; only the 3-hour body changes for untracked items ("Reply DONE 1 once submitted"). The
 deadline golden (`tests/integration/test_deadline_golden.py`) proves the timing did not move.
+
+## D057 — Work windows (2026-10-19)
+**Context.** "Free time" was waking hours minus classes, so 14 days held 167 hours, and every gap was booked with
+sessions the student could not move.
+**Decision.** The student says when they usually work (`schedule.work_windows`, for example Mon-Thu 19:00-23:00 and
+Sun 13:00-18:00). Argus plans into those hours only. `days` are start days, and an end at or before the start runs
+past midnight. At most 3 windows a day; overlaps merge, with a `check-config` warning. Classes (with the walking buffer)
+and commitments inside a window are not work time; quiet hours do not cut windows. Hours are real elapsed hours, so a
+window across a DST change is 3 or 5 hours long. Each occurrence has a stable id, its local start date and time
+(`2026-10-19T19:00`), so keys survive class and commitment changes. Config seeds the `work_windows` table on the first
+run only, and only when it lists at least one window (so adding windows to config later still seeds); after that
+Settings owns them. `/etc/argus/config.yaml` is root-owned and the units run with `ProtectSystem=strict`, so the app
+could not write it anyway. Without any windows, risk falls back to the time-only rule and no window messages are sent.
+`schedule.max_session_minutes` is retired but still accepted, so existing configs load.
+
+## D058 — The queue (2026-10-19)
+**Decision.** Instead of a calendar, open work is a ranked list. The key is total, so the order never depends on input
+order: skipped for this window ("Not tonight") last, then pinned (in the student's order), then tier (overdue but
+still workable, at risk, creeping, exam study due now, the rest), then slack (window hours to spare, rounded to
+minutes), then the due date (undated last), then work before study, then the id. An explicit pin lasts until the
+item is done. Moving an entry up or down pins the displayed prefix as "move" pins that expire at the end of the
+window, so the automatic order comes back. A move names the neighbour the student saw; if the list has changed, the
+move is refused. Each window's time is forecast in queue order: exam study first, then work, each in the earliest
+windows before its due time, never overfilling a window and never giving an item more than it needs. The window's
+split is stored just before it starts and frozen when it starts (a worker that was down at the start stores what is
+left).
+
+## D059 — Creeping and at risk on window time (2026-10-19)
+**Decision.** For each open item with a due date: C is the work-window hours before it is due (after now), minus exam
+study reserved in those windows, minus a window it is skipped for. D is its own remaining hours, plus those of counted
+items due at the same time, plus the earlier work that can still be done before its due time. Walking the due dates
+in order, earlier work counts only up to the window time before its own deadline: work that cannot fit by then is
+missed and does not take time from later items (the deadline-feasibility test). Past-deadline and unconfirmed items do
+not count. At risk: C < D. Creeping: C < 1.5 x D. An item with nothing left (E = 0) is OK. Comparisons are strict.
+Remaining hours (E) are the calibrated p80 (or the student's estimate) minus logged time, or the student's latest
+"about N h left" minus what they logged since. Without windows or an estimate, the time-only rule applies (due within
+24 hours and not started: creeping). With nothing logged, C only shrinks and D never grows, so an item's level only
+gets worse, except when a competing item's deadline passes (or its unfinishable part stops counting): then the item
+may get room back. The simulated week checks this, and that the deadline golden is unchanged with windows on.
+
+## D060 — Progress: ask, don't assume (2026-10-19)
+**Context.** D030 counted passed sessions as done to stop a nag loop. With no sessions there is nothing to assume, and
+the nag loop cannot recur: window messages are keyed per window and at-risk alerts per item and due date.
+**Decision.** Progress is only what the student logged: the timer (counted live while it runs), `LOG`, the form, or
+an answer to "Last night: did you work on Homework 3? 2h, 1h, None", asked once on Today after a window whose planned
+items have no time logged in it (or a LOG within a day after). An answer is a `checkin` time log, unique per item and
+window; "None" records 0 hours. No answer means no credit, and the question goes away when the next window ends.
+Planned sessions that had passed under D030 are converted once to `legacy` time (items with no real logs only), so
+remaining hours do not jump at the switch; calibration ignores `legacy` time.
+
+## D061 — The work-window message replaces start nudges (2026-10-19)
+**Decision.** Once per window, `notifications.window_notice_minutes` (default 20) before it starts, one message says
+what to do and why, for example "Tonight 7-11pm: [1] Homework 3, 4h left, due Thu. [2] Problem Set 6, 3h left, due
+tomorrow (at risk). Study 45m: Midterm 1." The key is `window:<window id>`. It respects quiet hours, class time, mute,
+and snooze (it waits only when every named item is snoozed), and expires 30 minutes after the start. It does not count
+toward the daily cap (at most 3 windows a day), so it can never delay a 24-hour warning. It is built entry by entry so
+it fits one GSM-7 segment and its numbers match `item_ids` exactly; exam study is never numbered, so `DONE n` cannot
+hit an exam. At-risk alerts keep their key but are batched into one message, and an item planned for the window in
+progress waits until the window ends (the student may be working on it). The morning brief and `TODAY` name the next
+window and what it starts with. `Rule.START_NUDGE` stays as a value so old rows still parse; Health hides it.
+
+## D062 — Exam study time (2026-10-19)
+**Decision.** Each exam gets one "Study for <exam>" card. Its hours are the exam's calibrated p80, clamped to 1-6 h;
+progress is time logged on the exam item only. What is left is spread evenly over the windows that start in the week
+before the exam and still have at least 30 minutes before it: at least 20 minutes per window, capped at half a window
+(three quarters in the last 48 hours), and three quarters of a window across all exams. That time is reserved first in
+each window; homework fills the rest, and its capacity C excludes it. What cannot fit is the shortfall, shown on the
+exam page and named in the plan line. Readiness and the review order stay for the Exam prep page and the countdown's
+"Weakest:" names; they do not feed the queue.
