@@ -1,5 +1,27 @@
 # Argus overhaul: plan (amended 2026-10-19)
 
+## Status (updated 2026-10-19)
+
+| Phase | State |
+|---|---|
+| Step 0: deadline golden | Done |
+| 1: Capabilities, hiding what isn't set up | Done; deployed to the Pi 2026-10-19 |
+| 2: Work windows, queue, risk, window message, exam study time | Done (`make check` green, reviewed, darwin and linux baselines); **waiting for the Pi run** |
+| Settings page for work windows (planned for P3) | Done early, ships with P2. Notice lead time and the theme move are still P3 |
+| 3: Today redesign, queue actions, SMS verbs, day strip, 0010 | Not started |
+| 4: Visual system pass, workload chart | Not started |
+| 5: Logo | Not started |
+
+**Before Phase 3 starts:**
+1. The user deploys P2: `git push origin overhaul`, then on the Pi (via Pi Connect, not SSH)
+   `sudo /opt/argus-src/deploy/update-on-pi.sh overhaul`. Work windows are then set at `/settings`;
+   `/etc/argus/config.yaml` no longer needs `schedule.work_windows`.
+2. A day or two of real use: the window message arrives 20 min before a window, the confirm line shows the
+   next morning, and Workload shows real window hours. 0010 must not ship until the Pi's `legacy` conversion has run.
+3. The user runs `make evals` (plan_note.v2 changed; needs `ARGUS_ANTHROPIC_API_KEY`).
+4. Open decision: the demand cap (D059) can ease an item's level without new logs when earlier, unfinishable
+   work stops counting. Keep it, or use a stricter rule where levels only ease after logged time?
+
 ## Context
 
 Argus works, but it plans like a calendar robot and looks generated.
