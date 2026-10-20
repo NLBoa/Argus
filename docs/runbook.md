@@ -131,13 +131,34 @@ Until Twilio verification finishes, leave the Twilio credentials out: reminders 
 | `LOG 1 2h` (or `90m`, `1h30m`) | Logs time on [1]; the plan updates |
 | `SNOOZE 1 2h` | No reminders about [1] for 2 hours (default 1h, up to 3 days); the 3-hour warning still comes |
 | `EST 1 3h` | Sets your estimate for [1] |
+| `LEFT 1 2h` | About 2 hours of work left on [1] (same amounts as `EST`) |
+| `SKIP 1` | Not tonight: [1] waits until the current or next work window is over |
+| `FIRST 1` | Pins [1] to the top of the queue until it's done |
 | `OK 1` / `Y 1`, `NO 1` / `N 1` | Answers the question Argus asked about [1] (for example, which date to trust) |
 | `TODAY` | Today's list, numbered fresh |
 | `?` | The command list |
 
 Numbers refer to the `[n]` in Argus's latest text. Anything else goes to the AI, which may only pick one of these
 commands, and the reply says how your text was read. If Argus still doesn't understand, it asks once. `STOP`,
-`START`, and `HELP` are handled by Twilio itself.
+`START`, and `HELP` are handled by Twilio itself. `SKIP`, `FIRST`, and `LEFT` always need a number, so chatter
+like "skip it tonight" goes to the AI, and an AI reading of `SKIP` asks before acting.
+
+**Testing a reply without Twilio.** Run `argus serve-webhook` and send it a request signed the way Twilio signs
+(the auth token and `notifications.webhook_url` must be the ones it runs with; the From number must be yours):
+
+```bash
+uv run python - <<'PY'
+import os, urllib.parse, urllib.request
+from argus.web.webhook import PATH, signature
+url = os.environ["WEBHOOK_URL"]  # exactly notifications.webhook_url
+params = {"MessageSid": "SMtest1", "From": os.environ["MY_NUMBER"], "To": "+18005550100", "Body": "SKIP 1"}
+req = urllib.request.Request("http://127.0.0.1:8001" + PATH, urllib.parse.urlencode(params).encode(),
+                             {"X-Twilio-Signature": signature(os.environ["ARGUS_TWILIO_AUTH_TOKEN"], url, params)})
+print(urllib.request.urlopen(req).read().decode())
+PY
+```
+
+Sending the same `MessageSid` again returns the same answer and changes nothing.
 
 ## Dead-man's switch
 
@@ -238,7 +259,8 @@ With Pi Connect, `deploy/update-on-pi.sh` does steps 1, 2, and 4 for you.
 2. Check the config the new code will read: `sudo argus-admin check-config`. Fix anything it reports
    before deploying (an invalid `config.yaml` stops the services).
 3. Read the phase's own notes in `docs/plans/overhaul.md` (for example, Phase 2 needs
-   `schedule.work_windows` in `/etc/argus/config.yaml` before deploying). Config's work windows seed the first run
+   `schedule.work_windows` in `/etc/argus/config.yaml` before deploying; Phase 3's migration 0010 waits on its own
+   until the worker has converted the old planned sessions, and the log says "migration held back" until then). Config's work windows seed the first run
    only; to change them later, use Settings in the app (or edit config.yaml and run
    `sudo argus-admin windows --reset`; `sudo argus-admin windows` lists them).
 4. From the laptop: `make deploy PI_HOST=argus-pi`. The services migrate on start.

@@ -20,17 +20,18 @@ def test_skip_link_and_landmarks(page: Page, base_url: str) -> None:
     expect(page.get_by_role("heading", level=1)).to_have_text("Monday, October 19")
 
 
-def test_today_shows_groups_stale_banner_and_timer(page: Page, base_url: str) -> None:
+def test_today_leads_with_the_running_timer_and_shows_the_rest(page: Page, base_url: str) -> None:
     page.goto(base_url + "/today")
+    hero = page.get_by_role("region", name="Essay draft: technical description")
+    expect(hero).to_contain_text("Working on")
+    expect(page.get_by_role("heading", name=re.compile("^Queue"))).to_be_visible()
     expect(page.get_by_role("heading", name=re.compile("^Past due"))).to_be_visible()
-    expect(page.get_by_role("heading", name=re.compile("^Due today"))).to_be_visible()
     expect(page.get_by_text("Gradescope last synced 3h ago")).to_be_visible()
-    expect(page.get_by_role("region", name="Running timer")).to_contain_text("Essay draft")
 
 
 def test_timer_start_and_stop(page: Page, fresh_server: Callable[..., LiveServer]) -> None:
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     row = page.locator("li.item-row", has_text="Homework 3")
     row.get_by_role("button", name=re.compile("^Start")).click()
     expect(row.get_by_role("button", name=re.compile("^Stop timer"))).to_be_visible()
@@ -40,19 +41,20 @@ def test_timer_start_and_stop(page: Page, fresh_server: Callable[..., LiveServer
     expect(page.get_by_text(re.compile(r"Logged \d+ min"))).to_be_visible()
 
 
-def test_stop_running_timer_from_bar(page: Page, fresh_server: Callable[..., LiveServer]) -> None:
+def test_stop_running_timer_from_the_hero(
+    page: Page, fresh_server: Callable[..., LiveServer]
+) -> None:
     s = fresh_server()
     page.goto(s.url + "/today")
-    page.get_by_role("region", name="Running timer").get_by_role(
-        "button", name="Stop timer"
-    ).click()
-    expect(page.get_by_role("region", name="Running timer")).to_have_count(0)
+    page.locator("#hero").get_by_role("button", name="Stop timer").click()
     expect(page.get_by_text("Logged 42 min")).to_be_visible()
+    expect(page.locator("#hero")).to_contain_text("Next up")
+    expect(page.locator("#hero-timer")).to_be_focused()
 
 
 def test_mark_done_and_undo(page: Page, fresh_server: Callable[..., LiveServer]) -> None:
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     row = page.locator("li.item-row", has_text="Problem Set 6")
     row.get_by_role("button", name=re.compile("^Mark done")).click()
     expect(row).to_have_attribute("data-done", "true")
@@ -69,7 +71,7 @@ def test_optimistic_update_rolls_back_on_error(
     page: Page, fresh_server: Callable[..., LiveServer]
 ) -> None:
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     page.route(
         re.compile(r".*/items/\d+/done$"), lambda route: route.fulfill(status=500, body="boom")
     )
@@ -145,7 +147,7 @@ def test_slash_on_mobile_opens_search_page(page: Page, base_url: str) -> None:
 
 
 def test_course_page_from_chip_and_modules(page: Page, base_url: str) -> None:
-    page.goto(base_url + "/today")
+    page.goto(base_url + "/upcoming")
     page.locator("li.item-row", has_text="Homework 3").get_by_role(
         "link", name="CMSC351", exact=True
     ).click()
@@ -209,7 +211,7 @@ def test_offline_banner_and_failed_action(
     page: Page, fresh_server: Callable[..., LiveServer]
 ) -> None:
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     banner = page.get_by_text("You're offline.")
     expect(banner).to_be_hidden()
     page.context.set_offline(True)
@@ -227,8 +229,8 @@ def test_empty_state(page: Page, fresh_server: Callable[..., LiveServer]) -> Non
     page.goto(s.url + "/upcoming")
     expect(page.get_by_role("heading", name="Nothing due in the next 14 days")).to_be_visible()
     page.goto(s.url + "/today")
-    expect(page.get_by_role("heading", name="Nothing due today")).to_be_visible()
-    expect(page.get_by_role("heading", name="No classes today")).to_be_visible()
+    expect(page.get_by_role("heading", name="Nothing in the queue")).to_be_visible()
+    expect(page.get_by_text("Nothing scheduled today.")).to_be_visible()
 
 
 def test_kiosk_has_no_controls_and_updates(page: Page, base_url: str) -> None:
@@ -264,7 +266,7 @@ def test_override_estimate_and_log_time(
     page: Page, fresh_server: Callable[..., LiveServer]
 ) -> None:
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     page.locator("li.item-row", has_text="Homework 3").get_by_role(
         "link", name=re.compile("^Homework 3")
     ).click()
@@ -355,7 +357,7 @@ def test_keyboard_focus_stays_on_the_button_after_a_row_swap(
 ) -> None:
     """Review R9: Enter on "Mark done" or "Start" keeps focus there, so Tab continues in place."""
     s = fresh_server()
-    page.goto(s.url + "/today")
+    page.goto(s.url + "/upcoming")
     row = page.locator("li.item-row", has_text="Problem Set 6")
     done = row.get_by_role("button", name=re.compile("^Mark done"))
     done.focus()

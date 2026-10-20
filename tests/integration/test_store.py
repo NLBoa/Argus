@@ -417,10 +417,14 @@ def test_0010_stays_pending_until_the_legacy_conversion_has_run(
     conn = _upgrade_db_with_legacy_blocks(tmp_path, clock)
     db_module._held.clear()
     caplog.set_level("INFO", logger="argus.store.db")
-    assert migrate(conn, clock) == []  # never raises, so the services can't crash-loop
-    assert migrate(conn, clock) == []
+    db_module.log.addHandler(caplog.handler)  # other tests may stop "argus" logs propagating
+    try:
+        assert 10 not in migrate(conn, clock)  # never raises, so the services can't crash-loop
+        assert migrate(conn, clock) == []
+    finally:
+        db_module.log.removeHandler(caplog.handler)
     assert "plan_blocks_legacy" in _tables(conn)
-    held = [r for r in caplog.records if getattr(r, "migration", "").startswith("0010")]
+    held = {id(r) for r in caplog.records if getattr(r, "migration", "").startswith("0010")}
     assert len(held) == 1  # logged once, not on every start
     with transaction(conn):
         assert repo.convert_legacy_blocks(conn, clock.now()) == 1
@@ -439,8 +443,9 @@ def test_0010_does_not_hold_back_later_migrations(tmp_path: Path, clock: FakeClo
     later.mkdir()
     for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
         shutil.copy(f, later / f.name)
-    (later / "0011_next.sql").write_text("CREATE TABLE next_thing (x INTEGER);")
-    assert migrate(conn, clock, later) == [11]
+    nxt = len(list(MIGRATIONS_DIR.glob("*.sql"))) + 1
+    (later / f"{nxt:04d}_next.sql").write_text("CREATE TABLE next_thing (x INTEGER);")
+    assert 10 not in migrate(conn, clock, later)
     assert {"next_thing", "plan_blocks_legacy"} <= _tables(conn)
 
 

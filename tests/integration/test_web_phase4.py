@@ -65,7 +65,7 @@ def test_item_detail(client: TestClient) -> None:
 
 
 def test_item_rows_show_estimates_and_link_to_detail(client: TestClient) -> None:
-    html = client.get("/today").text
+    html = client.get("/upcoming").text
     assert f'href="/items/{HW3}"' in html
     assert "estimated 3.5 h" in html  # raw next to calibrated
     assert "typical" in html  # Problem Set 6 uses the default

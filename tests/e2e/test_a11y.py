@@ -6,7 +6,8 @@ import pytest
 from axe_playwright_python.sync_playwright import Axe
 from playwright.sync_api import Page
 
-from tests.e2e.pages import VIEWPORTS, case_id, cases
+from tests.e2e.conftest import today_state
+from tests.e2e.pages import TODAY_STATES, VIEWPORTS, case_id, cases
 
 pytestmark = [pytest.mark.e2e, pytest.mark.a11y]
 
@@ -59,3 +60,23 @@ def test_empty_states_have_no_violations(page: Page, fresh_server, theme: str, p
     page.wait_for_load_state("networkidle")
     results = Axe().run(page, options=AXE_OPTIONS)
     assert results.violations_count == 0, results.generate_report()
+
+
+@pytest.mark.parametrize("viewport", ["mobile", "desktop"])
+@pytest.mark.parametrize("state", TODAY_STATES)
+def test_today_states_have_no_violations(
+    page: Page, fresh_server, theme: str, state: str, viewport: str
+) -> None:  # type: ignore[no-untyped-def]
+    s = fresh_server()
+    today_state(s, state)
+    w, h = VIEWPORTS[viewport]
+    page.set_viewport_size({"width": w, "height": h})
+    page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
+    page.goto(s.url + "/today")
+    page.wait_for_load_state("networkidle")
+    if viewport == "mobile":  # a row's "..." menu, open
+        page.locator("#queue ol .q-card__menu summary").first.click()
+    results = Axe().run(page, options=AXE_OPTIONS)
+    assert results.violations_count == 0, (
+        f"{state} ({theme}, {viewport}):\n{results.generate_report()}"
+    )

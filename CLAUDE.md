@@ -45,7 +45,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
 - `argus/planner/`: work windows, load and risk (C and D), the queue and its forecast, exam study time,
-  calibration, busy time. Pure and deterministic.
+  calibration, busy time, and `lanes` (layout for the day strip and the kiosk rail). Pure and deterministic.
 - `argus/reminders/`: rules (what), guards (when and whether), engine (idempotent dispatch), SMS command parser.
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
 - `argus/vault/`: `layout` (paths, links), `regions`, `ownership` (pure table), `proposals`, `writer` (the only
@@ -57,7 +57,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
   each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
   overrides), `argus/planning.py` (`compute`: remaining, load, risk, queue, study time, window forecast; `replan`:
-  seed windows, legacy conversion, the window's split; the confirm question), `argus/study.py` (materials →
+  seed windows, legacy conversion, the window's split; the confirm question; queue actions shared by Today and SMS:
+  pin, not tonight, move; the notice lead time), `argus/study.py` (materials →
   generate → verify → store), `argus/exams.py` (scope, readiness, attempts), and `argus/demo.py` (the synthetic seed).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
   routes per view, Jinja templates, component macros (`components/`), and static assets (vendored by `scripts/vendor_assets.py`).
@@ -73,7 +74,8 @@ questions/flashcards · `practice_attempts` results + confidence · `exams` scop
 `estimates` versioned, never overwritten · `time_logs` actuals and check-ins · `work_windows` when the student works ·
 `queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
-path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health.
+path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health ·
+`settings` choices made in Settings (the notice lead time).
 
 ## Conventions
 - **Time.** Store UTC only (ISO 8601 with `Z`/offset). Convert to `America/New_York` only at
@@ -154,6 +156,9 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   (`cases()`: full and `notoken`; no-token baselines end in `-notoken`).
 - Every state-changing route works with and without JS: HTMX gets a fragment plus an `HX-Trigger` toast; a plain
   form gets a 303 back. Cross-origin POSTs are refused (D016). Design reference: `docs/design.md`.
+- Row controls that only show on hover stay in the DOM (opacity, never `display: none`), so nothing shifts and the
+  keyboard reaches them; touch and narrow screens get the same controls in a `<details>` menu (D064). After an HTMX
+  swap the server says which control keeps focus. `tests/e2e/test_layout_shift.py` guards shifts around swaps.
 
 ## Testing rules
 - **Unit** (`tests/unit`): pure logic, property tests (hypothesis), and DST/time tests with `FakeClock`.

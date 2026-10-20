@@ -123,7 +123,7 @@ def test_search_states(client: TestClient, mode: str) -> None:
 
 
 def test_chips_link_to_course_pages(client: TestClient) -> None:
-    assert 'href="/courses/CMSC351"' in client.get("/today").text
+    assert 'href="/courses/CMSC351"' in client.get("/upcoming").text
 
 
 def test_palette_lists_courses(client: TestClient) -> None:

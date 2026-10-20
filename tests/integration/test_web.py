@@ -82,7 +82,8 @@ def test_today_with_data(client: TestClient) -> None:
     assert "Gradescope last synced 3h ago" in html  # stale state
     assert "Essay draft: technical description" in html  # running timer
     assert 'aria-current="page"' in html
-    assert "MATH240 lecture" in html  # day rail
+    assert "MATH240 lecture" in html  # day strip
+    assert 'id="hero"' in html and "Working on" in html
 
 
 def test_upcoming_with_filter(client: TestClient) -> None:
@@ -110,6 +111,11 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
         "estimate-pill",
         "item-row",
         "day-rail",
+        "q-card",
+        'class="hero"',
+        "confirm-line",
+        "queue-done",
+        'class="strip"',
         "workload",
         "finding-card",
         "diff__split",
@@ -130,8 +136,8 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
 
 def test_empty_states(empty: TestClient) -> None:
     today = empty.get("/today").text
-    assert "Nothing due today" in today
-    assert "No classes today" in today
+    assert "Nothing in the queue" in today
+    assert "Nothing scheduled today." in today
     assert "Nothing left due today" in today
     assert "Nothing due in the next 14 days" in empty.get("/upcoming").text
     health = empty.get("/health").text

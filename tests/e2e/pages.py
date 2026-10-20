@@ -25,6 +25,10 @@ PAGES: list[tuple[str, str, tuple[str, ...]]] = [
 ]
 VIEWPORTS = {"mobile": (390, 844), "desktop": (1280, 800), "kiosk": (1920, 1080)}
 
+# Today's other states (D058): each gets its own server, set up by conftest.today_state. The
+# default demo already covers a running timer; `fresh_server(seed=False)` covers the empty queue.
+TODAY_STATES = ("confirm-line", "no-windows", "pinned-and-skipped")
+
 # Demo setups each page is checked in. The kiosk has no token-dependent content.
 PROFILES = ("full", "notoken")
 SINGLE_PROFILE = {"kiosk"}

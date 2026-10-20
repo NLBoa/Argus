@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% from "components/ui.html" import icon, logo, course_chip, risk_badge, estimate_pill, item_row, empty_state, skeleton, error_banner, stale_banner, offline_banner, toast %}
 {% from "components/timeline.html" import day_rail %}
+{% from "components/queue.html" import queue_region, hero %}
+{% from "components/strip.html" import day_strip %}
 {% from "components/charts.html" import workload_chart, readiness_meter %}
 {% from "components/findings.html" import finding_card %}
 {% from "components/diff.html" import diff_viewer %}
@@ -67,8 +69,29 @@
   <ul class="item-list m-0 p-0 list-none">{% for v in sample.rows %}{{ item_row(v) }}{% endfor %}</ul>
 </section>
 
+<section aria-labelledby="sg-queue">
+  <h2 class="section-title" id="sg-queue">Today: hero, confirm line, queue</h2>
+  <p class="text-sm text-muted mb-2">Hero (at risk), confirm line, a done notice with undo, then pinned, "for tonight" (a moved study card with a shortfall), no estimate, and not tonight.</p>
+  {{ queue_region(sample.today) }}
+  <div class="grid gap-6 md:grid-cols-2 mt-6">
+    {{ hero(sample.hero_timed, sample.hero_timer, hid="sg-hero-timer") }}
+    <div class="grid gap-4 content-start">
+      <p class="queue-message" role="alert">{{ icon("refresh-cw", "icon-sm") }}{{ sample.queue_changed }}</p>
+      <div class="panel">{{ empty_state("circle-check", "Nothing in the queue", "No open work with time left. Add an estimate on an item, or get ahead from Upcoming.", "/upcoming", "See Upcoming") }}</div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="sg-strip">
+  <h2 class="section-title" id="sg-strip">Day strip</h2>
+  <div class="grid gap-6 md:grid-cols-2">
+    <div class="panel panel-pad">{{ day_strip(sample.strip) }}</div>
+    <div class="panel panel-pad">{{ day_strip(sample.empty_strip) }}</div>
+  </div>
+</section>
+
 <section aria-labelledby="sg-timeline">
-  <h2 class="section-title" id="sg-timeline">Timeline</h2>
+  <h2 class="section-title" id="sg-timeline">Kiosk rail</h2>
   <div class="grid gap-6 md:grid-cols-2">
     <div class="panel panel-pad">{{ day_rail(sample.timeline) }}</div>
     <div class="panel panel-pad">{{ empty_state("calendar-clock", "No classes today", "Your schedule is open.") }}</div>

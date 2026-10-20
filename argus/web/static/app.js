@@ -227,6 +227,15 @@
       const main = $("#main");
       if (main && e.detail.boosted) main.focus({ preventScroll: true });
     }
+    // The queue (D064): after a swap the server names the control that keeps focus, as
+    // "<container id>:<key>"; the visible one gets it (rows have an inline and a menu copy).
+    const queue = e.detail.target?.id === "queue" ? $("#queue") : null;
+    const [where, key] = (queue?.dataset.focus || "").split(":");
+    if (where && key && !document.activeElement?.closest?.("#queue")) {
+      const box = document.getElementById(where);
+      const el = box && $$(`[data-focus-key="${key}"]`, box).find((x) => x.offsetParent !== null && !x.disabled);
+      (el || box?.querySelector("a, button:not([disabled])") || queue.querySelector("button:not([disabled])"))?.focus();
+    }
   });
 
   // ---------------------------------------------------------------- offline

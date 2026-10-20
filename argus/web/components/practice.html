@@ -8,11 +8,11 @@
     <p class="mt-2">{{ q.answer }}</p>
     <p class="mt-1 text-sm text-muted">Source: {{ q.source_ref }}</p>
     {% if q.result is none %}
-    <div class="practice-card__grade" role="group" aria-label="How did you do?">
-      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "correct"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("circle-check", "icon-sm") }}Got it</button>
-      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "shaky"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("circle-help", "icon-sm") }}Shaky</button>
-      <button class="btn btn-sm" type="button" hx-post="/practice/{{ q.id }}/attempt" hx-vals='{"result": "incorrect"}' hx-target="#practice-{{ q.id }}" hx-swap="outerHTML">{{ icon("x", "icon-sm") }}Missed it</button>
-    </div>
+    <form method="post" action="/practice/{{ q.id }}/attempt" hx-post="/practice/{{ q.id }}/attempt" hx-target="#practice-{{ q.id }}" hx-swap="outerHTML" class="practice-card__grade" role="group" aria-label="How did you do?">
+      <button class="btn btn-sm" type="submit" name="result" value="correct">{{ icon("circle-check", "icon-sm") }}Got it</button>
+      <button class="btn btn-sm" type="submit" name="result" value="shaky">{{ icon("circle-help", "icon-sm") }}Shaky</button>
+      <button class="btn btn-sm" type="submit" name="result" value="incorrect">{{ icon("x", "icon-sm") }}Missed it</button>
+    </form>
     {% endif %}
   </details>
   {% if q.result %}<p class="mt-3 text-sm font-bold" role="status">{{ {"correct": "Marked as got it.", "shaky": "Marked as shaky; this concept moves up in your review plan.", "incorrect": "Marked as missed; this concept moves up in your review plan."}[q.result] }}</p>{% endif %}

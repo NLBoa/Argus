@@ -227,3 +227,11 @@ def test_logging_study_time_on_the_exam_page_reduces_study_time(client: TestClie
         follow_redirects=False,
     )
     assert r.status_code == 303 and r.headers["location"] == f"/exams/{exam}"
+
+
+def test_practice_grading_is_a_real_form_without_js(client: TestClient) -> None:
+    pid = practice_id(client, "How many distinct calls")
+    page = client.get(f"/exams/{item_id(client, 'Midterm 1')}").text
+    card = page[page.index(f'id="practice-{pid}"') :]
+    assert f'<form method="post" action="/practice/{pid}/attempt"' in card[:3000]
+    assert 'name="result" value="shaky"' in card[:3000]

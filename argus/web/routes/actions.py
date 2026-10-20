@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from typing import Annotated
 
@@ -11,17 +12,27 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from argus import announcements, estimates, exams
 from argus.domain.models import Item
-from argus.planning import replan
+from argus.planning import (
+    compute,
+    move_entry,
+    pin_to_top,
+    replan,
+    skip_tonight,
+    skipped,
+    unpin,
+    unskip,
+)
 from argus.reminders.rules import Rule
 from argus.store import repo
 from argus.store.db import connect, transaction
 from argus.vault import service as vault
 from argus.vault.writer import VaultWriter
-from argus.web.data import finding_view
+from argus.web.data import CHANGED, finding_view, load_today
 from argus.web.deps import AppState, Runner, get_conn, get_state
+from argus.web.format import hours as fmt_hours
 from argus.web.routes.common import ai_client, back, is_htmx, log, templates, toast
 from argus.web.study_data import practice_card
-from argus.web.viewmodels import course_views, item_view
+from argus.web.viewmodels import DoneNoticeView, course_views, item_view
 
 router = APIRouter()
 State = Annotated[AppState, Depends(get_state)]
@@ -50,7 +61,13 @@ def _refresh_status(conn: sqlite3.Connection, state: AppState) -> None:
 
 @router.post("/items/{item_id}/done")
 def mark_done(
-    request: Request, state: State, conn: Conn, item_id: int, done: Annotated[str, Form()] = "1"
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    item_id: int,
+    done: Annotated[str, Form()] = "1",
+    view: Annotated[str, Form()] = "row",
 ) -> Response:
     now = state.clock.now()
     with transaction(conn):
@@ -60,11 +77,17 @@ def mark_done(
         if done == "1" and timer and timer.item_id == item_id:
             repo.stop_timer(conn, now)
         _refresh_status(conn, state)
+    if view == "queue":
+        _replan(conn, state)
     if not is_htmx(request):
         return back(request)
     item = repo.get_item(conn, item_id)
     assert item is not None
     msg = f"Marked {item.title} done" if done == "1" else f"{item.title} is open again"
+    if view == "queue":
+        notice = DoneNoticeView(item.id, item.title) if done == "1" else None
+        focus = None if done == "1" else (f"item:{item.id}", "done")
+        return toast(_queue(request, state, conn, focus=focus, done=notice), msg)
     return toast(_row(request, state, conn, item_id), msg)
 
 
@@ -73,8 +96,10 @@ def timer(
     request: Request,
     state: State,
     conn: Conn,
+    *,
     item_id: int,
     action: Annotated[str, Form()] = "start",
+    view: Annotated[str, Form()] = "row",
 ) -> Response:
     if repo.get_item(conn, item_id) is None:
         raise HTTPException(404, "No such item")
@@ -92,6 +117,9 @@ def timer(
         msg = f"Logged {stopped.hours(now) * 60:.0f} min"
     else:
         msg = "Timer started"
+    if view == "queue":
+        _replan(conn, state)
+        return toast(_queue(request, state, conn, focus=("hero", "timer")), msg)
     response = toast(_row(request, state, conn, item_id), msg)
     response.headers["HX-Trigger-After-Settle"] = "argus:timer"
     return response
@@ -111,6 +139,196 @@ def stop_timer(request: Request, state: State, conn: Conn) -> Response:
         if stopped:
             toast(response, f"Logged {stopped.hours(now) * 60:.0f} min")
     return response
+
+
+# ---------------------------------------------------------------- the queue (D058, D064)
+
+_ENTRY = re.compile(r"^(item|study):(\d+)$")
+
+
+def _replan(conn: sqlite3.Connection, state: AppState) -> None:
+    replan(
+        conn, state.config, state.clock, tracking_sources=state.caps.tracking_sources, force=True
+    )
+
+
+def _queue(
+    request: Request,
+    state: AppState,
+    conn: sqlite3.Connection,
+    *,
+    focus: tuple[str, str] | None = None,
+    message: str | None = None,
+    done: DoneNoticeView | None = None,
+) -> HTMLResponse:
+    """The #queue fragment of Today."""
+    data = load_today(
+        conn, state.config, state.caps, state.clock.now(), focus=focus, message=message, done=done
+    )
+    html = (
+        templates(request)
+        .get_template("partials/queue.html")
+        .render(data=data, asset=templates(request).env.globals["asset"])
+    )
+    return HTMLResponse(html)
+
+
+def _entry_item(conn: sqlite3.Connection, entry: str) -> Item:
+    m = _ENTRY.match(entry)
+    item = repo.get_item(conn, int(m.group(2))) if m else None
+    if item is None:
+        raise HTTPException(404, "No such queue entry")
+    return item
+
+
+def _entry_title(entry: str, item: Item) -> str:
+    return f"Study for {item.title}" if entry.startswith("study:") else item.title
+
+
+def _to_card(entry: str, query: str = "") -> RedirectResponse:
+    """No JS: back to Today, scrolled to the card."""
+    return RedirectResponse(f"/today{query}#q-{entry.replace(':', '-')}", status_code=303)
+
+
+@router.post("/queue/{entry}/move")
+def move_entry_route(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    entry: str,
+    dir: Annotated[str, Form()],
+    before: Annotated[str, Form()] = "",
+) -> Response:
+    """Move up / Move down (D064). A move against a list that changed since it was shown is
+    refused, and the list is shown again."""
+    item = _entry_item(conn, entry)
+    if dir not in ("up", "down"):
+        raise HTTPException(422, "dir must be up or down")
+    now = state.clock.now()
+    plan = compute(conn, state.config, now, tracking_sources=state.caps.tracking_sources)
+    with transaction(conn):
+        moved = move_entry(conn, plan, entry, dir, before=before or None, now=now)
+    if not moved:
+        if not is_htmx(request):
+            return _to_card(entry, "?changed=1")
+        return toast(
+            _queue(request, state, conn, message=CHANGED), "The list changed. Try again.", "error"
+        )
+    _replan(conn, state)
+    if not is_htmx(request):
+        return _to_card(entry)
+    plan = compute(conn, state.config, now, tracking_sources=state.caps.tracking_sources)
+    prefs = repo.queue_prefs(conn)
+    shown = [e.entry_id for e in plan.queue if not skipped(plan, prefs, e.entry_id)]
+    pos = shown.index(entry) + 1 if entry in shown else 0
+    edge = (dir == "up" and pos == 1) or (dir == "down" and pos == len(shown))
+    key = {"up": "down", "down": "up"}[dir] if edge else dir
+    title = _entry_title(entry, item)
+    return toast(
+        _queue(request, state, conn, focus=(entry, key)), f"Moved {title} to {pos} of {len(shown)}"
+    )
+
+
+@router.post("/queue/{entry}/pin")
+def pin_entry(
+    request: Request, state: State, conn: Conn, entry: str, pin: Annotated[str, Form()] = "1"
+) -> Response:
+    item = _entry_item(conn, entry)
+    now = state.clock.now()
+    with transaction(conn):
+        if pin == "1":
+            pin_to_top(conn, entry, now)
+        else:
+            unpin(conn, entry, now)
+    _replan(conn, state)
+    if not is_htmx(request):
+        return _to_card(entry)
+    title = _entry_title(entry, item)
+    msg = f"Pinned {title} to the top" if pin == "1" else f"Unpinned {title}"
+    return toast(_queue(request, state, conn, focus=(entry, "pin")), msg)
+
+
+@router.post("/queue/{entry}/skip")
+def skip_entry(
+    request: Request, state: State, conn: Conn, entry: str, skip: Annotated[str, Form()] = "1"
+) -> Response:
+    """Not tonight: the current window, or the next one within a day."""
+    item = _entry_item(conn, entry)
+    now = state.clock.now()
+    plan = compute(conn, state.config, now, tracking_sources=state.caps.tracking_sources)
+    try:
+        with transaction(conn):
+            if skip == "1":
+                skip_tonight(conn, plan, entry, now)
+            else:
+                unskip(conn, entry, now)
+    except LookupError as e:
+        raise HTTPException(409, str(e)) from e
+    _replan(conn, state)
+    if not is_htmx(request):
+        return _to_card(entry)
+    title = _entry_title(entry, item)
+    msg = f"{title} moved out of tonight" if skip == "1" else f"{title} is back for tonight"
+    return toast(_queue(request, state, conn, focus=(entry, "skip")), msg)
+
+
+@router.post("/items/{item_id}/left")
+def time_left(
+    request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[str, Form()]
+) -> Response:
+    """ "About N h left": the student's own remaining time (D060)."""
+    item = _item_or_404(conn, item_id)
+    try:
+        value = float(hours)
+        with transaction(conn):
+            repo.add_remaining_mark(conn, item_id, value, state.clock.now(), "web")
+    except ValueError as e:
+        raise HTTPException(422, "Hours left must be a number from 0 to 200") from e
+    _replan(conn, state)
+    entry = f"item:{item_id}"
+    if not is_htmx(request):
+        return _to_card(entry)
+    return toast(
+        _queue(request, state, conn, focus=(entry, "left")),
+        f"About {fmt_hours(value)} left on {item.title}",
+    )
+
+
+@router.post("/windows/{window_id}/confirm")
+def confirm_window(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    window_id: str,
+    item_id: Annotated[int, Form()],
+    hours: Annotated[float, Form()],
+) -> Response:
+    """The answer to "did you work on it?" for one window: hours (0 for None), once (D060)."""
+    item = _item_or_404(conn, item_id)
+    plan = repo.window_plan(conn, window_id)
+    if plan is None:
+        raise HTTPException(404, "No such work window")
+    try:
+        with transaction(conn):
+            repo.checkin(
+                conn,
+                item_id,
+                window_id=window_id,
+                window_start=plan.starts_at,
+                hours=hours,
+                now=state.clock.now(),
+            )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    _replan(conn, state)
+    if not is_htmx(request):
+        return RedirectResponse("/today#queue", status_code=303)
+    msg = (
+        f"Logged {fmt_hours(hours)} on {item.title}" if hours else f"Noted: no time on {item.title}"
+    )
+    return toast(_queue(request, state, conn, focus=("confirm", "confirm")), msg)
 
 
 @router.post("/rules/{rule}/mute")
@@ -214,6 +432,23 @@ def _item_or_404(conn: sqlite3.Connection, item_id: int) -> Item:
     return item
 
 
+def _item_page(
+    request: Request,
+    state: AppState,
+    conn: sqlite3.Connection,
+    item_id: int,
+    message: str,
+    *,
+    kind: str = "ok",
+) -> Response:
+    """No JS: back where the form was. HTMX: the item page again (the form selects <main>) and a toast."""
+    if not is_htmx(request):
+        return back(request, f"/items/{item_id}")
+    from argus.web.routes.pages import item_detail
+
+    return toast(item_detail(request, state, conn, item_id), message, kind)
+
+
 @router.post("/items/{item_id}/estimate")
 def override_estimate(
     request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[float, Form()]
@@ -222,29 +457,21 @@ def override_estimate(
     try:
         estimates.set_override(conn, item, hours, state.clock.now())
     except ValueError as e:
+        if is_htmx(request):
+            return _item_page(request, state, conn, item_id, str(e), kind="error")
         raise HTTPException(422, str(e)) from e
-    replan(
-        conn,
-        state.config,
-        state.clock,
-        tracking_sources=state.caps.tracking_sources,
-        force=True,
+    _replan(conn, state)
+    return _item_page(
+        request, state, conn, item_id, f"Set your estimate for {item.title} to {fmt_hours(hours)}"
     )
-    return back(request, f"/items/{item_id}")
 
 
 @router.post("/items/{item_id}/estimate/clear")
 def clear_estimate(request: Request, state: State, conn: Conn, item_id: int) -> Response:
-    _item_or_404(conn, item_id)
+    item = _item_or_404(conn, item_id)
     estimates.clear_override(conn, item_id, state.clock.now())
-    replan(
-        conn,
-        state.config,
-        state.clock,
-        tracking_sources=state.caps.tracking_sources,
-        force=True,
-    )
-    return back(request, f"/items/{item_id}")
+    _replan(conn, state)
+    return _item_page(request, state, conn, item_id, f"Removed your estimate for {item.title}")
 
 
 @router.post("/items/{item_id}/estimate/rerun")
@@ -267,22 +494,18 @@ async def rerun_estimate(request: Request, state: State, conn: Conn, item_id: in
 def log_hours(
     request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[float, Form()]
 ) -> Response:
-    _item_or_404(conn, item_id)
+    item = _item_or_404(conn, item_id)
     now = state.clock.now()
     try:
         with transaction(conn):
             repo.log_time(conn, item_id, hours, now)
             repo.refresh_statuses(conn, now, tracking_sources=state.caps.tracking_sources)
     except ValueError as e:
+        if is_htmx(request):
+            return _item_page(request, state, conn, item_id, str(e), kind="error")
         raise HTTPException(422, str(e)) from e
-    replan(
-        conn,
-        state.config,
-        state.clock,
-        tracking_sources=state.caps.tracking_sources,
-        force=True,
-    )
-    return back(request, f"/items/{item_id}")
+    _replan(conn, state)
+    return _item_page(request, state, conn, item_id, f"Logged {fmt_hours(hours)} on {item.title}")
 
 
 # ---------------------------------------------------------------- study and vault

@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta
 from functools import cache
 from typing import Any
 
-from argus.clock import to_local
+from argus.clock import local_datetime, to_local
 from argus.config import AppConfig, CourseConfig
 from argus.domain.models import (
     SUBMISSION_SOURCES,
@@ -24,15 +24,21 @@ from argus.planner.risk import RiskLevel
 from argus.web.deps import STATIC_DIR
 from argus.web.format import due_text
 from argus.web.viewmodels import (
+    ConfirmView,
     CourseView,
+    DoneNoticeView,
     EstimateView,
     FindingView,
     PracticeView,
+    QueueEntryFacts,
     StaleNotice,
+    TimerView,
     WorkloadDay,
     course_views,
     diff_view,
     item_view,
+    queue_view,
+    strip,
     timeline,
 )
 
@@ -167,6 +173,73 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
     tl = timeline(
         day, meetings_on(day, [lecture, lab]), now, config=cfg, courses=courses, due_items=[rows[1]]
     )
+    evening = (local_datetime(day, 19), local_datetime(day, 23))
+    day_strip = strip(
+        day,
+        meetings_on(day, [lecture, lab]),
+        now,
+        courses=courses,
+        due_items=[rows[1]],
+        windows=[evening],
+    )
+    by_id = {v.id: v for v in rows}
+
+    def fact(row: int, level: RiskLevel = RiskLevel.OK, **kw: Any) -> QueueEntryFacts:
+        base: dict[str, Any] = {
+            "entry_id": f"item:{rows[row].id}",
+            "kind": "work",
+            "item_id": rows[row].id,
+            "remaining": 2.0,
+            "capacity": 6.0,
+            "demand": 4.0,
+            "level": level,
+            "pinned": False,
+            "moved": False,
+            "skipped": False,
+            "tonight_hours": None,
+        }
+        base.update(kw)
+        return QueueEntryFacts(**base)
+
+    facts = [
+        fact(4, RiskLevel.AT_RISK, remaining=3.5, capacity=2.0, demand=5.5, tonight_hours=2.0),
+        fact(1, RiskLevel.CREEPING, remaining=1.5, pinned=True, tonight_hours=1.0),
+        fact(
+            3,
+            entry_id=f"study:{rows[3].id}",
+            kind="study",
+            remaining=0.75,
+            moved=True,
+            capacity=None,
+            demand=None,
+            shortfall=1.5,
+            tonight_hours=0.75,
+        ),
+        fact(7, remaining=None, capacity=None, demand=None),
+        fact(0, skipped=True),
+    ]
+
+    def queue(**kw: Any) -> Any:
+        args: dict[str, Any] = {
+            "windows_on": True,
+            "window_text": "Tonight 7-11pm",
+            "can_skip": True,
+            "timer_item_id": None,
+        }
+        args.update(kw)
+        return queue_view(facts, by_id, **args)
+
+    today_sample = {
+        "queue": queue(done=DoneNoticeView(rows[6].id, rows[6].title)),
+        "timer": None,
+        "confirm": ConfirmView(
+            "2026-10-19T19:00", "Last night", rows[4].id, rows[4].title, (2.0, 1.0, 0.0)
+        ),
+    }
+    timed = queue(
+        timer_item_id=rows[1].id
+    ).hero  # not the main sample's hero: landmarks stay unique
+    hero_timer = TimerView(rows[1], now - timedelta(minutes=42), 42 * 60.0)
     workload = []
     for d in range(7):
         date = day + timedelta(days=d)
@@ -264,6 +337,12 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
         "est_same": EstimateView(3.0, 3.0),
         "rows": rows,
         "timeline": tl,
+        "strip": day_strip,
+        "empty_strip": strip(day, [], now, courses=courses),
+        "today": today_sample,
+        "hero_timed": timed,
+        "hero_timer": hero_timer,
+        "queue_changed": "The list changed since you loaded it, so nothing moved. Try again.",
         "workload": workload,
         "findings": findings,
         "diff": diff,

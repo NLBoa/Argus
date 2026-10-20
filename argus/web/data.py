@@ -14,6 +14,7 @@ from argus.domain.models import Item, ItemKind, ItemStatus
 from argus.estimates import effective_estimates, estimate_sources
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
+from argus.planner.queue import Pref, pinned
 from argus.planner.risk import RiskLevel
 from argus.planner.windows import hours_between, overlapping_windows, window_spans
 from argus.planning import (
@@ -22,11 +23,14 @@ from argus.planning import (
     compute,
     explanation,
     notice_minutes,
+    pending_confirmation,
     risk_views,
+    skipped,
     workload,
 )
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
+from argus.reminders.text import window_phrase
 from argus.store import repo
 from argus.vault.service import health as vault_health
 from argus.vault.service import item_note_path
@@ -35,26 +39,36 @@ from argus.web.settings_form import WindowRow, describe, rows_from_windows
 from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
     UNCONFIRMED_ASK_FOR,
+    ConfirmView,
     CourseView,
     DayGroup,
+    DoneNoticeView,
     EstimateView,
     FindingView,
     ItemView,
+    QueueEntryFacts,
+    QueueView,
     SourceStatusView,
     StaleNotice,
+    StripView,
     TimelineView,
     TimerView,
     WorkloadDay,
+    confirm_choices,
+    confirm_when,
     course_views,
     group_by_day,
     item_view,
+    queue_view,
     source_status,
     stale_notices,
+    strip,
     timeline,
     timer_view,
 )
 
 PAST_DUE_WINDOW = timedelta(days=3)
+CHANGED = "The list changed since you loaded it, so nothing moved. Try again."
 
 
 def source_statuses(
@@ -125,29 +139,79 @@ class TodayData:
     windows_on: bool
     date_text: str
     summary: str
-    timeline: TimelineView
-    groups: list[TodayGroup]
+    queue: QueueView
+    confirm: ConfirmView | None
+    groups: list[TodayGroup]  # "Did you submit?", past due, exams and events
+    strip: StripView
+    due_soon: list[ItemView]  # the desktop aside
     timer: TimerView | None
 
 
+def _queue_facts(p: Planning, prefs: Mapping[str, Pref]) -> list[QueueEntryFacts]:
+    tonight = dict(p.allocation(p.window.window_id)) if p.window else {}
+    out = []
+    for e in p.queue:
+        pref = prefs.get(e.entry_id)
+        live = pref is not None and pinned(pref, p.now)
+        ip = p.items.get(e.item_id)
+        if e.kind == "work":
+            remaining = ip.remaining if ip else None
+            load = ip.load if ip else None
+        else:
+            remaining, load = e.remaining, None
+        out.append(
+            QueueEntryFacts(
+                entry_id=e.entry_id,
+                kind=e.kind,
+                item_id=e.item_id,
+                remaining=remaining,
+                capacity=load.capacity if load else None,
+                demand=load.demand if load else None,
+                level=ip.level if ip and e.kind == "work" else RiskLevel.OK,
+                pinned=live and pref is not None and pref.pin_kind == "pin",
+                moved=live and pref is not None and pref.pin_kind == "move",
+                skipped=skipped(p, dict(prefs), e.entry_id),
+                tonight_hours=tonight.get(e.entry_id),
+                shortfall=p.study.shortfall.get(e.item_id) if e.kind == "study" else None,
+            )
+        )
+    return out
+
+
+def _confirm(conn: sqlite3.Connection, p: Planning, now: datetime) -> ConfirmView | None:
+    c = pending_confirmation(conn, p)
+    if c is None:
+        return None
+    ip = p.items.get(c.item_ids[0])
+    if ip is None:
+        return None
+    stored = repo.window_plan(conn, c.window_id)
+    planned = dict(stored.allocation).get(f"item:{ip.item.id}", 1.0) if stored else 1.0
+    return ConfirmView(
+        c.window_id, confirm_when(c.start, now), ip.item.id, ip.item.title, confirm_choices(planned)
+    )
+
+
 def load_today(
-    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    caps: Capabilities,
+    now: datetime,
+    *,
+    focus: tuple[str, str] | None = None,
+    message: str | None = None,
+    done: DoneNoticeView | None = None,
 ) -> TodayData:
+    """Today (D058): the next task, the confirm line, the queue, what to confirm or not miss,
+    and the day strip. `focus`, `message`, and `done` come from a queue action (D064)."""
     today = to_local(now).date()
     start = local_datetime(today, 0)
     tomorrow = local_datetime(today + timedelta(days=1), 0)
     after = local_datetime(today + timedelta(days=2), 0)
     plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
-    views = _views(
-        conn,
-        config,
-        now,
-        caps=caps,
-        plan=plan,
-        due_after=now - timedelta(days=14),
-        due_before=after,
-        include_undated=False,
-    )
+    views = _views(conn, config, now, caps=caps, plan=plan)
+    by_id = {v.id: v for v in views}
+    queued = {e.item_id for e in plan.queue if e.kind == "work"}
     recent = now - PAST_DUE_WINDOW
     # D056: past-due work no source can report a submission for asks, it doesn't accuse.
     unconfirmed = [
@@ -162,70 +226,70 @@ def load_today(
         for v in views
         if v.due_at
         and recent <= v.due_at < now
+        and v.id not in queued
         and v.risk is not RiskLevel.UNCONFIRMED
         and (v.status.is_open or v.status == ItemStatus.MISSED)
         and v.kind.takes_submission
     ]
-    past_ids = {v.id for v in overdue} | {v.id for v in unconfirmed}
-    due_today = [
-        v for v in views if v.due_at and start <= v.due_at < tomorrow and v.id not in past_ids
+    events = [
+        v
+        for v in views
+        if v.due_at and max(now, start) <= v.due_at < after and not v.kind.takes_submission
     ]
-    due_tomorrow = [v for v in views if v.due_at and tomorrow <= v.due_at < after]
-    groups: list[TodayGroup] = []
-    if unconfirmed:
-        groups.append(TodayGroup(None, "Did you submit?", tuple(unconfirmed)))
-    if overdue:
-        groups.append(TodayGroup(None, "Past due", tuple(overdue)))
-    groups.append(
-        TodayGroup(
-            today,
-            "Due today",
-            tuple(due_today),
-            "circle-check",
-            "Nothing due today",
-            "Get ahead on something from Upcoming, or take the win.",
+    groups = [
+        TodayGroup(None, label, tuple(vs))
+        for label, vs in (
+            ("Did you submit?", unconfirmed),
+            ("Past due", overdue),
+            ("Exams and events", sorted(events, key=lambda v: (v.due_at, v.title))),
         )
+        if vs
+    ]
+    due_today = [v for v in views if v.due_at and start <= v.due_at < tomorrow]
+    due_soon = sorted(
+        (
+            v
+            for v in views
+            if v.due_at and now <= v.due_at < after and v.kind.takes_submission and not v.done
+        ),
+        key=lambda v: (v.due_at, v.title),
     )
-    groups.append(
-        TodayGroup(
-            today + timedelta(days=1),
-            "Due tomorrow",
-            tuple(due_tomorrow),
-            "calendar-days",
-            "Nothing due tomorrow",
-            "Tomorrow is clear so far.",
-        )
-    )
-    open_today = sum(1 for v in due_today if v.status.is_open)
+    open_today = sum(1 for v in due_today if v.status.is_open and v.due_at and v.due_at >= now)
     parts = [f"{open_today} due today" if open_today else "Nothing left due today"]
-    if due_tomorrow:
-        parts.append(f"{len(due_tomorrow)} tomorrow")
+    if n := sum(1 for v in due_soon if v.due_at and v.due_at >= tomorrow):
+        parts.append(f"{n} tomorrow")
     if overdue:
         parts.append(f"{len(overdue)} past due")
     if unconfirmed:
         parts.append(f"{len(unconfirmed)} to confirm")
+    timer = repo.running_timer(conn)
+    prefs = repo.queue_prefs(conn)
+    window = plan.window
+    queue = queue_view(
+        _queue_facts(plan, prefs),
+        by_id,
+        windows_on=plan.windows_on,
+        window_text=window_phrase(window.start, window.end, now) if window else None,
+        can_skip=window is not None,
+        timer_item_id=timer.item_id if timer else None,
+        focus=focus,
+        message=message,
+        done=done,
+    )
     busy = busy_on(today, repo.list_meetings(conn), config.schedule.commitments)
     windows = [(sp.start, sp.end) for sp in busy_windows(plan, start, tomorrow)]
-    by_id = {v.id: v for v in views}
     return TodayData(
         windows_on=plan.windows_on,
         date_text=long_date(today),
         summary=", ".join(parts),
-        timeline=timeline(
-            today,
-            busy,
-            now,
-            config=config,
-            courses=course_views(config),
-            due_items=due_today,
-            windows=windows,
-        ),
+        queue=queue,
+        confirm=_confirm(conn, plan, now),
         groups=groups,
-        timer=timer_view(
-            repo.running_timer(conn),
-            by_id | _running_extra(conn, config, now, by_id, caps.tracking_sources),
-            now,
+        strip=strip(
+            today, busy, now, courses=course_views(config), due_items=due_today, windows=windows
         ),
+        due_soon=due_soon,
+        timer=timer_view(timer, by_id, now),
     )
 
 
@@ -428,7 +492,14 @@ def load_kiosk(
         next_up=next_up,
         time_text=f"{local.hour % 12 or 12}:{local.minute:02d}",
         date_text=long_date(today),
-        timeline=timeline(today, busy, now, config=config, courses=course_views(config)),
+        timeline=timeline(
+            today,
+            busy,
+            now,
+            config=config,
+            courses=course_views(config),
+            due_items=[v for v in views if v.due_at and to_local(v.due_at).date() == today],
+        ),
         deadlines=views[:6],
         notices=notices(conn, caps.sources, now),
     )

@@ -39,7 +39,7 @@
     <section aria-labelledby="adjust-heading">
       <h2 class="section-title" id="adjust-heading">Adjust</h2>
       <div class="panel panel-pad grid gap-4">
-        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/estimate">
+        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/estimate" hx-post="/items/{{ v.id }}/estimate" hx-target="main" hx-select="main" hx-swap="outerHTML">
           <label class="grid gap-1"><span class="text-sm font-bold">Your estimate (hours)</span>
             <input class="field" name="hours" type="number" inputmode="decimal" min="0.25" max="200" step="0.25" required value="{{ '%g'|format(data.estimate.p50|round(2)) if data.estimate else '' }}">
           </label>
@@ -48,7 +48,7 @@
         {% if caps.ai_calls_left or (data.estimate and data.estimate.overridden) %}
         <div class="flex flex-wrap gap-2">
           {% if caps.ai_calls_left %}<form method="post" action="/items/{{ v.id }}/estimate/rerun" data-requires="ai"><button class="btn" type="submit">{{ icon("refresh-cw", "icon-sm") }}Re-run AI estimate</button></form>{% endif %}
-          {% if data.estimate and data.estimate.overridden %}<form method="post" action="/items/{{ v.id }}/estimate/clear"><button class="btn btn-quiet" type="submit">Remove my estimate</button></form>{% endif %}
+          {% if data.estimate and data.estimate.overridden %}<form method="post" action="/items/{{ v.id }}/estimate/clear" hx-post="/items/{{ v.id }}/estimate/clear" hx-target="main" hx-select="main" hx-swap="outerHTML"><button class="btn btn-quiet" type="submit">Remove my estimate</button></form>{% endif %}
         </div>
         {% endif %}
       </div>
@@ -57,7 +57,7 @@
     <section aria-labelledby="time-heading">
       <h2 class="section-title" id="time-heading">Time spent <span class="section-count">{{ data.logged }}</span></h2>
       <div class="panel panel-pad grid gap-4">
-        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/log">
+        <form class="flex flex-wrap items-end gap-3" method="post" action="/items/{{ v.id }}/log" hx-post="/items/{{ v.id }}/log" hx-target="main" hx-select="main" hx-swap="outerHTML">
           <label class="grid gap-1"><span class="text-sm font-bold">Log time (hours)</span>
             <input class="field" name="hours" type="number" inputmode="decimal" min="0.25" max="24" step="0.25" required>
           </label>

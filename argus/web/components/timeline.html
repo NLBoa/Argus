@@ -1,6 +1,7 @@
 {% from "components/ui.html" import icon %}
-{#- The day rail: the hero of Today and the kiosk. Classes are solid, work windows a thin bar,
-    commitments hatched; the bronze needle is now. A list version is given for screen readers. -#}
+{#- The day rail (the kiosk, D063). Classes are solid, work windows a thin bar, commitments hatched;
+    overlapping blocks share the width in columns; the bronze needle is now. A list version is
+    given for screen readers. -#}
 {% macro day_rail(tl, label="Your day") -%}
 <figure class="m-0">
   <figcaption class="visually-hidden">{{ label }}: {{ tl.blocks|length }} scheduled block{{ "" if tl.blocks|length == 1 else "s" }}.</figcaption>
@@ -11,7 +12,7 @@
     <div class="day-rail__track">
       {% for w in tl.windows %}<div class="rail-window" style="top: {{ w.top_pct }}%; height: {{ w.height_pct }}%" title="{{ w.label }}"></div>{% endfor %}
       {% for b in tl.blocks %}
-      <div class="rail-block rail-block--{{ b.kind }}" {% if b.accent %}data-accent="{{ b.accent }}"{% endif %} style="top: {{ b.top_pct }}%; height: {{ b.height_pct }}%">
+      <div class="rail-block rail-block--{{ b.kind }}{{ ' rail-block--short' if b.short else '' }}" {% if b.accent %}data-accent="{{ b.accent }}"{% endif %} style="top: {{ b.top_pct }}%; height: {{ b.height_pct }}%; --lane: {{ b.lane }}; --lanes: {{ b.lanes }}">
         <span class="rail-block__title">{{ b.title }}</span>
         {% if not b.short %}<span class="rail-block__sub tnum">{{ b.start_text }} to {{ b.end_text }}{% if b.subtitle %}, {{ b.subtitle }}{% endif %}</span>{% endif %}
       </div>

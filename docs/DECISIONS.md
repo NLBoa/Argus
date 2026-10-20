@@ -470,7 +470,7 @@ Planned sessions that had passed under D030 are converted once to `legacy` time 
 remaining hours do not jump at the switch; calibration ignores `legacy` time.
 
 ## D061 — The work-window message replaces start nudges (2026-10-19)
-**Decision.** Once per window, `notifications.window_notice_minutes` (default 20) before it starts, one message says
+**Decision.** Once per window, the lead time set in Settings (default `notifications.window_notice_minutes`, 20) before it starts, one message says
 what to do and why, for example "Tonight 7-11pm: [1] Homework 3, 4h of 10h left, due Thu. [2] Problem Set 6, 3h
 left, due tomorrow (at risk). Study 45m: Midterm 1." (the first number is this window's share; the second appears when
 more is left after it). The key is `window:<window id>`. It respects quiet hours, class time, mute,
@@ -492,3 +492,29 @@ before the exam and still have at least 30 minutes before it: at least 20 minute
 each window; homework fills the rest, and its capacity C excludes it. What cannot fit is the shortfall, shown on the
 exam page and named in the plan line. Readiness and the review order stay for the Exam prep page and the countdown's
 "Weakest:" names; they do not feed the queue.
+
+## D063 — Today leads with the next task; a day strip on Today, a laned rail on the kiosk (2026-10-20)
+**Decision.** Today answers "what do I do now": the hero is the first queue entry (title, course, due, "~4 h left",
+one reason line such as "6 h of window time before it's due", and Start), or the running timer when one runs. Then
+the confirm line (D060), the ranked queue as an `<ol>` (with study cards), a "Not tonight" list, then "Did you
+submit?", past due, and today's and tomorrow's exams and events. The vertical day rail moved off Today: a compact,
+read-only horizontal strip shows classes and commitments in lanes, work windows shaded, deadlines in their own lane,
+and the now needle; its range is the busy part of the day ±30 min, and its labels sit in a list under it. The kiosk
+keeps the vertical rail, now with overlapping blocks in columns, a range stretched to take in late deadlines, and hour
+labels at real local hours (25 on the fall-back day). Both use `planner/lanes.py` (greedy interval colouring: lanes =
+the most blocks overlapping at once). Desktop puts the strip and "Due soon" beside the queue; the phone stacks them
+last.
+
+## D064 — Queue controls and reorder semantics (2026-10-20)
+**Decision.** Each card has Move up / Move down, Pin to top (Unpin), Not tonight (Back to tonight), Mark done, and a
+time-left field; study cards have only the moves and Pin. With a mouse they show on hover or focus-within (always in
+the DOM, so nothing shifts and the keyboard reaches them); on touch screens and narrow windows the same controls sit
+in a "..." `<details>` menu, which needs no JS. Pin and SMS `FIRST` both pin to the top until done or unpinned, and
+clear a "Not tonight". A move pins everything from the top down to the moved pair, as "move" pins that expire when
+tonight's window ends (at midnight without windows); explicit pins stay pins. A move names the neighbor it swaps
+with (`before`); if that is no longer the neighbor the move is refused and the list is shown again with "The list
+changed". Moves act on tonight's list only (skipped entries are listed apart). Every control is a form: with HTMX it
+swaps `#queue` and the server names the control that keeps focus (the opposite arrow at an edge); without JS it
+redirects to `/today#q-<entry>`. Mark done from the queue leaves "Marked X done. Undo" in place of the card.
+SMS adds `SKIP n`, `FIRST n`, and `LEFT n h`; each needs a number, and an AI reading of `SKIP` asks first.
+The window message's lead time is set in Settings (a `settings` row, 0011); config.yaml's value is only the default.
