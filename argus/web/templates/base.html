@@ -1,4 +1,5 @@
-{% from "components/ui.html" import icon, logo, status_line %}
+{% from "components/ui.html" import icon, status_line %}
+{% from "components/brand.html" import wordmark %}
 {% from "components/nav.html" import header_nav, tabbar %}
 <!doctype html>
 <html lang="en"{% if theme in ("light", "dark") %} data-theme="{{ theme }}"{% endif %}>
@@ -7,8 +8,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{{ page_title }}{% endblock %} | Argus</title>
   <meta name="description" content="Argus: your courses, deadlines, and study plan.">
-  <meta name="theme-color" content="#0b636b" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+  {#- The header surface (D068); a theme chosen in Settings wins over the system's. -#}
+  {% if theme in ("light", "dark") %}
+  <meta name="theme-color" content="{{ '#121b2c' if theme == 'dark' else '#ffffff' }}">
+  {% else %}
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121b2c" media="(prefers-color-scheme: dark)">
+  {% endif %}
   <link rel="preload" href="/static/fonts/ahn-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/display-bricolage.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ asset('dist/app.css') }}">
@@ -25,7 +31,7 @@
   <div class="progress-bar" aria-hidden="true"></div>
   <header class="app-header">
     <div class="app-header__inner">
-      <a class="brand" href="/today" aria-label="Argus, go to Today">{{ logo() }}<span>Argus</span></a>
+      <a class="brand" href="/today" aria-label="Argus, go to Today">{{ wordmark(20) }}</a>
       {{ header_nav(caps, active, open_proposals) }}
       <div class="header-tools">
         <form class="header-search" action="/search" method="get" role="search">

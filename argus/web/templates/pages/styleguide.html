@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/ui.html" import icon, logo, course_chip, course_code, risk_badge, item_row, empty_state, skeleton, error_banner, status_line, toast %}
+{% from "components/ui.html" import icon, course_chip, course_code, risk_badge, item_row, empty_state, skeleton, error_banner, status_line, toast %}
 {% from "components/timeline.html" import day_rail %}
 {% from "components/queue.html" import queue_region, hero %}
 {% from "components/strip.html" import day_strip %}
@@ -7,6 +7,7 @@
 {% from "components/findings.html" import finding_card %}
 {% from "components/diff.html" import diff_viewer %}
 {% from "components/practice.html" import practice_card %}
+{% from "components/brand.html" import mark, wordmark %}
 {% block content %}
 <div class="page-head">
   <h1 class="page-title">Styleguide</h1>
@@ -40,6 +41,17 @@
     <p class="text-xs text-muted">Caption 12.5</p>
     <p class="tnum">Tabular 0123456789 11:30 pm</p>
     <p>A link reads as ink with an underline: <a href="/styleguide">open the styleguide</a>.</p>
+  </div>
+</section>
+
+<section aria-labelledby="sg-mark">
+  <h2 class="section-title" id="sg-mark">Mark</h2>
+  <p class="text-sm text-muted mb-2">The wordmark, whose g's ear is the bronze "now" needle, and the square mark at 16, 28, 64 and 192 px; full color, then one color (D068).</p>
+  <div class="panel panel-pad grid gap-6">
+    {% for mono in [False, True] %}
+    <div class="flex flex-wrap items-end gap-6" data-mark="wordmark">{{ wordmark(20, mono) }}{{ wordmark(40, mono) }}{{ wordmark(80, mono) }}</div>
+    <div class="flex flex-wrap items-end gap-6" data-mark="square">{% for size in [16, 28, 64, 192] %}{{ mark(size, mono) }}{% endfor %}</div>
+    {% endfor %}
   </div>
 </section>
 
@@ -142,8 +154,8 @@
 </section>
 
 <section aria-labelledby="sg-icons">
-  <h2 class="section-title" id="sg-icons">Icons and mark</h2>
-  <p class="flex flex-wrap gap-3 items-center">{{ logo(40) }}{% for n in icons %}<span title="{{ n }}">{{ icon(n) }}</span>{% endfor %}</p>
+  <h2 class="section-title" id="sg-icons">Icons</h2>
+  <p class="flex flex-wrap gap-3 items-center">{% for n in icons %}<span title="{{ n }}">{{ icon(n) }}</span>{% endfor %}</p>
 </section>
 </div>
 {% endblock %}

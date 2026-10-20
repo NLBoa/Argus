@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
@@ -32,7 +34,7 @@ def manifest() -> JSONResponse:
             "scope": "/",
             "display": "standalone",
             "background_color": "#eef2f5",
-            "theme_color": "#0b636b",
+            "theme_color": "#ffffff",
             "icons": [
                 {"src": "/static/icons/argus.svg", "sizes": "any", "type": "image/svg+xml"},
                 {"src": "/static/icons/argus-192.png", "sizes": "192x192", "type": "image/png"},
@@ -56,7 +58,10 @@ def service_worker(request: Request) -> Response:
     body = (
         templates(request)
         .get_template("sw.js")
-        .render(version=__version__ + "-" + str(abs(hash(tuple(urls))) % 10**8), urls=urls)
+        .render(
+            version=__version__ + "-" + hashlib.sha256("\n".join(urls).encode()).hexdigest()[:8],
+            urls=urls,
+        )
     )
     return Response(
         body,

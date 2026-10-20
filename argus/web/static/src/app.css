@@ -111,12 +111,11 @@
     padding: 0.5rem max(1rem, env(safe-area-inset-right)) 0.5rem max(1rem, env(safe-area-inset-left));
   }
   .brand {
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    color: var(--ink); text-decoration: none; font-family: var(--font-display); font-weight: 750;
-    letter-spacing: -0.02em; font-size: var(--text-lg);
+    display: inline-flex; align-items: center; min-height: 1.75rem;
+    color: var(--ink); text-decoration: none;
   }
   .brand:hover { color: var(--ink); }
-  .brand svg { width: 1.75rem; height: 1.75rem; }
+  .brand .wordmark { display: block; }
   /* Text-only nav: Today, Upcoming, Exams, and "More". */
   .nav { display: flex; align-items: center; gap: 0.25rem; }
   .nav-link, .nav__more {

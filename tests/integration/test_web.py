@@ -130,6 +130,8 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
         "skeleton",
         "banner--error",
         "toast",
+        'data-mark="wordmark"',
+        'data-mark="square"',
     ]:
         assert marker in html, marker
 
