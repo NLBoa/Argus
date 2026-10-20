@@ -428,7 +428,8 @@ and commitments inside a window are not work time; quiet hours do not cut window
 window across a DST change is 3 or 5 hours long. Each occurrence has a stable id, its local start date and time
 (`2026-10-19T19:00`), so keys survive class and commitment changes. Config seeds the `work_windows` table on the first
 run only, and only when it lists at least one window (so adding windows to config later still seeds); after that
-Settings owns them. `/etc/argus/config.yaml` is root-owned and the units run with `ProtectSystem=strict`, so the app
+Settings owns them (Phase 3). Until then, `argus windows --reset` (on the Pi: `sudo argus-admin windows --reset`)
+copies config.yaml's windows again. `/etc/argus/config.yaml` is root-owned and the units run with `ProtectSystem=strict`, so the app
 could not write it anyway. Without any windows, risk falls back to the time-only rule and no window messages are sent.
 `schedule.max_session_minutes` is retired but still accepted, so existing configs load.
 
@@ -450,7 +451,7 @@ study reserved in those windows, minus a window it is skipped for. D is its own 
 items due at the same time, plus the earlier work that can still be done before its due time. Walking the due dates
 in order, earlier work counts only up to the window time before its own deadline: work that cannot fit by then is
 missed and does not take time from later items (the deadline-feasibility test). Past-deadline and unconfirmed items do
-not count. At risk: C < D. Creeping: C < 1.5 x D. An item with nothing left (E = 0) is OK. Comparisons are strict.
+not count; an overdue item still inside its late window is planned up to its late deadline and does count. At risk: C < D. Creeping: C < 1.5 x D. An item with nothing left (E = 0) is OK. Comparisons are strict.
 Remaining hours (E) are the calibrated p80 (or the student's estimate) minus logged time, or the student's latest
 "about N h left" minus what they logged since. Without windows or an estimate, the time-only rule applies (due within
 24 hours and not started: creeping). With nothing logged, C only shrinks and D never grows, so an item's level only
@@ -469,18 +470,22 @@ remaining hours do not jump at the switch; calibration ignores `legacy` time.
 
 ## D061 — The work-window message replaces start nudges (2026-10-19)
 **Decision.** Once per window, `notifications.window_notice_minutes` (default 20) before it starts, one message says
-what to do and why, for example "Tonight 7-11pm: [1] Homework 3, 4h left, due Thu. [2] Problem Set 6, 3h left, due
-tomorrow (at risk). Study 45m: Midterm 1." The key is `window:<window id>`. It respects quiet hours, class time, mute,
+what to do and why, for example "Tonight 7-11pm: [1] Homework 3, 4h of 10h left, due Thu. [2] Problem Set 6, 3h
+left, due tomorrow (at risk). Study 45m: Midterm 1." (the first number is this window's share; the second appears when
+more is left after it). The key is `window:<window id>`. It respects quiet hours, class time, mute,
 and snooze (it waits only when every named item is snoozed), and expires 30 minutes after the start. It does not count
 toward the daily cap (at most 3 windows a day), so it can never delay a 24-hour warning. It is built entry by entry so
 it fits one GSM-7 segment and its numbers match `item_ids` exactly; exam study is never numbered, so `DONE n` cannot
-hit an exam. At-risk alerts keep their key but are batched into one message, and an item planned for the window in
+hit an exam. At-risk alerts keep their key but are batched into one message ("+N more on Today" when they don't all
+fit), and an item planned for the window in
 progress waits until the window ends (the student may be working on it). The morning brief and `TODAY` name the next
-window and what it starts with. `Rule.START_NUDGE` stays as a value so old rows still parse; Health hides it.
+window and what it starts with. `Rule.START_NUDGE` stays as a value so old rows still parse; Health hides it. A planner
+failure in a tick is logged and skipped: the 24-hour and 3-hour warnings never depend on it.
 
 ## D062 — Exam study time (2026-10-19)
 **Decision.** Each exam gets one "Study for <exam>" card. Its hours are the exam's calibrated p80, clamped to 1-6 h;
-progress is time logged on the exam item only. What is left is spread evenly over the windows that start in the week
+progress is time logged on the exam item only. What is left is spread evenly (recomputed window by window, so time a capped window can't take moves to the later ones)
+over the windows that start in the week
 before the exam and still have at least 30 minutes before it: at least 20 minutes per window, capped at half a window
 (three quarters in the last 48 hours), and three quarters of a window across all exams. That time is reserved first in
 each window; homework fills the rest, and its capacity C excludes it. What cannot fit is the shortfall, shown on the

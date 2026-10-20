@@ -62,7 +62,7 @@ def busy_on(
     return sorted(out, key=lambda b: (b.start, b.title))
 
 
-# ---------------------------------------------------------------- free time
+# ---------------------------------------------------------------- interval arithmetic
 
 
 @dataclass(frozen=True, slots=True, order=True)

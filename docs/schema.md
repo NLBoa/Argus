@@ -31,6 +31,10 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `estimates` | 0004 | Versioned, append-only: `source` (`ai`, `default`, `user`), p50/p80 hours, confidence, breakdown and assumptions (JSON), reasoning, input hash, model, prompt version. User overrides can be retracted (`retracted_at`), never rewritten |
 | `plan_blocks` | 0004 | Removed in 0009: renamed `plan_blocks_legacy`, converted once to `legacy` time, dropped in 0010 (D060) |
 | `plan_state` | 0004, 0009 | The facts hash of the plan, its one-line explanation, when it was made; `model_since`, `legacy_converted_at`, `windows_seeded_at` (D057) |
+| `work_windows` | 0009 | When the student works: one row per start day (`day` Mon=0, `start_time`, `end_time` local `HH:MM`; end at or before start runs past midnight). Seeded once from config, then owned by Settings (D057) |
+| `queue_prefs` | 0009 | Per queue entry (`item:<id>`, `study:<exam id>`): `pin_rank`, `pin_kind` `pin`/`move`, `pin_until` (move pins expire), `skip_window` ("Not tonight") (D058) |
+| `remaining_marks` | 0009 | The student's "about N h left", append-only; the latest counts minus time logged since (D060) |
+| `window_plans` | 0009 | Per work window (`window_id` = local start, e.g. `2026-10-19T19:00`): its split as JSON `[[entry, hours], ...]`, stored just before it starts and frozen once it starts (D061) |
 | `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 
 | `materials` | 0005 | Text extracted from course files and pages, per page or slide (JSON `pages` `[{ref, text}]`), with the Canvas `url` the student opens. Files themselves are never stored or copied into the vault. `UNIQUE(course_id, url)` |
@@ -73,8 +77,3 @@ the merge step. Links are sticky (see `domain/merge.py`).
 `via` records the channel (`piazza`, `piazza_email`, `canvas_api`). `author_role` is `instructor`, `ta`,
 `student`, or `unknown`. `kind` is `note`, `question`, `instructor_answer`, `announcement`, or `syllabus`.
 `content_hash` changes on edit. `scanned_hash` is the hash at the last AI extraction (Phase 4).
-
-| `work_windows` | 0009 | When the student works: one row per start day (`day` Mon=0, `start_time`, `end_time` local `HH:MM`; end at or before start runs past midnight). Seeded once from config, then owned by Settings (D057) |
-| `queue_prefs` | 0009 | Per queue entry (`item:<id>`, `study:<exam id>`): `pin_rank`, `pin_kind` `pin`/`move`, `pin_until` (move pins expire), `skip_window` ("Not tonight") (D058) |
-| `remaining_marks` | 0009 | The student's "about N h left", append-only; the latest counts minus time logged since (D060) |
-| `window_plans` | 0009 | Per work window (`window_id` = local start, e.g. `2026-10-19T19:00`): its split as JSON `[[entry, hours], ...]`, stored just before it starts and frozen once it starts (D061) |

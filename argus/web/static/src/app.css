@@ -297,7 +297,6 @@
   .rail-block__title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rail-block__sub { color: inherit; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rail-block--class { background: var(--accent-bg); color: var(--accent-ink); border-left: 4px solid var(--accent); }
-  .rail-block--session { background: var(--surface); color: var(--ink); border: 1.5px dashed var(--brand); }
   .rail-block--commitment {
     color: var(--ink); border: 1px solid var(--line);
     background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--surface) 6px 12px);

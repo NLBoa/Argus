@@ -66,7 +66,7 @@
         {% if data.logs %}
         <table class="data-table"><caption class="visually-hidden">Time logs</caption>
           <thead><tr><th scope="col">Started</th><th scope="col">Hours</th><th scope="col">How</th></tr></thead>
-          <tbody>{% for l in data.logs %}<tr><td class="tnum">{{ l.when }}</td><td class="tnum">{{ l.hours }}{% if l.running %} (running){% endif %}</td><td>{{ {"timer": "Timer", "sms": "Text reply", "manual": "Logged here"}[l.source] }}</td></tr>{% endfor %}</tbody>
+          <tbody>{% for l in data.logs %}<tr><td class="tnum">{{ l.when }}</td><td class="tnum">{{ l.hours }}{% if l.running %} (running){% endif %}</td><td>{{ {"timer": "Timer", "sms": "Text reply", "manual": "Logged here", "checkin": "Answered after a work window", "legacy": "Planned session (before work windows)"}.get(l.source, l.source) }}</td></tr>{% endfor %}</tbody>
         </table>
         {% endif %}
       </div>

@@ -67,10 +67,12 @@ def study_plan(exams: Sequence[ExamStudy], spans: Sequence[WindowSpan], now: dat
         if not eligible:
             plan.shortfall[e.exam_id] = left
             continue
-        per = max(MIN_SLOT, _ceil_quarter(left / len(eligible)))
-        for s in eligible:
+        for n, s in enumerate(eligible):
             if left <= 1e-9:
                 break
+            # Spread what is left over the windows still ahead, so time a capped window can't
+            # take moves to the later ones.
+            per = max(MIN_SLOT, _ceil_quarter(left / (len(eligible) - n)))
             avail = s.hours_between(now, e.at)
             cap = (LATE_CAP if e.at - s.start <= LATE else CAP) * avail
             room = ALL_EXAMS_CAP * avail - used.get(s.window_id, 0.0)

@@ -214,3 +214,16 @@ def test_errors_without_javascript_render_a_page(client: TestClient) -> None:
     assert client.get("/exams/9999", headers={"Accept": "application/json"}).json() == {
         "detail": "No such exam"
     }
+
+
+def test_logging_study_time_on_the_exam_page_reduces_study_time(client: TestClient) -> None:
+    exam = item_id(client, "Midterm 1")
+    page = client.get(f"/exams/{exam}").text
+    assert f'action="/items/{exam}/log"' in page and "Log study time" in page
+    r = client.post(
+        f"/items/{exam}/log",
+        data={"hours": "2"},
+        headers={"origin": "http://testserver", "referer": f"http://testserver/exams/{exam}"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"] == f"/exams/{exam}"

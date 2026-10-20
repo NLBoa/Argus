@@ -284,3 +284,27 @@ def test_untracked_items_same_timing_and_keys_new_wording(due: timedelta) -> Non
         assert "Not submitted yet." in tracked.body
         assert "Reply DONE 1 once submitted." in untracked.body
     assert gsm_length(untracked.sms) <= SEGMENT
+
+
+def test_at_risk_with_no_window_left_says_so() -> None:
+    it = item(1, timedelta(hours=20))
+    [r] = at_risk(snap(it, at_risk=frozenset({1}), at_risk_load={1: (0.0, 3.0)}))
+    assert "no work window before it's due" in r.body and "5m" not in r.body
+
+
+def test_batched_at_risk_says_how_many_more_are_on_today() -> None:
+    long = [
+        item(i, timedelta(days=i), title=f"An unusually long assignment title {i}")
+        for i in range(1, 9)
+    ]
+    [r] = at_risk(snap(*long, at_risk=frozenset(range(1, 9))))
+    hidden = 8 - len(r.item_ids)
+    assert hidden > 0 and f"+{hidden} more on Today" in r.body
+    assert gsm_length(r.sms) <= SEGMENT
+
+
+def test_due_phrase_names_far_days_by_date() -> None:
+    from argus.reminders.text import due_phrase
+
+    assert due_phrase(NOW + timedelta(days=3), NOW) == "due Thu"
+    assert due_phrase(NOW + timedelta(days=10), NOW) == "due Oct 29"

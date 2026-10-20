@@ -27,7 +27,8 @@ schedule:
   walking_buffer_minutes: 15
   morning_brief: "08:00"    # inside quiet hours it would wait until they end
   # When you usually work. Argus plans into these hours only, and texts you before each one.
-  # These seed the first run; after that, edit them in Settings. `days` are start days; an end
+  # These seed the first run; after that, change them here and run `argus windows --reset`
+  # (sudo argus-admin windows --reset on the Pi). `days` are start days; an end
   # before the start runs past midnight. At most 3 windows a day.
   work_windows:
     - { days: [Mon, Tue, Wed, Thu], start: "19:00", end: "23:00" }

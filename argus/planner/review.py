@@ -9,13 +9,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from itertools import zip_longest
-
-REVIEW_DAYS = (7, 5, 3, 2, 1)
-SESSION = timedelta(minutes=45)
-PER_SESSION = 3
 
 
 class Readiness(StrEnum):

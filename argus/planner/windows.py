@@ -66,22 +66,27 @@ def from_config(windows: Iterable[WorkWindowConfig]) -> list[WorkWindow]:
 
 
 def overlapping_windows(windows: Sequence[WorkWindow]) -> list[str]:
-    """Pairs that overlap within a week (they are merged; `check-config` warns)."""
-    monday = date(2026, 1, 5)
+    """Pairs that overlap within a week, including Sunday night into Monday (they are merged;
+    `check-config` warns). Works in minutes of the week, so no clock or timezone is involved."""
+    week = 7 * 24 * 60
     occurrences = []
     for w in windows:
         for day in sorted(w.days):
-            d = monday + timedelta(days=day)
-            s = datetime.combine(d, w.start)
-            e = datetime.combine(d + timedelta(days=1) if w.wraps else d, w.end)
-            occurrences.append((s, e, w.describe(day)))
+            start = day * 24 * 60 + w.start.hour * 60 + w.start.minute
+            length = (w.end.hour * 60 + w.end.minute) - (w.start.hour * 60 + w.start.minute)
+            occurrences.append(
+                (start, start + (length if length > 0 else length + 24 * 60), w.describe(day))
+            )
     occurrences.sort()
     found = []
     for i, (_s1, e1, name1) in enumerate(occurrences):
         for s2, _e2, name2 in occurrences[i + 1 :]:
-            if s2 >= e1:
-                break
-            found.append(f"{name1} overlaps {name2}")
+            if s2 < e1:
+                found.append(f"{name1} overlaps {name2}")
+        if e1 > week:  # runs past Sunday midnight into Monday
+            for s2, _e2, name2 in occurrences:
+                if s2 < e1 - week and name2 != name1:
+                    found.append(f"{name1} overlaps {name2}")
     return found
 
 

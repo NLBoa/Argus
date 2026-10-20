@@ -164,3 +164,12 @@ def test_naive_bounds_are_rejected() -> None:
             buffer_minutes=0,
         )
     assert NOW.tzinfo is UTC
+
+
+def test_overlap_across_the_week_boundary_is_found() -> None:
+    sunday_night = WorkWindow(frozenset({6}), time(22), time(2))  # Sun 10 pm - Mon 2 am
+    monday_early = WorkWindow(frozenset({0}), time(1), time(3))
+    assert overlapping_windows([sunday_night, monday_early]) == [
+        "Sun 22:00-02:00 overlaps Mon 01:00-03:00"
+    ]
+    assert overlapping_windows([sunday_night, EVENINGS]) == []

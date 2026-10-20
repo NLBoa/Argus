@@ -125,3 +125,15 @@ def test_list_empty(config_path: Path) -> None:
     result = runner.invoke(cli.app, ["list", "-c", str(config_path), "--all"])
     assert result.exit_code == 0
     assert result.output.strip() == "nothing due"
+
+
+def test_windows_lists_and_resets_from_config(config_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from argus.cli import app
+
+    cli = CliRunner()
+    first = cli.invoke(app, ["windows", "-c", str(config_path)])
+    assert first.exit_code == 0, first.output
+    reset = cli.invoke(app, ["windows", "--reset", "-c", str(config_path)])
+    assert reset.exit_code == 0 and "replaced with the ones in config.yaml" in reset.output

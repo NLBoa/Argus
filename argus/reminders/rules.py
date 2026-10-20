@@ -95,9 +95,10 @@ class NoticeEntry:
     item_id: int | None  # None for exam study (never numbered: DONE n must not hit an exam)
     course: str
     title: str
-    hours: float
+    hours: float  # this window's share
     due: datetime | None
     at_risk: bool = False
+    left: float | None = None  # all the hours still needed, when more than this window's share
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,12 +316,15 @@ def at_risk(snap: Snapshot) -> list[Reminder]:
         it = risky[0]
         assert it.due_at is not None
         load = snap.at_risk_load.get(it.id)
-        why = (
-            f"only {hours_short(load[0])} of work windows before {when(it.due_at)} for "
-            f"{hours_short(load[1])} of work"
-            if load
-            else f"not enough work-window time before {when(it.due_at)}"
-        )
+        if load and load[0] < 1 / 60:
+            why = f"no work window before it's due {when(it.due_at)}"
+        elif load:
+            why = (
+                f"only {hours_short(load[0])} of work windows before {when(it.due_at)} for "
+                f"{hours_short(load[1])} of work"
+            )
+        else:
+            why = f"not enough work-window time before {when(it.due_at)}"
         body = f"[1] {it.course_code} {short(it.title, 50)}: {why}. Reply EST 1 h to correct the estimate."
         return [
             Reminder(
@@ -337,10 +341,15 @@ def at_risk(snap: Snapshot) -> list[Reminder]:
     tail = " Reply EST n h to fix an estimate."
     title = f"{len(risky)} at risk"
     parts: list[str] = []
+
+    def batch_body(shown: list[str]) -> str:
+        more = len(risky) - len(shown)
+        return "; ".join(shown) + (f"; +{more} more on Today" if more else "") + "." + tail
+
     for n, it in enumerate(risky, start=1):
         assert it.due_at is not None
         part = f"[{n}] {it.course_code} {short(it.title, 30)} ({due_phrase(it.due_at, snap.now)})"
-        if gsm_length(to_gsm7(f"{title}: " + "; ".join([*parts, part]) + "." + tail)) > SEGMENT:
+        if gsm_length(to_gsm7(f"{title}: " + batch_body([*parts, part]))) > SEGMENT:
             break
         parts.append(part)
     shown = tuple(i.id for i in risky[: len(parts)])
@@ -349,7 +358,7 @@ def at_risk(snap: Snapshot) -> list[Reminder]:
             rule=Rule.AT_RISK,
             keys=keys,
             title=title,
-            body="; ".join(parts) + "." + tail,
+            body=batch_body(parts),
             item_ids=shown,
             priority=4,
             counts_toward_cap=False,
@@ -382,7 +391,13 @@ def window_plan(snap: Snapshot) -> list[Reminder]:
         else:
             due = f", {due_phrase(e.due, snap.now)}" if e.due else ""
             risk = " (at risk)" if e.at_risk else ""
-            part = f"[{len(ids) + 1}] {short(e.title, 30)}, {hours_short(e.hours)} left{due}{risk}."
+            share = hours_short(e.hours)
+            amount = (
+                f"{share} of {hours_short(e.left)} left"
+                if e.left is not None and hours_short(e.left) != share and e.left > e.hours
+                else f"{share} left"
+            )
+            part = f"[{len(ids) + 1}] {short(e.title, 30)}, {amount}{due}{risk}."
         if gsm_length(to_gsm7(f"{title}: " + " ".join([*parts, part]))) > SEGMENT:
             break
         parts.append(part)

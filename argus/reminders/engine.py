@@ -97,8 +97,16 @@ class ReminderEngine:
         health = repo.source_health(self.conn, SOURCES)
         first = repo.first_success_at(self.conn)
         tracking = self.caps.tracking_sources
-        plan = compute(self.conn, self.config, now, tracking_sources=tracking)
-        risky = {i: ip for i, ip in plan.items.items() if ip.level is RiskLevel.AT_RISK}
+        try:
+            plan: Planning | None = compute(self.conn, self.config, now, tracking_sources=tracking)
+        except Exception:
+            # Deadline alerts never depend on the planner: without a plan this tick, the 24-hour
+            # and 3-hour warnings still go out; only at-risk and window messages wait.
+            log.exception("planning failed; deadline reminders continue without it")
+            plan = None
+        risky = (
+            {i: ip for i, ip in plan.items.items() if ip.level is RiskLevel.AT_RISK} if plan else {}
+        )
         vault = vault_health(self.conn)
         sources = {
             s: SourceAlertState(s, h.failures, h.failing_since, h.last_error)
@@ -108,7 +116,7 @@ class ReminderEngine:
             "vault", vault.failures, vault.failing_since, vault.last_error
         )
         items = repo.list_items(self.conn)
-        notice, in_window = self._window(plan, now)
+        notice, in_window = self._window(plan, now) if plan else (None, frozenset[int]())
         return Snapshot(
             at_risk=frozenset(risky),
             at_risk_load={
@@ -154,6 +162,7 @@ class ReminderEngine:
                     hours,
                     it.due_at if kind == "item" else None,
                     ip.level is RiskLevel.AT_RISK,
+                    ip.remaining if kind == "item" else None,
                 )
             )
         running = w.start <= now < w.end
@@ -167,9 +176,13 @@ class ReminderEngine:
         local = to_local(now)
         if local.time() < self.config.schedule.morning_brief:
             return None
-        body, ids = today_text(
-            self.conn, self.config, now, tracking_sources=self.caps.tracking_sources
-        )
+        try:
+            body, ids = today_text(
+                self.conn, self.config, now, tracking_sources=self.caps.tracking_sources
+            )
+        except Exception:
+            log.exception("morning brief failed; it waits for the next tick")
+            return None
         return Brief(local.date(), body, ids, self._end_of_day(now))
 
     def _countdowns(self, now: datetime) -> list[Countdown]:

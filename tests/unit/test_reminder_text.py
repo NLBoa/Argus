@@ -43,3 +43,17 @@ def test_item_numbers_survive_gsm7_and_count_double() -> None:
     long = "[1] " + "word " * 40
     out = fit(long)
     assert gsm_length(out) <= 160 and out.endswith("...") and out.startswith("[1]")
+
+
+def test_hours_short_rounds_to_five_minutes_then_half_hours() -> None:
+    from argus.reminders.text import hours_short
+
+    assert [hours_short(h) for h in (0.0, 0.25, 0.75, 0.99, 1.0, 1.26, 4.0)] == [
+        "5m",
+        "15m",
+        "45m",
+        "1h",
+        "1h",
+        "1.5h",
+        "4h",
+    ]

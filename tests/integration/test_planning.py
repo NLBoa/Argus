@@ -219,9 +219,10 @@ def test_the_split_is_frozen_when_the_window_starts(
 
 
 def test_with_no_new_logs_risk_only_gets_worse(demo: sqlite3.Connection, clock: FakeClock) -> None:
-    """With nothing logged, an item's window time before its due date only shrinks, so its level
-    only gets worse. The one exception (D059): when a competing item's deadline passes, it stops
-    competing (it can no longer be done in time), D drops, and the item may get some room back."""
+    """With nothing logged, an item's window time before its due date only shrinks and its demand
+    never grows, so its level only gets worse, with one exception (D059): earlier work that can
+    no longer be done in time (its deadline passed, or the window time before it ran out) stops
+    counting, D drops, and the item may get some room back."""
     with transaction(demo):
         repo.stop_timer(demo, clock.now())  # a running timer is progress: stop it
     replan(demo, DEMO_CONFIG, clock, tracking_sources=TRACKING)
@@ -352,3 +353,60 @@ def test_the_window_message_skips_work_done_since_the_split_was_stored(
     assert snap.in_window == frozenset()  # the window hasn't started yet
     clock.set(stored.starts_at + timedelta(minutes=5))
     assert engine.snapshot(clock.now()).in_window == frozenset({hw4})
+
+
+def test_an_overdue_item_in_its_late_window_gets_window_time_and_competes(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Due this morning, late submissions until Thursday: still workable, so it is planned into
+    tonight and counts against work due after it (D059)."""
+    hw4 = item_id(demo, "Homework 4")
+    late = item_id(demo, "Quiz 2")
+    now = clock.now()
+    with transaction(demo):
+        demo.execute(
+            "UPDATE items SET due_at = ?, late_due_at = ? WHERE id = ?",
+            (iso(now - timedelta(hours=2)), iso(now + timedelta(days=3)), late),
+        )
+        repo.refresh_statuses(demo, now, tracking_sources=TRACKING)
+    plan = compute(demo, DEMO_CONFIG, now, tracking_sources=TRACKING)
+    assert plan.items[late].item.status.is_open
+    assert plan.queue[0].entry_id == f"item:{late}"  # overdue but workable: first
+    planned = {e for alloc in plan.forecast.values() for e, _ in alloc}
+    assert f"item:{late}" in planned
+    others = compute(demo, DEMO_CONFIG, now, tracking_sources=TRACKING).items[hw4].load
+    assert others is not None and others.demand > (plan.items[hw4].remaining or 0)
+
+
+def test_the_explanation_is_not_reworded_every_tick(
+    demo: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Facts like "15.3 hours of work windows" change by the minute; rewording on each would
+    make dozens of AI calls a day. The plan line changes only when what it is about changes."""
+    assert replan(demo, DEMO_CONFIG, clock, tracking_sources=TRACKING, force=True)
+    changes = 0
+    for _ in range(3):
+        clock.advance(timedelta(minutes=15))
+        changes += replan(demo, DEMO_CONFIG, clock, tracking_sources=TRACKING)
+    assert changes == 0
+
+
+def test_a_planning_failure_never_blocks_deadline_alerts(
+    demo: sqlite3.Connection, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from argus.notify.router import Router
+    from argus.reminders import engine as engine_module
+    from argus.reminders.engine import ReminderEngine
+    from argus.reminders.rules import Rule, candidates
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("planner bug")
+
+    monkeypatch.setattr(engine_module, "compute", broken)
+    clock.set(local_datetime(to_local(clock.now()).date(), 22))  # Homework 3 is due at 11:30 pm
+    engine = ReminderEngine(
+        demo, DEMO_CONFIG, clock, Router([]), caps=derive(DEMO_CONFIG, demo_secrets())
+    )
+    snap = engine.snapshot(clock.now())
+    assert snap.window is None and snap.at_risk == frozenset()
+    assert any(r.rule is Rule.DUE_3H for r in candidates(snap))

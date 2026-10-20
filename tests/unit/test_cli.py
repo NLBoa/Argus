@@ -36,6 +36,7 @@ def test_check_config_explains_work_windows_and_warns(tmp_path: Path) -> None:
     example = runner.invoke(app, ["check-config", "-c", str(REPO_ROOT / "config.example.yaml")])
     assert example.exit_code == 0
     assert "work windows: 2 in config.yaml (they seed the first run only" in example.output
+    assert "argus windows --reset" in example.output
     old = tmp_path / "old.yaml"
     old.write_text(
         "schedule:\n"

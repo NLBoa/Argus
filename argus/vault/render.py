@@ -265,7 +265,7 @@ def exam_note(e: ExamData) -> DesiredNote:
     # left empty: the markers stay, so the regions exist if study notes arrive later.
     regions = (
         ("scope", "\n".join(scope)),
-        ("plan", "## Review plan\n\n" + plan if e.study or e.sessions else ""),
+        ("plan", "## Study time\n\n" + plan if e.study or e.sessions else ""),
         ("practice", "## Practice exam\n\n" + practice if e.study else ""),
     )
     return DesiredNote(fm, regions, PLAIN_TAIL)

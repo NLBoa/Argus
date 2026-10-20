@@ -85,8 +85,9 @@ def window_phrase(start: datetime, end: datetime, now: datetime) -> str:
 
 def hours_short(hours: float) -> str:
     """'4h', '1.5h', '45m'."""
-    if hours < 1:
-        return f"{max(5, round(hours * 60 / 5) * 5)}m"
+    minutes = round(hours * 60 / 5) * 5
+    if minutes < 60:
+        return f"{max(5, minutes)}m"
     rounded = round(hours * 2) / 2
     return f"{rounded:g}h"
 
@@ -98,4 +99,5 @@ def due_phrase(due: datetime, now: datetime) -> str:
         return "due today"
     if days == 1:
         return "due tomorrow"
-    return f"due {to_local(due):%a}"
+    local = to_local(due)
+    return f"due {local:%a}" if days < 7 else f"due {local:%b} {local.day}"

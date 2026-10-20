@@ -433,7 +433,8 @@ class Builder:
         sessions = []
         for sp in busy_windows(plan, start, end):
             parts = []
-            for entry, hours in plan.allocation(sp.window_id):
+            stored = repo.window_plan(self.conn, sp.window_id)  # started windows: what it was for
+            for entry, hours in stored.allocation if stored else plan.allocation(sp.window_id):
                 kind, _, raw = entry.partition(":")
                 ip = plan.items.get(int(raw))
                 if ip is not None:

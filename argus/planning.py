@@ -47,7 +47,8 @@ HORIZON = timedelta(days=120)  # window time is counted up to the latest due dat
 TONIGHT_WITHIN = timedelta(hours=24)  # the queue's window: the current one or the next in 24 h
 MIN_LEFT = 0.25  # the queue shows at least 15 minutes left on an open item (display only)
 REPLAN_EVERY = timedelta(hours=1)
-LOG_AFTER = timedelta(hours=24)  # a LOG this soon after a window answers its question
+LOG_AFTER = timedelta(hours=24)  # time logged this soon after a window answers its question
+ASK_FOR = timedelta(hours=48)  # never ask about a window older than this
 _TIERS = {
     RiskLevel.OVERDUE: QueueTier.OVERDUE,
     RiskLevel.AT_RISK: QueueTier.AT_RISK,
@@ -120,6 +121,17 @@ def _remaining(
     return out
 
 
+def _work_until(item: Item, now: datetime) -> datetime | None:
+    """The time work on an item can be done by: its due time, or, once that has passed, the
+    end of its late window (an overdue item still in its late window gets window time and
+    competes with later work)."""
+    if item.due_at is not None and item.due_at <= now:
+        deadline = effective_deadline(item.due_at, item.late_due_at)
+        if deadline is not None and deadline > now:
+            return deadline
+    return item.due_at
+
+
 def _study_cards(items: Sequence[Item], study: StudyPlan, window: WindowSpan) -> list[Entry]:
     """One "Study for <exam>" card per exam with time reserved in this window (D062)."""
     by_id = {i.id: i for i in items}
@@ -189,7 +201,7 @@ def compute(
         counts = not awaiting_confirmation(it, now, tracked=tracked[it.id]) and (
             deadline is None or deadline > now
         )
-        work.append(Work(it.id, it.due_at, e, counts))
+        work.append(Work(it.id, _work_until(it, now), e, counts))
     load = loads(work, now, spans, reserved=study.reserved(), skips=skips) if windows_on else {}
 
     plans: dict[int, ItemPlan] = {}
@@ -208,7 +220,7 @@ def compute(
                 f"item:{it.id}",
                 it.id,
                 "work",
-                it.due_at,
+                _work_until(it, now),
                 _TIERS.get(level, QueueTier.OK),
                 lo.slack if lo is not None else None,
                 remaining.get(it.id) or 0.0,  # unfloored: nothing left gets no window time
@@ -271,6 +283,15 @@ def facts(p: Planning) -> list[str]:
     return out
 
 
+def _signature(p: Planning) -> list[object]:
+    """What the explanation is about, without the numbers that change by the minute (window
+    hours left, exact shortfalls): reword only when these change, or hourly (REPLAN_EVERY)."""
+    risky = sorted(i for i, ip in p.items.items() if ip.level is RiskLevel.AT_RISK)
+    window = p.window.window_id if p.window else None
+    first = [e for e, _ in p.allocation(window)][:3] if window else []
+    return [p.windows_on, risky, sorted(p.study.shortfall), window, first]
+
+
 def fallback_line(fs: list[str]) -> str:
     return fs[0] + "." if fs else "Nothing to plan."
 
@@ -293,7 +314,7 @@ def replan(
     p = compute(conn, config, now, tracking_sources=tracking_sources)
     lead = timedelta(minutes=config.notifications.window_notice_minutes)
     fs = facts(p)
-    digest = hashlib.sha256(json.dumps(fs).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps(_signature(p)).encode()).hexdigest()
     with transaction(conn):
         # The split is made before the window starts and frozen when it starts, so it records
         # what the whole window was for. A worker that was down at the start stores what is left.
@@ -423,7 +444,7 @@ def pending_confirmation(conn: sqlite3.Connection, p: Planning) -> Confirmation 
     within a day after) get one quiet question on Today: "did you work on it?" (D060). No answer
     means no credit; an answer is recorded once. The question goes when the next window ends."""
     plan = repo.latest_ended_window_plan(conn, p.now)
-    if plan is None:
+    if plan is None or p.now - plan.ends_at > ASK_FOR:
         return None
     later = [sp for sp in p.spans if sp.start >= plan.ends_at]
     if later and later[0].end <= p.now:
@@ -445,7 +466,7 @@ def pending_confirmation(conn: sqlite3.Connection, p: Planning) -> Confirmation 
             for lg in mine
         )
         logged_after = any(
-            lg.source in ("sms", "manual")
+            lg.source not in ("checkin", "legacy")
             and lg.created_at is not None
             and plan.ends_at <= lg.created_at < plan.ends_at + LOG_AFTER
             for lg in mine

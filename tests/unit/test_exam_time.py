@@ -113,3 +113,15 @@ def test_property_reserved_time_fits_windows(
     for e in exams:
         total = sum(q.get(e.exam_id, 0.0) for q in plan.quota.values())
         assert total + plan.shortfall.get(e.exam_id, 0.0) <= plan.total[e.exam_id] + 1e-9
+
+
+def test_time_a_capped_window_cant_take_moves_to_later_windows() -> None:
+    """A 1 h window can hold 30 min; the rest goes to the two 6 h windows after it."""
+    short = WorkWindow(frozenset({0}), time(19), time(20))
+    long = WorkWindow(frozenset({1, 2}), time(14), time(20))
+    windows = window_spans(
+        NOW, NOW + timedelta(days=4), [short, long], meetings=[], commitments=[], buffer_minutes=0
+    )
+    plan = study_plan([ExamStudy(5, at(3, 9), p80=4.5, logged=0.0)], windows, NOW)
+    assert [plan.quota[w][5] for w in sorted(plan.quota)] == pytest.approx([0.5, 2.0, 2.0])
+    assert plan.shortfall == {}

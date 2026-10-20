@@ -146,3 +146,21 @@ def test_dst_fall_back_ids_differ_and_both_fire() -> None:
     [ra] = window_plan(snap(sat - timedelta(minutes=20), a))
     [rb] = window_plan(snap(sun - timedelta(minutes=20), b))
     assert ra.keys != rb.keys
+
+
+def test_a_bigger_item_shows_tonights_share_and_what_is_left() -> None:
+    big = NoticeEntry(4, "CMSC351", "Project", 4.0, END + timedelta(days=6), left=10.0)
+    [r] = window_plan(snap(START - timedelta(minutes=10), notice(big)))
+    assert "[1] Project, 4h of 10h left" in r.body
+    whole = NoticeEntry(4, "CMSC351", "Project", 4.0, END + timedelta(days=6), left=4.0)
+    [r2] = window_plan(snap(START - timedelta(minutes=10), notice(whole)))
+    assert "[1] Project, 4h left" in r2.body
+
+
+def test_a_moved_due_date_rearms_deadline_rules_but_not_the_window_message() -> None:
+    moved = NoticeEntry(
+        3, "CMSC351", "Homework 3", 4.0, HW3.due + timedelta(days=1) if HW3.due else None
+    )
+    [before] = window_plan(snap(START - timedelta(minutes=10), notice(HW3)))
+    again = window_plan(snap(START - timedelta(minutes=5), notice(moved), frozenset(before.keys)))
+    assert again == []  # the window's message is keyed by the window, not the due date

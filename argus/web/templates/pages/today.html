@@ -25,7 +25,7 @@
     <h2 class="section-title" id="day-heading">Your day</h2>
     <div class="panel panel-pad">
       {% if data.timeline.empty %}
-        {{ empty_state("calendar-clock", "No classes today", "Your schedule is open. Planned work sessions will show here once estimates exist.") }}
+        {{ empty_state("calendar-clock", "No classes today", "Your schedule is open. Work windows show as a bar beside the hours.") }}
       {% else %}
         {{ day_rail(data.timeline) }}
       {% endif %}

@@ -267,9 +267,11 @@ class RuleRow:
     note: str | None  # why the rule cannot fire with the current setup (Health only, D055)
 
 
-def rule_note(rule: Rule, caps: Capabilities) -> str | None:
+def rule_note(rule: Rule, caps: Capabilities, *, windows_on: bool) -> str | None:
     if rule is Rule.ANNOUNCED and not (caps.has(Feature.STAFF_POSTS) and caps.has(Feature.AI)):
         return "needs staff posts (ELMS API or Piazza) and AI"
+    if rule is Rule.WINDOW_PLAN and not windows_on:
+        return "needs work windows: add them to config.yaml, then run argus windows --reset"
     return None
 
 
@@ -342,6 +344,7 @@ def load_health(
     health = repo.source_health(conn, SOURCES)
     successes = [h.last_success for h in health.values() if h.last_success]
     muted = repo.muted_rules(conn, now)
+    windows_on = bool(repo.work_windows(conn))
     return HealthData(
         sources=statuses,
         texts_today=sum(1 for n in sent if n.channel == "sms"),
@@ -350,7 +353,7 @@ def load_health(
         ai_spend=ai_spend(conn, config, now),
         last_sync=relative(max(successes), now) if successes else None,
         rules=[
-            RuleRow(r.value, r.label, r.value in muted, rule_note(r, caps))
+            RuleRow(r.value, r.label, r.value in muted, rule_note(r, caps, windows_on=windows_on))
             for r in Rule
             if r is not Rule.START_NUDGE  # retired (D061)
         ],

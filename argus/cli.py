@@ -56,7 +56,7 @@ def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     if windows:
         typer.echo(
             f"work windows: {len(windows)} in config.yaml (they seed the first run only; "
-            "after that Settings owns them)"
+            "after that `argus windows --reset` copies them again)"
         )
     else:
         typer.echo("work windows: none in config.yaml (risk uses the time-only rule until set)")
@@ -123,6 +123,39 @@ def _format_item(item: Item) -> str:
         flags.append("dates differ")
     flag = f"  [{', '.join(flags)}]" if flags else ""
     return f"  {when}  {item.course_code:<8} {item.title}  ({sources}, {item.status.value}){flag}"
+
+
+@app.command()
+def windows(
+    config: ConfigOpt = DEFAULT_CONFIG,
+    reset: Annotated[
+        bool, typer.Option("--reset", help="Replace them with the work windows in config.yaml.")
+    ] = False,
+) -> None:
+    """Show your work windows (and, with --reset, copy them from config.yaml again)."""
+    from argus.planner.windows import DAYS, from_config
+    from argus.store.db import connect, iso, migrate, transaction
+    from argus.store.repo import set_work_windows, work_windows
+
+    cfg, _ = _setup(config)
+    clock = make_clock()
+    conn = connect(cfg.paths.db_path)
+    migrate(conn, clock)
+    if reset:
+        with transaction(conn):
+            set_work_windows(conn, from_config(cfg.schedule.work_windows), clock.now())
+            conn.execute(
+                """INSERT INTO plan_state (id, inputs_hash, explanation, planned_at)
+                   VALUES (1, '', '', ?) ON CONFLICT (id) DO UPDATE SET windows_seeded_at = ?""",
+                (iso(clock.now()), iso(clock.now())),
+            )
+        typer.echo("work windows replaced with the ones in config.yaml")
+    current = work_windows(conn)
+    if not current:
+        typer.echo("no work windows (risk uses the time-only rule)")
+    for w in current:
+        days = ", ".join(DAYS[d] for d in sorted(w.days))
+        typer.echo(f"{days}: {w.start:%H:%M}-{w.end:%H:%M}")
 
 
 @app.command("list")
