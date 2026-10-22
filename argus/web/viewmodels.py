@@ -109,6 +109,11 @@ class ItemView:
             and self.risk is not RiskLevel.UNCONFIRMED
         )
 
+    @property
+    def needs_time(self) -> bool:
+        """Open work with no estimate and no "about N h left": ask the student (D069)."""
+        return self.actionable and self.left_hours is None
+
 
 def _sources(item: Item) -> tuple[SourceLabel, ...]:
     seen: dict[str, SourceLabel] = {}
@@ -778,6 +783,7 @@ class QueueCardView:
     down_before: str | None
     can_skip: bool
     marker: RiskLevel | None  # creeping, at risk, overdue
+    needs_time: bool = False  # work with no estimate and no "about N h left" (D069)
 
     @property
     def dom_id(self) -> str:
@@ -907,6 +913,7 @@ def queue_view(
             marker=f.level
             if f.level in (RiskLevel.CREEPING, RiskLevel.AT_RISK, RiskLevel.OVERDUE)
             else None,
+            needs_time=f.kind == "work" and f.remaining is None,
         )
 
     cards = [card(f, n) for n, f in enumerate(tonight, 1)]

@@ -14,6 +14,8 @@ from argus.estimates import (
     effective_estimates,
     ensure_estimates,
     estimate_item,
+    estimate_sources,
+    estimate_state,
     input_hash,
     needs_estimate,
     set_override,
@@ -22,6 +24,12 @@ from argus.store import repo
 from argus.store.db import transaction
 from tests.ai_fakes import FakeTransport, ok, recorded
 from tests.caps import EVERY_SOURCE
+
+HW3_DESCRIPTION = (
+    "Prove the three lemmas from lecture 9 about the running time of merge sort. Part A: show "
+    "the recurrence holds for powers of two. Part B: extend it to every n. Part C: bound the "
+    "number of comparisons. Typeset your answers in LaTeX and submit one PDF on Gradescope."
+)
 
 
 @pytest.fixture
@@ -41,7 +49,7 @@ def items(db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock) -> di
                     now + timedelta(days=3),
                     "h",
                     points=30,
-                    description="Prove the three lemmas.",
+                    description=HW3_DESCRIPTION,
                 ),
                 SourceItem(
                     Source.CANVAS_API,
@@ -99,74 +107,123 @@ async def test_ai_estimate_is_stored_with_provenance(
 ) -> None:
     t = FakeTransport([ok(recorded("estimate_hw3"), model="claude-sonnet-5-5")])
     row = await estimate_item(db, ai(db, clock, t), app_config, clock, items["Homework 3"])
+    assert row is not None
     assert (row.source, row.p50, row.p80, row.version) == ("ai", 3.5, 5.0, 1)
-    assert row.model == "claude-sonnet-5-5" and row.prompt_version == "estimate.v1"
+    assert row.model == "claude-sonnet-5-5" and row.prompt_version == "estimate.v2"
     assert row.breakdown[1] == ("Write up the three proofs", 2.5)
     assert t.calls[0]["model"] == "claude-sonnet-5-5"
-    assert "Prove the three lemmas." in t.calls[0]["user"]
+    assert "Part B: extend it to every n." in t.calls[0]["user"]
     assert "never drafts answers" in t.calls[0]["system"]
 
 
-async def test_fallback_without_ai_uses_typical_then_median(
+async def test_no_guess_without_a_full_description(
     db: sqlite3.Connection, items: dict[str, Any], app_config: AppConfig, clock: FakeClock
 ) -> None:
-    row = await estimate_item(db, ai(db, clock, None), app_config, clock, items["Homework 3"])
-    assert (row.source, row.p50, row.p80) == ("default", 3.0, 4.5)
-    assert (row.reasoning or "").startswith("Typical for an assignment; no history yet.")
-    # Log actuals on finished homework: the fallback becomes their median.
-    with transaction(db):
-        repo.log_time(db, items["Homework 1"].id, 2.0, clock.now() - timedelta(days=19))
-        repo.log_time(db, items["Homework 2"].id, 4.0, clock.now() - timedelta(days=9))
-    row2 = await estimate_item(db, ai(db, clock, None), app_config, clock, items["Homework 3"])
-    assert (row2.p50, row2.version) == (3.0, 2)  # median of 2 and 4
-    assert "Median of your past" in (row2.reasoning or "")
+    t = FakeTransport(responder=lambda req: ok(recorded("estimate_hw3")))
+    quiz = items["Quiz 2"]  # no description at all
+    assert await estimate_item(db, ai(db, clock, t), app_config, clock, quiz) is None
+    pointer = replace(items["Homework 3"], description="See the attached PDF.")
+    assert await estimate_item(db, ai(db, clock, t), app_config, clock, pointer) is None
+    assert t.calls == [] and repo.latest_estimates(db) == {}
+    assert estimate_state(quiz, None, None, None, ai=True) == "no_description"
+    assert estimate_state(quiz, None, None, None, ai=False) == "ask"
 
 
-async def test_invalid_ai_output_falls_back(
+async def test_ai_finding_the_description_incomplete_is_remembered(
     db: sqlite3.Connection, items: dict[str, Any], app_config: AppConfig, clock: FakeClock
 ) -> None:
+    hw3 = items["Homework 3"]
+    declined = {
+        **recorded("estimate_hw3"),
+        "whole_task": False,
+        "missing": "The problems are in a PDF.",
+    }
+    t = FakeTransport([ok(declined)])
+    assert await estimate_item(db, ai(db, clock, t), app_config, clock, hw3) is None
+    assert repo.estimates_for(db, hw3.id) == []
+    miss = repo.estimate_misses(db)[hw3.id]
+    assert (miss.outcome, miss.reason) == ("incomplete", "The problems are in a PDF.")
+    assert estimate_state(hw3, None, None, miss, ai=True) == "incomplete"
+    later = clock.now() + timedelta(days=30)
+    assert not needs_estimate(hw3, None, miss, overridden=False, ai_available=True, now=later)
+    # A new description is a new input: ask again.
+    changed = replace(hw3, description=HW3_DESCRIPTION + " Part D: a lower bound.")
+    assert needs_estimate(changed, None, miss, overridden=False, ai_available=True, now=clock.now())
+
+
+async def test_a_failed_call_is_retried_a_day_later(
+    db: sqlite3.Connection, items: dict[str, Any], app_config: AppConfig, clock: FakeClock
+) -> None:
+    hw3 = items["Homework 3"]
     bad = {**recorded("estimate_hw3"), "p80_hours": 1.0}  # p80 < p50 fails validation
     t = FakeTransport([ok(bad), ok(bad)])
-    row = await estimate_item(db, ai(db, clock, t), app_config, clock, items["Homework 3"])
-    assert row.source == "default"
-    assert "invalid" in (row.reasoning or "")
+    assert await estimate_item(db, ai(db, clock, t), app_config, clock, hw3) is None
+    assert repo.estimates_for(db, hw3.id) == []
+    miss = repo.estimate_misses(db)[hw3.id]
+    assert (miss.outcome, miss.reason) == ("failed", "invalid")
+    assert estimate_state(hw3, None, None, miss, ai=True) == "failed"
+    soon, later = clock.now() + timedelta(hours=1), clock.now() + timedelta(hours=25)
+    assert not needs_estimate(hw3, None, miss, overridden=False, ai_available=True, now=soon)
+    assert needs_estimate(hw3, None, miss, overridden=False, ai_available=True, now=later)
+    assert not needs_estimate(hw3, None, miss, overridden=False, ai_available=False, now=later)
+    # A later success clears the miss.
+    t2 = FakeTransport([ok(recorded("estimate_hw3"))])
+    assert await estimate_item(db, ai(db, clock, t2), app_config, clock, hw3, force_ai=True)
+    assert hw3.id not in repo.estimate_misses(db)
 
 
 async def test_ensure_estimates_runs_once_per_input(
     db: sqlite3.Connection, items: dict[str, Any], app_config: AppConfig, clock: FakeClock
 ) -> None:
     c = ai(db, clock, FakeTransport(responder=lambda req: ok(recorded("estimate_hw3"))))
-    assert (
-        await ensure_estimates(db, c, app_config, clock) == 2
-    )  # Homework 3 and Quiz 2: not events or finished items
+    # Only Homework 3: Quiz 2 has no description; events and finished work are never estimated.
+    assert await ensure_estimates(db, c, app_config, clock) == 1
     assert await ensure_estimates(db, c, app_config, clock) == 0
     latest = repo.latest_estimates(db)
     hw3 = items["Homework 3"]
-    assert latest[hw3.id][0] is not None
-    changed = replace(hw3, description="Prove the four lemmas.")
-    assert needs_estimate(changed, latest[hw3.id][0], True, clock.now())
+    base = latest[hw3.id][0]
+    assert base is not None
+    changed = replace(hw3, description=HW3_DESCRIPTION + " Part D: a lower bound.")
+    assert needs_estimate(changed, base, None, overridden=False, ai_available=True, now=clock.now())
     assert input_hash(changed) != input_hash(hw3)
+    # The student's own time ends the asking.
+    assert not needs_estimate(
+        changed, base, None, overridden=True, ai_available=True, now=clock.now()
+    )
+    assert not needs_estimate(
+        items["Office hours"], None, None, overridden=False, ai_available=True, now=clock.now()
+    )
 
 
-def test_needs_estimate_retry_of_defaults(
-    items: dict[str, Any], clock: FakeClock, db: sqlite3.Connection
+@pytest.mark.parametrize(("source", "prompt"), [("default", None), ("ai", "estimate.v1")])
+def test_old_guesses_no_longer_count(
+    items: dict[str, Any],
+    clock: FakeClock,
+    db: sqlite3.Connection,
+    source: str,
+    prompt: str | None,
 ) -> None:
-    hw3 = items["Homework 3"]
+    """Per-kind defaults and title-only AI guesses (estimate.v1) are ignored, and the item is
+    asked about again under the current prompt when its description is readable (D069)."""
+    hw3, quiz = items["Homework 3"], items["Quiz 2"]
     with transaction(db):
-        repo.insert_estimate(
-            db,
-            item_id=hw3.id,
-            source="default",
-            p50=3,
-            p80=4.5,
-            input_hash=input_hash(hw3),
-            now=clock.now(),
-        )
-    default = repo.estimates_for(db, hw3.id)[-1]
-    assert not needs_estimate(hw3, default, True, clock.now())
-    assert needs_estimate(hw3, default, True, clock.now() + timedelta(hours=25))
-    assert not needs_estimate(hw3, default, False, clock.now() + timedelta(hours=25))
-    assert not needs_estimate(items["Office hours"], None, True, clock.now())
+        for it in (hw3, quiz):
+            repo.insert_estimate(
+                db,
+                item_id=it.id,
+                source=source,
+                p50=3,
+                p80=4.5,
+                input_hash=input_hash(it),
+                now=clock.now(),
+                prompt_version=prompt,
+            )
+    assert effective_estimates(db, clock.now()) == {}
+    assert estimate_sources(db) == {}
+    old = repo.estimates_for(db, hw3.id)[-1]
+    assert estimate_state(hw3, old, None, None, ai=True) == "pending"
+    assert needs_estimate(hw3, old, None, overridden=False, ai_available=True, now=clock.now())
+    assert not needs_estimate(quiz, old, None, overridden=False, ai_available=True, now=clock.now())
 
 
 async def test_override_wins_and_versions_are_kept(
@@ -179,6 +236,8 @@ async def test_override_wins_and_versions_are_kept(
     set_override(db, hw3, 6.0, clock.now())
     eff = effective_estimates(db, clock.now())[hw3.id]
     assert (eff.p50, eff.p80, eff.overridden, eff.raw_p50) == (6.0, 6.0, True, 3.5)
+    user = repo.latest_estimates(db)[hw3.id][1]
+    assert estimate_state(hw3, None, user, None, ai=True) == "user"
     clear_override(db, hw3.id, clock.now())
     eff = effective_estimates(db, clock.now())[hw3.id]
     assert (eff.p50, eff.overridden) == (3.5, False)

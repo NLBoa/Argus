@@ -84,6 +84,10 @@ class Step(_Out):
 
 
 class EstimateOut(_Out):
+    # False when the instructions don't describe the whole task (they point to a handout, or
+    # are too thin to size it): Argus then discards the numbers and asks the student (D069).
+    whole_task: bool
+    missing: str = Field(max_length=300)  # what's missing, when whole_task is false
     p50_hours: float = Field(gt=0, le=200)
     p80_hours: float = Field(gt=0, le=300)
     confidence: Literal["low", "medium", "high"]

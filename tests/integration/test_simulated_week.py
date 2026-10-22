@@ -16,9 +16,10 @@ from typing import Any
 
 from argus.clock import FakeClock, to_local
 from argus.config import AppConfig
+from argus.estimates import effective_estimates
 from argus.store import repo
 from argus.store.db import transaction
-from tests.integration.simweek import QUIET, run_week, with_windows
+from tests.integration.simweek import END, QUIET, run_week, with_windows
 from tests.integration.test_deadline_golden import GOLDEN, deadline_alerts
 
 
@@ -65,8 +66,9 @@ async def test_simulated_week_with_windows_logging_as_planned(
     conn, sent = await run_week(tmp_path, with_windows(app_config), student=answer_last_window)
     _check(conn, sent)
     _check_windows(conn)
-    # Each item gets at most its estimate (p80 = 3 h) of window time across all windows, so
-    # it is named in no more windows than that needs.
+    # Each item gets at most its estimate (p80 = 3 h, calibrated once finished work shows the
+    # student's actual time) of window time across all windows, so it is named in no more
+    # windows than that needs.
     planned: Counter[int] = Counter()
     windows_named: Counter[int] = Counter()
     for r in conn.execute("SELECT allocation FROM window_plans"):
@@ -74,13 +76,13 @@ async def test_simulated_week_with_windows_logging_as_planned(
             if entry.startswith("item:"):
                 planned[int(entry.split(":", 1)[1])] += hours
                 windows_named[int(entry.split(":", 1)[1])] += 1
-    assert planned and max(planned.values()) <= 3.0 + 1e-6, planned
+    eff = effective_estimates(conn, END)
+    assert planned and all(h <= eff[i].p80 + 1e-6 for i, h in planned.items()), planned
     capacity = 4.0  # the shortest evening window
     for item_id, n in windows_named.items():
-        assert n <= -(-planned[item_id] // capacity) + 1, (
-            item_id,
-            n,
-        )  # +1: a window split by a due time
+        # +2: a window split by a due time, and work that arrives mid-week and goes ahead of it
+        # (Quiz B is estimated only once its Canvas description appears on Wednesday, D069).
+        assert n <= -(-planned[item_id] // capacity) + 2, (item_id, n)
 
 
 def _check_windows(conn: sqlite3.Connection) -> None:

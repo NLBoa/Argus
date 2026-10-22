@@ -1,4 +1,5 @@
-{"p50_hours": 3.5, "p80_hours": 5.0, "confidence": "medium",
+{"whole_task": true, "missing": "",
+ "p50_hours": 3.5, "p80_hours": 5.0, "confidence": "medium",
  "breakdown": [{"step": "Review lecture 9 notes", "hours": 0.5}, {"step": "Write up the three proofs", "hours": 2.5}, {"step": "Check and typeset", "hours": 0.5}],
  "assumptions": ["Each proof is similar in length to the homework 2 proofs"],
  "reasoning": "Three proofs at about 50 minutes each, plus review and typesetting. Past homework took this student slightly longer than average."}

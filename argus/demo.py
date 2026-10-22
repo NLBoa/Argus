@@ -171,11 +171,30 @@ def seed_demo(
             )
 
         a, q, e = ItemKind.ASSIGNMENT, ItemKind.QUIZ, ItemKind.EXAM
+        d = DESCRIPTIONS
         records = [
-            canvas("51003", "CMSC351", 1000001, "Homework 3", a, _at(now, 0, 23, 59)),
+            canvas(
+                "51003",
+                "CMSC351",
+                1000001,
+                "Homework 3",
+                a,
+                _at(now, 0, 23, 59),
+                description=d["hw3"],
+            ),
             gs("61003", "CMSC351", "2000001", "HW3", _at(now, 0, 23, 30), submitted=False),
-            canvas("51004", "CMSC351", 1000001, "Quiz 2", q, _at(now, 1, 12)),
-            canvas("51005", "CMSC351", 1000001, "Homework 4", a, _at(now, 5, 23, 59)),
+            canvas(
+                "51004", "CMSC351", 1000001, "Quiz 2", q, _at(now, 1, 12), description=d["quiz2"]
+            ),
+            canvas(
+                "51005",
+                "CMSC351",
+                1000001,
+                "Homework 4",
+                a,
+                _at(now, 5, 23, 59),
+                description=d["hw4"],
+            ),
             canvas("51009", "CMSC351", 1000001, "Midterm 1", e, _at(now, 9, 9, 30)),
             canvas(
                 "51002",
@@ -184,6 +203,7 @@ def seed_demo(
                 "Homework 2",
                 a,
                 _at(now, -10, 23, 59),
+                description=d["hw2"],
                 submitted=True,
                 graded=True,
             ),
@@ -192,7 +212,15 @@ def seed_demo(
                 "62006", "MATH240", "2000002", "Problem Set 6", _at(now, 0, 23, 59), submitted=False
             ),
             canvas("52012", "MATH240", 1000002, "Lab report 2", a, now - timedelta(hours=3)),
-            canvas("52007", "MATH240", 1000002, "Problem Set 7", a, _at(now, 6, 23, 59)),
+            canvas(
+                "52007",
+                "MATH240",
+                1000002,
+                "Problem Set 7",
+                a,
+                _at(now, 6, 23, 59),
+                description=d["ps7"],
+            ),
             canvas(
                 "53001",
                 "ENGL393",
@@ -200,6 +228,7 @@ def seed_demo(
                 "Essay draft: technical description",
                 a,
                 _at(now, 2, 17),
+                description=d["essay"],
             ),
             canvas(
                 "53005",
@@ -623,6 +652,29 @@ def _seed_study(
     )
 
 
+# Synthetic assignment text: AI estimates exist only for work with a full description (D069).
+DESCRIPTIONS = {
+    "hw3": "Prove the three lemmas from lecture 9 about merge sort. Part A: the recurrence holds "
+    "for powers of two. Part B: extend it to every n. Part C: bound the number of comparisons. "
+    "Typeset your answers and submit one PDF.",
+    "quiz2": "A timed online quiz on this week's material: asymptotic notation and solving "
+    "recurrences. Ten multiple-choice questions and two short answers, 30 minutes, one attempt. "
+    "Notes are allowed; collaboration is not.",
+    "hw4": "Four dynamic programming problems: define the subproblems, give the recurrence, "
+    "argue correctness, and state the running time for each. Problems 1 and 2 are from the "
+    "textbook chapter on sequences; 3 and 4 are new. Submit one PDF.",
+    "ps7": "About ten short computational problems on eigenvalues and eigenvectors: find them "
+    "for the 2x2 and 3x3 matrices given, diagonalize where possible, and check one answer by "
+    "multiplying out. Show your work; answers alone get no credit.",
+    "essay": "Draft a technical description of a tool or process you use, about 1,000 words, "
+    "for a reader new to it. Include one figure with a caption and a short glossary. This "
+    "draft gets peer review in class; revise it for the final version.",
+    "hw2": "Prove the two lemmas on loop invariants from lecture 5 and analyze the running time "
+    "of insertion sort in the best and worst case. Typeset your answers and submit one PDF. "
+    "Each proof should state the invariant before using it.",
+}
+
+
 def _seed_estimates(conn: sqlite3.Connection, now: datetime) -> None:
     from argus.estimates import input_hash
 
@@ -639,14 +691,6 @@ def _seed_estimates(conn: sqlite3.Connection, now: datetime) -> None:
             ],
             ["Each proof is similar in length to the homework 2 proofs"],
             "Three proofs at about 50 minutes each, plus review and typesetting.",
-        ),
-        "Problem Set 6": (
-            "default",
-            3.0,
-            4.5,
-            [],
-            [],
-            "Typical for an assignment; no history yet. (AI estimate unavailable: unavailable.)",
         ),
         "Quiz 2": (
             "ai",
@@ -709,20 +753,22 @@ def _seed_estimates(conn: sqlite3.Connection, now: datetime) -> None:
             assumptions=assumptions,
             reasoning=reasoning,
             model="claude-sonnet-5-5" if source == "ai" else None,
-            prompt_version="estimate.v1" if source == "ai" else None,
+            prompt_version="estimate.v2" if source == "ai" else None,
         )
-    essay = items.get("Essay draft: technical description")
-    if essay is not None:
-        repo.insert_estimate(
-            conn,
-            item_id=essay.id,
-            source="user",
-            p50=3.0,
-            p80=3.0,
-            input_hash=input_hash(essay),
-            now=now - timedelta(days=1),
-            reasoning="Set by you.",
-        )
+    # The student's own times: Problem Set 6 has no description to estimate from (D069).
+    for title, hours in (("Essay draft: technical description", 3.0), ("Problem Set 6", 4.5)):
+        mine = items.get(title)
+        if mine is not None:
+            repo.insert_estimate(
+                conn,
+                item_id=mine.id,
+                source="user",
+                p50=hours,
+                p80=hours,
+                input_hash=input_hash(mine),
+                now=now - timedelta(days=1),
+                reasoning="Set by you.",
+            )
 
 
 def _seed_findings(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) -> None:

@@ -51,6 +51,36 @@
 </form>
 {%- endmacro %}
 
+{#- "Set time" (D069): work with no estimate asks the student, one tap away and never hidden behind
+    hover. A <details> popover (Esc and a click outside close it, like "More"): presets, then any
+    number. `view` picks what HTMX swaps back: row (the row), queue (#queue), or item (the page,
+    where the same forms sit inline). -#}
+{% set SET_TIME_PRESETS = [0.5, 1, 2, 3, 5, 8] %}
+{% macro set_time_forms(id, title, view, key, question="How long will it take?") -%}
+{% set hx -%}
+{% if view == "queue" %}hx-target="#queue" hx-select="#queue"{% elif view == "row" %}hx-target="#item-{{ id }}"{% else %}hx-target="main" hx-select="main"{% endif %} hx-swap="outerHTML"
+{%- endset %}
+<p class="set-time__q" id="set-time-q-{{ key }}">{{ question }}</p>
+<form class="set-time__presets" method="post" action="/items/{{ id }}/estimate" hx-post="/items/{{ id }}/estimate" {{ hx }} role="group" aria-labelledby="set-time-q-{{ key }}">
+  <input type="hidden" name="view" value="{{ view }}">
+  {% for h in SET_TIME_PRESETS %}<button class="btn btn-sm tnum" type="submit" name="hours" value="{{ h }}">{{ h|hours }}</button>{% endfor %}
+</form>
+<form class="set-time__other" method="post" action="/items/{{ id }}/estimate" hx-post="/items/{{ id }}/estimate" {{ hx }}>
+  <input type="hidden" name="view" value="{{ view }}">
+  <label for="set-time-h-{{ key }}">Other</label>
+  <input class="field field-sm tnum" id="set-time-h-{{ key }}" name="hours" type="number" inputmode="decimal" min="0.25" max="200" step="0.25" required>
+  <span aria-hidden="true">h</span>
+  <button class="btn btn-sm" type="submit">Set<span class="visually-hidden"> hours for {{ title }}</span></button>
+</form>
+{%- endmacro %}
+
+{% macro set_time(id, title, view, sfx="") -%}
+<details class="set-time" data-more>
+  <summary class="btn btn-sm set-time__open" id="set-time-{{ id }}{{ sfx }}" data-focus-key="time">{{ icon("hourglass", "icon-sm") }}Set time<span class="visually-hidden"> for {{ title }}</span></summary>
+  <div class="set-time__panel">{{ set_time_forms(id, title, view, id ~ sfx) }}</div>
+</details>
+{%- endmacro %}
+
 {#- A row (D065): the title; a muted line (course, kind unless an assignment, "~4 h"); the due date;
     a marker only when something is wrong. Sources live on the item page. -#}
 {% macro item_row(v, actions=True) -%}
@@ -60,14 +90,15 @@
     <p class="item-row__title">
       <a href="/items/{{ v.id }}" data-nav-target>{{ v.title }}<span class="visually-hidden">, {{ v.course.code }}</span></a>
     </p>
-    <p class="item-row__meta">
+    <div class="item-row__meta">
       <span>{{ v.course.code }}</span>
       {%- if v.kind.value != "assignment" %}<span>{{ v.kind_label }}</span>{% endif %}
       {%- if v.done or v.status.value == "in_progress" %}<span>{{ v.status_label }}</span>{% endif %}
       {%- if v.running %}<span class="item-row__running">{{ icon("timer", "icon-sm") }}Timer running</span>{% endif %}
       {%- if v.left_text and v.actionable %}<span class="tnum">{{ v.left_text }}</span>{% endif %}
       {%- if v.conflict %}<span class="tag-conflict" title="{{ v.conflict|join('; ') }}">{{ icon("git-compare", "icon-sm") }}Dates differ<span class="visually-hidden">: {{ v.conflict|join('; ') }}</span></span>{% endif %}
-    </p>
+      {%- if v.needs_time and actions %}{{ set_time(v.id, v.title, "row") }}{% endif %}
+    </div>
   </div>
   <div class="item-row__side">
     {% if v.due_text %}<span class="item-row__due">{{ v.due_text }}</span><span class="item-row__rel">{{ v.due_relative }}</span>

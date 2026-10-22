@@ -4,13 +4,11 @@ from hypothesis import strategies as st
 
 from argus.domain.models import ItemKind
 from argus.planner.calibration import (
-    DEFAULT_HOURS,
     Effective,
     Finished,
     K,
     calibrate,
     factor,
-    median_actual,
 )
 
 A = ItemKind.ASSIGNMENT
@@ -68,12 +66,3 @@ def test_calibrate_and_override_wins() -> None:
     )
     o = calibrate(raw_p50=3.0, raw_p80=4.0, f=f, override=7.5)
     assert (o.p50, o.p80, o.overridden) == (7.5, 7.5, True)
-
-
-def test_median_actual_fallback() -> None:
-    assert (
-        median_actual([fin(3, 2), fin(5, 2), fin(9, 2), fin(1, 1, course="X")], "CMSC351", A) == 5
-    )
-    assert median_actual([fin(3, 2), fin(5, 2)], "CMSC351", A) == 4
-    assert median_actual([], "CMSC351", A) is None
-    assert DEFAULT_HOURS[ItemKind.QUIZ] < DEFAULT_HOURS[A] < DEFAULT_HOURS[ItemKind.EXAM]

@@ -584,3 +584,21 @@ the letter. Source: `components/brand.html` (`mark`, `wordmark`, `mark_shapes`);
 `argus.svg` and the 192 and 512 px maskable PNGs with Playwright from `mark_shapes` in the dark tokens, and a unit
 test runs its `--check`. `theme-color` now matches the header surface (white, and `#121b2c` dark) instead of teal,
 which D065 reserves.
+
+## D069 — Estimates: read the whole task or ask (2026-10-22)
+**Decision.** The AI estimates an item only when it can read the full description of the work. Two gates: the
+description must be at least 200 characters (whitespace collapsed, `estimates.MIN_DESCRIPTION`), and the AI must say
+it describes the whole task (`estimate.v2` adds `whole_task` and `missing`: a description that points to an attached
+PDF, covers only logistics, or is too thin to size the work gets `whole_task: false`). Otherwise there is no estimate:
+no per-kind default, no median of past actuals, no title-only guess. The student sets the time instead, from a
+"Set time" button that is always visible (never hover-only) on a queue card, the hero, or a row of open work with no
+estimate and no "about N h left": a popover with 30 min, 1, 2, 3, 5 and 8 h and any other number. The item page says
+why there is no estimate and offers the same choices inline; `EST n h` still works by text. **Why.** Estimates made
+from a title (Canvas iCal often carries little or no description) were far off, and a confident wrong number planned
+the week worse than an honest blank. **Details.** A miss is stored in `estimate_misses` per item and input hash:
+`incomplete` is never asked again for the same description, `failed` (invalid output, budget, an API error) is
+retried after 24 hours. No AI call is made once the student has set a time. Old estimates with `source = 'default'`
+or from `estimate.v1` no longer count anywhere (planning, item rows, calibration history), and items with a full
+description are estimated again under v2. The non-AI fallback for an estimate is now the student's own answer.
+Exam study time still reserves the per-kind exam default when an exam has no estimate (D062): it budgets study, it
+does not claim how long an assignment takes.

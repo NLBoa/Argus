@@ -61,7 +61,7 @@ def test_item_detail(client: TestClient) -> None:
     assert "Each proof is similar in length" in html
     assert "took 1.40x their estimates (1 finished). Argus applies 1.10x" in html
     assert "AI estimate before calibration" in html
-    assert "claude-sonnet-5-5, prompt estimate.v1" in html
+    assert "claude-sonnet-5-5, prompt estimate.v2" in html
     assert client.get("/items/9999").status_code == 404
 
 
@@ -95,11 +95,22 @@ def test_override_clear_and_replan(client: TestClient) -> None:
 
 
 def test_rerun_uses_ai_without_cache(client: TestClient, transport: FakeTransport) -> None:
-    client.post(f"/items/{PS6}/estimate/rerun", headers=ORIGIN)
+    client.post(f"/items/{HW3}/estimate/rerun", headers=ORIGIN)
+    client.post(f"/items/{HW3}/estimate/rerun", headers=ORIGIN)
+    assert len(transport.calls) == 2
+    sources = [e.source for e in repo.estimates_for(conn_of(client), HW3)]
+    assert sources == ["ai", "ai", "ai"]
+    # Problem Set 6 has no description (the student set its time): nothing to read, no call (D069).
     client.post(f"/items/{PS6}/estimate/rerun", headers=ORIGIN)
     assert len(transport.calls) == 2
-    sources = [e.source for e in repo.estimates_for(conn_of(client), PS6)]
-    assert sources == ["default", "ai", "ai"]
+    assert [e.source for e in repo.estimates_for(conn_of(client), PS6)] == ["user"]
+
+
+def test_the_item_page_says_why_there_is_no_estimate(client: TestClient) -> None:
+    html = client.get("/items/11").text  # the course survey: no description (D069)
+    assert 'data-estimate-state="no_description"' in html
+    assert "How long do you think it will take?" in html
+    assert "Re-run AI estimate" not in html  # nothing for the AI to read
 
 
 def test_log_time(client: TestClient) -> None:

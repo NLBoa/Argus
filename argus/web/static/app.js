@@ -220,9 +220,12 @@
   // A row's "..." menu copy of a control: after the row swaps, reopen the menu and refocus it
   // (htmx's own focus-by-id fails quietly inside a closed <details>).
   let menuFocus = null;
-  document.addEventListener("htmx:beforeSwap", () => {
+  // "Set time" (D069) is gone once a row has a time: focus moves to the row's title.
+  let timeRow = null;
+  document.addEventListener("htmx:beforeSwap", (e) => {
     const a = document.activeElement;
     menuFocus = a?.id && a.closest?.(".item-row__menu") ? a.id : null;
+    timeRow = a?.closest?.(".item-row .set-time") ? e.detail.target?.id : null;
   });
   document.addEventListener("htmx:afterSettle", (e) => {
     document.body.classList.remove("is-loading");
@@ -232,6 +235,10 @@
       const menu = el?.closest("details");
       if (menu) menu.open = true;
       el?.focus();
+    }
+    if (timeRow) {
+      document.getElementById(timeRow)?.querySelector("[data-nav-target]")?.focus();
+      timeRow = null;
     }
     if (e.detail.boosted || e.detail.target?.id === "main") {
       const path = window.location.pathname;

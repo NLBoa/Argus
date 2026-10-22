@@ -57,12 +57,34 @@ async def test_estimates_are_sane(live_ai: AIClient) -> None:
         rows.append(
             {
                 "title": item["title"],
+                "whole_task": v.whole_task,
+                "missing": v.missing,
                 "p50": v.p50_hours,
                 "p80": v.p80_hours,
                 "confidence": v.confidence,
             }
         )
     write_report("estimates", {"items": rows})
+
+
+@pytest.mark.parametrize(
+    "instructions",
+    [
+        None,
+        "See the attached PDF for the problems. Submit on Gradescope by the deadline.",
+        "Late work loses 10% per day. Submit one PDF. Collaboration policy: you may discuss "
+        "problems with classmates but must write up your own answers. Cite any source you use. "
+        "Regrade requests are open for one week after grades are released.",
+    ],
+    ids=["none", "pointer", "logistics-only"],
+)
+async def test_no_whole_task_without_a_full_description(
+    live_ai: AIClient, instructions: str | None
+) -> None:
+    """D069: a description that doesn't say what the work is gets whole_task false."""
+    r = await _estimate(live_ai, "Homework 6", "assignment", 30, instructions)
+    assert r.value is not None, r.status
+    assert not r.value.whole_task and r.value.missing.strip()
 
 
 @pytest.mark.parametrize(

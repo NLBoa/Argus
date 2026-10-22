@@ -288,3 +288,54 @@ def test_the_timer_without_js_replans(client: TestClient, db_path: Path, clock: 
         follow_redirects=False,
     )
     assert conn.execute("SELECT planned_at FROM plan_state").fetchone()[0] != "2000-01-01T00:00:00Z"
+
+
+def test_set_time_asks_for_work_without_an_estimate(
+    client: TestClient, db_path: Path, clock: FakeClock
+) -> None:
+    """D069: the course survey has no description, so no estimate; its card and row ask for a
+    time, one tap away. Homework 3 has an AI estimate and doesn't."""
+    html = client.get("/today").text
+    assert 'id="set-time-11-q"' in html and 'id="set-time-2-q"' not in html
+    panel = html[html.index('id="set-time-11-q"') :][:3000]
+    assert "How long will it take?" in panel and 'name="hours" value="0.5">30 min</button>' in panel
+    assert 'name="view" value="queue"' in panel
+    r = client.post("/items/11/estimate", data={"hours": "2", "view": "queue"}, headers=HX)
+    assert toast(r)["message"] == "Set your estimate for Course survey to 2 h"
+    assert 'id="set-time-11-q"' not in r.text and "~2 h left" in r.text
+    assert 'data-focus="q-item-11:left"' in r.text
+    plain = client.post(
+        "/items/11/estimate",
+        data={"hours": "3", "view": "queue"},
+        headers=ORIGIN,
+        follow_redirects=False,
+    )
+    assert plain.status_code == 303 and plain.headers["location"] == "/today#q-item-11"
+    conn = db(db_path, clock)
+    rows = conn.execute("SELECT source, p50_hours FROM estimates WHERE item_id = 11").fetchall()
+    assert [tuple(r) for r in rows] == [("user", 2.0), ("user", 3.0)]
+
+
+def test_set_time_from_a_row(client: TestClient) -> None:
+    html = client.get("/upcoming").text
+    assert 'id="set-time-11"' in html and 'id="set-time-2"' not in html
+    bad = client.post("/items/11/estimate", data={"hours": "0", "view": "row"}, headers=HX)
+    assert toast(bad)["kind"] == "error" and 'id="set-time-11"' in bad.text
+    r = client.post("/items/11/estimate", data={"hours": "1", "view": "row"}, headers=HX)
+    assert toast(r)["message"] == "Set your estimate for Course survey to 1 h"
+    assert r.text.lstrip().startswith('<li class="item-row" id="item-11"')
+    assert "set-time" not in r.text and "~1 h" in r.text
+    plain = client.post(
+        "/items/11/estimate",
+        data={"hours": "2", "view": "row"},
+        headers={**ORIGIN, "referer": "http://testserver/upcoming"},
+        follow_redirects=False,
+    )
+    assert plain.status_code == 303 and plain.headers["location"] == "/upcoming"
+
+
+def test_the_item_page_offers_presets_without_an_estimate(client: TestClient) -> None:
+    html = client.get("/items/11").text
+    assert "How long do you think it will take?" in html
+    assert 'name="view" value="item"' in html
+    assert "data-estimate-state" not in html  # no AI set up here: no word about estimating

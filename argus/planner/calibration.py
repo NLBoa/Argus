@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from statistics import mean, median
+from statistics import mean
 
 from argus.domain.models import ItemKind
 
@@ -63,12 +63,3 @@ def calibrate(*, raw_p50: float, raw_p80: float, f: Factor, override: float | No
     if override is not None:
         return Effective(override, override, raw_p50, raw_p80, overridden=True, factor=f.m)
     return Effective(f.m * raw_p50, f.m * raw_p80, raw_p50, raw_p80, overridden=False, factor=f.m)
-
-
-def median_actual(history: Sequence[Finished], course_code: str, kind: ItemKind) -> float | None:
-    actuals = [
-        h.actual
-        for h in history
-        if h.course_code == course_code and h.kind == kind and h.actual > 0
-    ]
-    return float(median(actuals)) if actuals else None

@@ -1,4 +1,4 @@
-{% from "components/ui.html" import icon, risk_badge %}
+{% from "components/ui.html" import icon, risk_badge, set_time %}
 {#- The queue on Today (D058, D064): the hero next task, the confirm line, and tonight's ranked
     entries. Every control is a real form (it works without JS); with HTMX it swaps #queue and
     the server says which control keeps focus (data-focus-key, see app.js). Rows show their
@@ -67,6 +67,7 @@
 {%- if c.left_text %}<span class="tnum">{{ c.left_text }}</span>{% endif %}
 {%- if c.tonight_hours and not c.skipped %}<span class="tnum">{{ c.tonight_hours|hours }} {{ "tonight" if (c.position or 0) else "" }}</span>{% endif %}
 {%- if c.pinned %}<span class="q-tag">{{ icon("pin", "icon-sm") }}Pinned</span>{% elif c.moved %}<span class="q-tag">For tonight</span>{% endif %}
+{%- if c.needs_time %}{{ set_time(c.item.id, c.title, "queue", "-q") }}{% endif %}
 {%- endmacro %}
 
 {% macro _due(c) -%}
@@ -80,7 +81,7 @@
   <span class="q-card__pos tnum" aria-hidden="true">{{ c.position or "" }}</span>
   <div class="q-card__main">
     <p class="q-card__title"><a href="/items/{{ c.item.id }}" data-nav-target>{{ c.title }}<span class="visually-hidden">, {{ c.item.course.code }}</span></a></p>
-    <p class="q-card__meta">{{ _meta(c) }}</p>
+    <div class="q-card__meta">{{ _meta(c) }}</div>
   </div>
   <div class="q-card__side">{{ _due(c) }}</div>
   <div class="q-card__actions">{{ _controls(c, "") }}</div>
@@ -107,7 +108,7 @@
   {% else %}
   <p class="hero__eyebrow">Next up{% if c.position and c.total > 1 %}<span class="hero__count">1 of {{ c.total }}</span>{% endif %}</p>
   <h2 class="hero__title" id="{{ hid }}-title"><a href="/items/{{ c.item.id }}">{{ c.title }}</a></h2>
-  <p class="hero__meta">{{ _meta(c) }}{% if c.item.due_text %}<span>due {{ c.item.due_text }}, {{ c.item.due_relative }}</span>{% endif %}</p>
+  <div class="hero__meta">{{ _meta(c) }}{% if c.item.due_text %}<span>due {{ c.item.due_text }}, {{ c.item.due_relative }}</span>{% endif %}</div>
   {% if c.reason or c.marker %}<p class="hero__reason">{% if c.marker %}{{ risk_badge(c.marker) }}{% endif %}{{ c.reason or "" }}</p>{% endif %}
   <div class="hero__go">
     <form method="post" action="/items/{{ c.item.id }}/timer" hx-post="/items/{{ c.item.id }}/timer" {{ _hx() }}>

@@ -57,6 +57,12 @@ COURSE = {
     "9005": "MATH240",
 }
 CANVAS_IDS = {"CMSC351": 1234567, "MATH240": 1234568}
+# A full description on every event, so the AI estimates them (D069).
+DESCRIPTION = (
+    "Five problems from this week's lectures. Show every step and state the result you use. "
+    "Problems 1 to 3 are short exercises and 4 and 5 ask for a proof. Typeset your answers "
+    "and submit one PDF before the deadline."
+)
 
 
 def feed(now: datetime) -> bytes:
@@ -70,6 +76,7 @@ def feed(now: datetime) -> bytes:
             f"UID:event-assignment-{uid}\n"
             f"DTSTART:{due.strftime('%Y%m%dT%H%M%SZ')}\n"
             f"SUMMARY:{title} [{code}-0101-Fall2026]\n"
+            f"DESCRIPTION:{DESCRIPTION}\n"
             f"URL;VALUE=URI:https://umd.instructure.com/courses/{CANVAS_IDS[code]}/assignments/{uid}\n"
             "END:VEVENT\n"
         )
@@ -155,6 +162,8 @@ def model(req: dict[str, Any]) -> Any:
     if "estimate how long" in system:
         return ok(
             {
+                "whole_task": True,
+                "missing": "",
                 "p50_hours": 2.0,
                 "p80_hours": 3.0,
                 "confidence": "medium",

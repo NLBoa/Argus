@@ -456,19 +456,39 @@ def _item_page(
 
 @router.post("/items/{item_id}/estimate")
 def override_estimate(
-    request: Request, state: State, conn: Conn, item_id: int, hours: Annotated[float, Form()]
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    item_id: int,
+    hours: Annotated[float, Form()],
+    view: Annotated[str, Form()] = "item",
 ) -> Response:
+    """The student's estimate, from the item page, a row's or a queue card's "Set time" (D069).
+    `view` says which fragment HTMX gets back: item (the page), row, or queue."""
     item = _item_or_404(conn, item_id)
     try:
         estimates.set_override(conn, item, hours, state.clock.now())
     except ValueError as e:
-        if is_htmx(request):
-            return _item_page(request, state, conn, item_id, str(e), kind="error")
-        raise HTTPException(422, str(e)) from e
+        if not is_htmx(request):
+            raise HTTPException(422, str(e)) from e
+        if view == "queue":
+            return toast(_queue(request, state, conn), str(e), "error")
+        if view == "row":
+            return toast(_row(request, state, conn, item_id), str(e), "error")
+        return _item_page(request, state, conn, item_id, str(e), kind="error")
     _replan(conn, state)
-    return _item_page(
-        request, state, conn, item_id, f"Set your estimate for {item.title} to {fmt_hours(hours)}"
-    )
+    message = f"Set your estimate for {item.title} to {fmt_hours(hours)}"
+    if view == "queue":
+        entry = f"item:{item_id}"
+        if not is_htmx(request):
+            return _to_card(entry)
+        return toast(_queue(request, state, conn, focus=(entry, "left")), message)
+    if view == "row":
+        if not is_htmx(request):
+            return back(request)
+        return toast(_row(request, state, conn, item_id), message)
+    return _item_page(request, state, conn, item_id, message)
 
 
 @router.post("/items/{item_id}/estimate/clear")

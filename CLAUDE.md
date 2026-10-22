@@ -74,7 +74,7 @@ SQLite with WAL and FTS5. Full schema: [docs/schema.md](docs/schema.md).
 `item_sources` per-source links · `posts` Piazza posts / Canvas announcements · `findings` extracted
 facts + applied state · `modules` Canvas modules · `concepts` concept notes · `practice_items`
 questions/flashcards · `practice_attempts` results + confidence · `exams` scope/logistics ·
-`estimates` versioned, never overwritten · `time_logs` actuals and check-ins · `work_windows` when the student works ·
+`estimates` versioned, never overwritten · `estimate_misses` AI declined or failed (D069) · `time_logs` actuals and check-ins · `work_windows` when the student works ·
 `queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
 path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health ·

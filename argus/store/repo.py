@@ -1762,6 +1762,55 @@ def retract_user_estimates(conn: sqlite3.Connection, item_id: int, now: datetime
     )
 
 
+@dataclass(frozen=True, slots=True)
+class EstimateMiss:
+    """The AI gave no estimate for this input (D069)."""
+
+    item_id: int
+    input_hash: str
+    outcome: str  # incomplete | failed
+    reason: str
+    prompt_version: str | None
+    created_at: datetime
+
+
+def record_estimate_miss(
+    conn: sqlite3.Connection,
+    *,
+    item_id: int,
+    input_hash: str,
+    outcome: str,
+    reason: str,
+    prompt_version: str | None,
+    now: datetime,
+) -> None:
+    conn.execute(
+        """INSERT INTO estimate_misses (item_id, input_hash, outcome, reason, prompt_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (item_id) DO UPDATE SET input_hash = excluded.input_hash, outcome = excluded.outcome,
+             reason = excluded.reason, prompt_version = excluded.prompt_version, created_at = excluded.created_at""",
+        (item_id, input_hash, outcome, reason, prompt_version, iso(now)),
+    )
+
+
+def clear_estimate_miss(conn: sqlite3.Connection, item_id: int) -> None:
+    conn.execute("DELETE FROM estimate_misses WHERE item_id = ?", (item_id,))
+
+
+def estimate_misses(conn: sqlite3.Connection) -> dict[int, EstimateMiss]:
+    return {
+        r["item_id"]: EstimateMiss(
+            r["item_id"],
+            r["input_hash"],
+            r["outcome"],
+            r["reason"],
+            r["prompt_version"],
+            parse_iso(r["created_at"]),
+        )
+        for r in conn.execute("SELECT * FROM estimate_misses")
+    }
+
+
 def logged_hours(conn: sqlite3.Connection, now: datetime) -> dict[int, float]:
     """Progress per item: every logged hour, a running timer up to now included."""
     return _hours(conn, now, include_legacy=True)

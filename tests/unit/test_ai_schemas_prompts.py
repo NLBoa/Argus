@@ -57,6 +57,8 @@ def test_finding_date_validation() -> None:
 
 def test_estimate_requires_ordered_percentiles() -> None:
     good = {
+        "whole_task": True,
+        "missing": "",
         "p50_hours": 3,
         "p80_hours": 4.5,
         "confidence": "medium",

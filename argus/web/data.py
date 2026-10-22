@@ -11,7 +11,13 @@ from argus.capabilities import Capabilities, Feature
 from argus.clock import local_datetime, to_local
 from argus.config import AppConfig
 from argus.domain.models import Item, ItemKind, ItemStatus
-from argus.estimates import effective_estimates, estimate_sources
+from argus.estimates import (
+    counts,
+    effective_estimates,
+    estimate_sources,
+    estimate_state,
+    finished_rows,
+)
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
 from argus.planner.queue import Pref, pinned
@@ -803,6 +809,8 @@ class ItemDetail:
     item: Item
     estimate: Effective | None
     estimate_source: str | None
+    estimate_state: str  # estimates.estimate_state: user | ai | ask | no_description | ...
+    miss_reason: str | None  # what the AI said is missing from the description
     latest: repo.EstimateRow | None
     history: list[repo.EstimateRow]
     factor_text: str | None
@@ -833,7 +841,10 @@ def load_item(
     eff = effective_estimates(conn, now).get(item.id)
     history = repo.estimates_for(conn, item.id)
     base = next((e for e in reversed(history) if e.source != "user"), None)
-    finished = repo.finished_history(conn, now)
+    user = repo.latest_estimates(conn).get(item.id, (None, None))[1]
+    miss = repo.estimate_misses(conn).get(item.id)
+    state = estimate_state(item, base, user, miss, ai=caps.has(Feature.AI))
+    finished = finished_rows(conn, now)
     same = [f for f in finished if f.course_code == item.course_code and f.kind == item.kind]
     factor_text = None
     if eff is not None and not eff.overridden:
@@ -871,7 +882,9 @@ def load_item(
         item=item,
         estimate=eff,
         estimate_source=estimate_sources(conn).get(item.id),
-        latest=base,
+        estimate_state=state,
+        miss_reason=miss.reason if state == "incomplete" and miss else None,
+        latest=base if counts(base) else None,
         history=list(reversed(history)),
         factor_text=factor_text,
         logged=hours(total) if total else "None yet",
