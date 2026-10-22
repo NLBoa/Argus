@@ -11,6 +11,7 @@ PAGES: list[tuple[str, str, tuple[str, ...]]] = [
     ("announcements", "/announcements", ("mobile", "desktop")),
     ("workload", "/workload", ("mobile", "desktop")),
     ("item", "/items/2", ("mobile", "desktop")),
+    ("task-new", "/tasks/new", ("mobile", "desktop")),
     ("course", "/courses/CMSC351", ("mobile", "desktop")),
     ("exams", "/exams", ("mobile", "desktop")),
     ("exam", "/exams/5", ("mobile", "desktop")),

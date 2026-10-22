@@ -271,6 +271,11 @@ class Item:
         return any(link.source.value in sources for link in self.links)
 
     @property
+    def added_by_you(self) -> bool:
+        """A task the student added (D070): its only present record is a manual one."""
+        return bool(self.links) and all(link.source == Source.MANUAL for link in self.links)
+
+    @property
     def announced(self) -> bool:
         """True while the only date comes from an announcement, not an official source."""
         return self.due_source == Source.FINDING

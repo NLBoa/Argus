@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from argus.capabilities import Feature
+from argus.clock import to_local
 from argus.planner.windows import DAYS
 from argus.web.data import (
     CHANGED,
@@ -29,6 +30,7 @@ from argus.web.routes.common import LOAD_ERROR, log, render
 from argus.web.samples import icon_names, styleguide_samples
 from argus.web.settings_form import WindowRow
 from argus.web.study_data import load_exam, load_exams, load_proposals
+from argus.web.task_form import FieldError, TaskForm
 from argus.web.viewmodels import ACCENTS, course_views
 
 router = APIRouter()
@@ -251,6 +253,39 @@ def item_detail(request: Request, state: State, conn: Conn, item_id: int) -> HTM
         {"data": data},
         active="/items",
         title=data.item.title,
+    )
+
+
+@router.get("/tasks/new", response_class=HTMLResponse)
+def new_task(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    return task_page(request, state, conn)
+
+
+def task_page(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    form: TaskForm | None = None,
+    error: FieldError | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """The Add a task form (D070), blank (due tonight) or as typed with its error."""
+    courses = list(course_views(state.config).values())
+    if form is None:
+        form = TaskForm(
+            course=courses[0].code if courses else "",
+            due_date=to_local(state.clock.now()).date().isoformat(),
+        )
+    return render(
+        request,
+        state,
+        conn,
+        "pages/task_new.html",
+        {"form": form, "courses": courses, "form_error": error},
+        active="/today",
+        title="Add a task",
+        status_code=status_code,
     )
 
 

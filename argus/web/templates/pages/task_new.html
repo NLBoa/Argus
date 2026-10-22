@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon %}
+{% macro invalid(name) %}{% if form_error and form_error.field == name %} aria-invalid="true" aria-describedby="task-error"{% endif %}{% endmacro %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Add a task</h1>
+  <p class="page-sub">Studying, reading, anything your courses don't list. Argus ranks it with the rest of your work.</p>
+</div>
+<form id="task-form" class="task-form panel panel-pad grid gap-5" method="post" action="/tasks"
+      hx-post="/tasks" hx-target="main" hx-select="main" hx-swap="outerHTML">
+  <label class="grid gap-1"><span class="text-sm font-bold">What</span>
+    <input class="field field-wide" name="title" type="text" required maxlength="200" autocomplete="off" placeholder="Study for Midterm 2" value="{{ form.title }}"{{ invalid("title") }}>
+  </label>
+  <label class="grid gap-1"><span class="text-sm font-bold">Course</span>
+    <select class="field w-auto" name="course"{{ invalid("course") }}>
+      {% for c in courses %}<option value="{{ c.code }}" {% if c.code == form.course %}selected{% endif %}>{{ c.code }}</option>{% endfor %}
+    </select>
+  </label>
+  <fieldset class="task-form__due grid gap-1 m-0 p-0 border-0">
+    <legend class="text-sm font-bold p-0">Due</legend>
+    <div class="flex flex-wrap gap-3">
+      <label class="grid gap-1"><span class="text-sm text-muted">Date</span>
+        <input class="field" name="due_date" type="date" required value="{{ form.due_date }}"{{ invalid("due_date") }}>
+      </label>
+      <label class="grid gap-1"><span class="text-sm text-muted">Time</span>
+        <input class="field" name="due_time" type="time" required value="{{ form.due_time }}"{{ invalid("due_time") }}>
+      </label>
+    </div>
+  </fieldset>
+  <label class="grid gap-1"><span class="text-sm font-bold">How long, in hours <span class="font-normal text-muted">(optional)</span></span>
+    <input class="field" name="hours" type="number" inputmode="decimal" min="0.25" max="200" step="0.25" value="{{ form.hours }}"{{ invalid("hours") }}>
+  </label>
+  <label class="grid gap-1"><span class="text-sm font-bold">Notes <span class="font-normal text-muted">(optional)</span></span>
+    <textarea class="field field-wide" name="notes" rows="3" maxlength="4000"{{ invalid("notes") }}>{{ form.notes }}</textarea>
+  </label>
+  {% if form_error %}<p class="field-error m-0" id="task-error" role="alert">{{ icon("circle-alert", "icon-sm") }}{{ form_error.message }}</p>{% endif %}
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-primary" type="submit">{{ icon("plus", "icon-sm") }}Add task</button>
+    <a class="btn btn-quiet" href="/today">Cancel</a>
+  </div>
+</form>
+{% endblock %}

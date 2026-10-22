@@ -103,6 +103,11 @@
         {% if data.obsidian %}<a class="btn btn-sm" href="{{ data.obsidian }}">{{ icon("book-open", "icon-sm") }}Open note in Obsidian</a>{% endif %}
       </p>
       {% endif %}
+      {% if data.item.added_by_you %}
+      <form class="mt-3" method="post" action="/tasks/{{ v.id }}/delete" hx-post="/tasks/{{ v.id }}/delete" hx-target="main" hx-select="main" hx-swap="outerHTML">
+        <button class="btn btn-sm" type="submit">{{ icon("trash-2", "icon-sm") }}Delete task</button>
+      </form>
+      {% endif %}
     </section>
     <section class="panel panel-pad" aria-labelledby="past-heading">
       <h2 class="section-title" id="past-heading">Past {{ v.kind_label|lower }}s in {{ v.course.code }}</h2>

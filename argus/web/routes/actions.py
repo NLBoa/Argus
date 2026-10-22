@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from argus import announcements, estimates, exams
+from argus import announcements, estimates, exams, tasks
 from argus.domain.models import Item
 from argus.planning import (
     compute,
@@ -32,6 +32,7 @@ from argus.web.deps import AppState, Runner, get_conn, get_state
 from argus.web.format import hours as fmt_hours
 from argus.web.routes.common import ai_client, back, is_htmx, log, templates, toast
 from argus.web.study_data import practice_card
+from argus.web.task_form import FieldError, TaskForm, field_for
 from argus.web.viewmodels import DoneNoticeView, course_views, item_view
 
 router = APIRouter()
@@ -531,6 +532,64 @@ def log_hours(
         raise HTTPException(422, str(e)) from e
     _replan(conn, state)
     return _item_page(request, state, conn, item_id, f"Logged {fmt_hours(hours)} on {item.title}")
+
+
+def _today_page(
+    request: Request, state: AppState, conn: sqlite3.Connection, message: str
+) -> Response:
+    """No JS: 303 to Today. HTMX: Today itself (the form selects <main>), its URL, and a toast."""
+    if not is_htmx(request):
+        return RedirectResponse("/today", status_code=303)
+    from argus.web.routes.pages import today
+
+    response = toast(today(request, state, conn), message)
+    response.headers["HX-Push-Url"] = "/today"
+    return response
+
+
+@router.post("/tasks")
+def add_task(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    course: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    hours: Annotated[str, Form()] = "",
+    notes: Annotated[str, Form()] = "",
+) -> Response:
+    """A task the student adds (D070). A mistake shows the form again, as typed."""
+    from argus.web.routes.pages import task_page
+
+    form = TaskForm(course, title, due_date, due_time, hours, notes)
+    now = state.clock.now()
+    try:
+        item = tasks.add_task(
+            conn,
+            course_code=course,
+            title=title,
+            due_at=form.due_at(),
+            notes=notes,
+            hours=form.hours_value(),
+            now=now,
+        )
+    except ValueError as e:
+        error = e if isinstance(e, FieldError) else FieldError(field_for(str(e)), str(e))
+        status = 200 if is_htmx(request) else 422
+        return task_page(request, state, conn, form=form, error=error, status_code=status)
+    _replan(conn, state)
+    return _today_page(request, state, conn, f"Added {item.title}")
+
+
+@router.post("/tasks/{item_id}/delete")
+def delete_task(request: Request, state: State, conn: Conn, item_id: int) -> Response:
+    item = _item_or_404(conn, item_id)
+    if not tasks.remove_task(conn, item_id, state.clock.now()):
+        raise HTTPException(404, "No such task")
+    _replan(conn, state)
+    return _today_page(request, state, conn, f"Deleted {item.title}")
 
 
 # ---------------------------------------------------------------- study and vault

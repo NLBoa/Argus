@@ -195,6 +195,7 @@
   .page-title--quiet { font-size: var(--text-lg); }
   @media (min-width: 48rem) { .page-title--quiet { font-size: var(--text-xl); } }
   .page-sub { color: var(--muted); }
+  .page-head__action { margin-left: auto; align-self: center; }
   .section-title {
     font-family: var(--font-display); font-weight: 650; letter-spacing: -0.01em; font-size: var(--text-lg);
     margin-bottom: 0.625rem; display: flex; align-items: baseline; gap: 0.5rem;
@@ -750,6 +751,9 @@
     min-height: 2.5rem; padding: 0.375rem 0.625rem; border-radius: var(--radius-control);
     border: 1px solid var(--control-line); background: var(--surface); color: var(--ink); font: inherit; width: 9rem;
   }
+  .field-wide { width: 100%; }
+  textarea.field { min-height: 5rem; resize: vertical; }
+  .task-form { max-width: 36rem; }
   .field-sm { min-height: 2rem; width: 4.5rem; padding: 0.125rem 0.375rem; font-size: 0.875rem; }
   /* ------------------------------------------------------------ settings: work windows */
   .window-row { border: 1px solid var(--line); margin: 0; min-width: 0; }

@@ -602,3 +602,16 @@ or from `estimate.v1` no longer count anywhere (planning, item rows, calibration
 description are estimated again under v2. The non-AI fallback for an estimate is now the student's own answer.
 Exam study time still reserves the per-kind exam default when an exam has no estimate (D062): it budgets study, it
 does not claim how long an assignment takes.
+
+## D070 — Tasks you add yourself (2026-10-22)
+**Decision.** "Add a task" on Today opens `/tasks/new`: what, course, due date and time (default tonight, 11:59 pm),
+optional hours and notes. A task is stored as a `manual` source record (`argus/tasks.py`), so it merges into an
+assignment item and ranks in the queue, gets the 24-hour and 3-hour deadline texts, and gets a vault note like any
+other item. Hours, when given, become the student's estimate; without them the row offers "Set time" (D069). The
+item page of a task has "Delete task", which marks the record absent so the next merge removes the item. **Why.**
+Studying and reading compete for the same work windows as graded work, and the queue can only plan around what it
+knows about. Reusing the source-record path kept merge, planning, reminders, and the vault unchanged, with no
+schema change. **Details.** The external id hashes course, title (case-folded), and due time, so a double submit
+adds one task. Collectors never mark `manual` records absent, so syncs keep tasks. Synced items can't be deleted
+here: their source would bring them back. A task needs a course, since every item has one. Its kind is
+`assignment`; there is no separate "study" kind.
