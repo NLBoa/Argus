@@ -22,3 +22,6 @@ test-results/
 .DS_Store
 tests/evals/reports/
 docs/plans/overhaul/
+mac/*.xcodeproj/
+mac/build/
+mac/Config/Local.xcconfig

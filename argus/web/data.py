@@ -185,25 +185,21 @@ def _confirm(conn: sqlite3.Connection, p: Planning, now: datetime) -> ConfirmVie
     )
 
 
-def load_today(
-    conn: sqlite3.Connection,
-    config: AppConfig,
-    caps: Capabilities,
-    now: datetime,
-    *,
-    focus: tuple[str, str] | None = None,
-    message: str | None = None,
-    done: DoneNoticeView | None = None,
-) -> TodayData:
-    """Today (D058): the next task, the confirm line, the queue, what to confirm or not miss,
-    and the day strip. `focus`, `message`, and `done` come from a queue action (D064)."""
+@dataclass(frozen=True)
+class _Day:
+    unconfirmed: list[ItemView]
+    overdue: list[ItemView]
+    due_today: list[ItemView]
+    due_soon: list[ItemView]  # due today or tomorrow, not done
+    summary: str  # "2 due today, 1 tomorrow, 1 past due"
+
+
+def _day(views: Sequence[ItemView], plan: Planning, now: datetime) -> _Day:
+    """Today's lists and its summary line, shared by Today and the widget feed (D071)."""
     today = to_local(now).date()
     start = local_datetime(today, 0)
     tomorrow = local_datetime(today + timedelta(days=1), 0)
     after = local_datetime(today + timedelta(days=2), 0)
-    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
-    views = _views(conn, config, now, caps=caps, plan=plan)
-    by_id = {v.id: v for v in views}
     queued = {e.item_id for e in plan.queue if e.kind == "work"}
     recent = now - PAST_DUE_WINDOW
     # D056: past-due work no source can report a submission for asks, it doesn't accuse.
@@ -224,20 +220,6 @@ def load_today(
         and (v.status.is_open or v.status == ItemStatus.MISSED)
         and v.kind.takes_submission
     ]
-    events = [
-        v
-        for v in views
-        if v.due_at and max(now, start) <= v.due_at < after and not v.kind.takes_submission
-    ]
-    groups = [
-        TodayGroup(None, label, tuple(vs))
-        for label, vs in (
-            ("Did you submit?", unconfirmed),
-            ("Past due", overdue),
-            ("Exams and events", sorted(events, key=lambda v: (v.due_at, v.title))),
-        )
-        if vs
-    ]
     due_today = [v for v in views if v.due_at and start <= v.due_at < tomorrow]
     due_soon = sorted(
         (
@@ -255,6 +237,44 @@ def load_today(
         parts.append(f"{len(overdue)} past due")
     if unconfirmed:
         parts.append(f"{len(unconfirmed)} to confirm")
+    return _Day(unconfirmed, overdue, due_today, due_soon, ", ".join(parts))
+
+
+def load_today(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    caps: Capabilities,
+    now: datetime,
+    *,
+    focus: tuple[str, str] | None = None,
+    message: str | None = None,
+    done: DoneNoticeView | None = None,
+) -> TodayData:
+    """Today (D058): the next task, the confirm line, the queue, what to confirm or not miss,
+    and the day strip. `focus`, `message`, and `done` come from a queue action (D064)."""
+    today = to_local(now).date()
+    start = local_datetime(today, 0)
+    tomorrow = local_datetime(today + timedelta(days=1), 0)
+    after = local_datetime(today + timedelta(days=2), 0)
+    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
+    views = _views(conn, config, now, caps=caps, plan=plan)
+    by_id = {v.id: v for v in views}
+    day = _day(views, plan, now)
+    unconfirmed, overdue = day.unconfirmed, day.overdue
+    events = [
+        v
+        for v in views
+        if v.due_at and max(now, start) <= v.due_at < after and not v.kind.takes_submission
+    ]
+    groups = [
+        TodayGroup(None, label, tuple(vs))
+        for label, vs in (
+            ("Did you submit?", unconfirmed),
+            ("Past due", overdue),
+            ("Exams and events", sorted(events, key=lambda v: (v.due_at, v.title))),
+        )
+        if vs
+    ]
     timer = repo.running_timer(conn)
     prefs = repo.queue_prefs(conn)
     window = plan.window
@@ -274,14 +294,14 @@ def load_today(
     return TodayData(
         windows_on=plan.windows_on,
         date_text=long_date(today),
-        summary=", ".join(parts),
+        summary=day.summary,
         queue=queue,
         confirm=_confirm(conn, plan, now),
         groups=groups,
         strip=strip(
-            today, busy, now, courses=course_views(config), due_items=due_today, windows=windows
+            today, busy, now, courses=course_views(config), due_items=day.due_today, windows=windows
         ),
-        due_soon=due_soon,
+        due_soon=day.due_soon,
         timer=timer_view(timer, by_id, now),
     )
 
@@ -470,6 +490,35 @@ def load_kiosk(
         ),
         deadlines=views[:6],
         notices=notices(conn, caps.sources, now),
+    )
+
+
+WIDGET_DAYS = 7
+WIDGET_ITEMS = 8
+
+
+@dataclass(frozen=True)
+class WidgetData:
+    summary: str
+    notes: list[str]
+    items: list[ItemView]
+
+
+def load_widget(
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
+) -> WidgetData:
+    """The desktop widget's feed (D071): Today's summary line and the next open work due this week."""
+    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
+    views = _views(conn, config, now, caps=caps, plan=plan)
+    week = now + timedelta(days=WIDGET_DAYS)
+    items = sorted(
+        (v for v in views if v.due_at and now <= v.due_at < week and v.actionable),
+        key=lambda v: (v.due_at, v.title),
+    )
+    return WidgetData(
+        summary=_day(views, plan, now).summary,
+        notes=[n.text for n in notices(conn, caps.sources, now)],
+        items=items[:WIDGET_ITEMS],
     )
 
 

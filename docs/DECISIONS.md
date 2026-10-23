@@ -615,3 +615,19 @@ schema change. **Details.** The external id hashes course, title (case-folded), 
 adds one task. Collectors never mark `manual` records absent, so syncs keep tasks. Synced items can't be deleted
 here: their source would bring them back. A task needs a course, since every item has one. Its kind is
 `assignment`; there is no separate "study" kind.
+
+## D071 — A desktop widget and countdown window on the Mac (2026-10-22)
+**Decision.** `GET /widget.json` returns Today's summary line, the stale-source notes, and up to 8 open,
+actionable items due in the next 7 days, sorted by due time. Each item has its id, title, course, accent, kind,
+due time (UTC, `Z`), and path. `mac/` is an XcodeGen project with two parts, built with SweetPad or `xcodebuild`.
+ArgusWidget is a medium WidgetKit widget. ArgusBar is a background menu bar app: it polls the feed every 5
+minutes and pops a glass countdown window. **Why.** The student wants the next deadlines on the Mac desktop at a
+glance, without opening the site. The feed is a GET on the tailnet like every page, so it needs no token (D016
+guards writes only); the widget stays read-only. **Details.** Countdown rule: an item due on today's local date
+with 12 hours or less left shows a live countdown. In the widget it's `Text(timerInterval:)`, which ticks with no
+reloads. The window pops at 12 h, 3 h, and 1 h left and stays until dismissed. Each pop has a key
+`id:due_at:milestone` (UserDefaults), so a moved due date re-arms it. The rule lives in the Mac app
+(`mac/Shared/Countdown.swift`), not in the feed: it has to switch on at an exact time, and WidgetKit limits refreshes
+to a budget (roughly every 15 minutes), so the feed can't do it. These windows are extra. Argus's own 24-hour and
+3-hour texts stay the deterministic deadline alerts. The tailnet host and signing team go in the git-ignored
+`mac/Config/Local.xcconfig`.

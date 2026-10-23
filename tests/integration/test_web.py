@@ -294,6 +294,44 @@ def test_palette_items(client: TestClient) -> None:
     assert all(i["href"].startswith("/items/") for i in items if i["id"].startswith("item-"))
 
 
+def test_widget_feed(client: TestClient, clock: FakeClock) -> None:
+    feed = client.get("/widget.json").json()
+    assert feed["version"] == 1
+    assert feed["generated_at"].endswith("Z")
+    assert feed["summary"] == "2 due today, 1 tomorrow, 1 past due"  # Today's line (D071)
+    assert any("Gradescope" in n for n in feed["notes"])
+    items = feed["items"]
+    assert items and len(items) <= 8
+    dues = [i["due_at"] for i in items]
+    assert dues == sorted(dues) and all(d.endswith("Z") for d in dues)
+    week = clock.now() + timedelta(days=7)
+    assert all(clock.now().isoformat() <= d.replace("Z", "+00:00") < week.isoformat() for d in dues)
+    first = items[0]
+    assert set(first) == {"id", "title", "course", "accent", "kind", "due_at", "url"}
+    assert first["url"] == f"/items/{first['id']}"
+    assert first["course"].isupper() and first["accent"]
+
+
+def test_widget_feed_leaves_out_done_work(client: TestClient) -> None:
+    title = client.get("/widget.json").json()["items"][0]["title"]
+    db = client.app.state.argus.db_path  # type: ignore[attr-defined]
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE items SET status = 'submitted' WHERE title = ?", (title,))
+    assert title not in {i["title"] for i in client.get("/widget.json").json()["items"]}
+
+
+def test_widget_feed_empty_and_error(empty: TestClient) -> None:
+    feed = empty.get("/widget.json").json()
+    assert feed["items"] == [] and feed["summary"] == "Nothing left due today"
+
+    def broken() -> Iterator[sqlite3.Connection]:
+        yield sqlite3.connect(":memory:")
+
+    empty.app.dependency_overrides[get_conn] = broken  # type: ignore[attr-defined]
+    r = empty.get("/widget.json")
+    assert r.status_code == 503 and "error" in r.json()
+
+
 def test_manifest_service_worker_offline(client: TestClient) -> None:
     m = client.get("/manifest.webmanifest")
     assert m.headers["content-type"].startswith("application/manifest+json")

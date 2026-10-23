@@ -1,15 +1,16 @@
-"""Read-only views: Today, Upcoming, Health, Exam prep, Proposals, Styleguide, palette feed."""
+"""Read-only views: Today, Upcoming, Health, Exam prep, Proposals, Styleguide, palette and widget feeds."""
 
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from argus.capabilities import Feature
-from argus.clock import to_local
+from argus.clock import ensure_utc, to_local
 from argus.planner.windows import DAYS
 from argus.web.data import (
     CHANGED,
@@ -21,6 +22,7 @@ from argus.web.data import (
     load_settings,
     load_today,
     load_upcoming,
+    load_widget,
     load_workload,
     palette_items,
     search_scope,
@@ -163,6 +165,43 @@ def styleguide(request: Request, state: State) -> HTMLResponse:
 @router.get("/palette.json")
 def palette(state: State, conn: Conn) -> JSONResponse:
     return JSONResponse({"items": palette_items(conn, state.config, state.caps, state.clock.now())})
+
+
+def _utc(dt: datetime) -> str:
+    return ensure_utc(dt).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@router.get("/widget.json")
+def widget(state: State, conn: Conn) -> JSONResponse:
+    """The Mac desktop widget's feed (D071). Read-only, so no token: the tailnet is the boundary."""
+    now = state.clock.now()
+    try:
+        data = load_widget(conn, state.config, state.caps, now)
+    except sqlite3.Error:
+        log.exception("widget feed failed")
+        return JSONResponse({"error": LOAD_ERROR}, status_code=503)
+    items = [
+        {
+            "id": v.id,
+            "title": v.title,
+            "course": v.course.code,
+            "accent": v.course.accent,
+            "kind": v.kind_label,
+            "due_at": _utc(v.due_at),
+            "url": f"/items/{v.id}",
+        }
+        for v in data.items
+        if v.due_at
+    ]
+    return JSONResponse(
+        {
+            "version": 1,
+            "generated_at": _utc(now),
+            "summary": data.summary,
+            "notes": data.notes,
+            "items": items,
+        }
+    )
 
 
 @router.get("/courses/{code}", response_class=HTMLResponse)
