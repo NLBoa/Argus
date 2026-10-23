@@ -1,0 +1,91 @@
+# The Mac desktop widget and countdown window (D071). Generate the project with `make mac`
+# (XcodeGen), then build and run the ArgusBar scheme with SweetPad or xcodebuild.
+name: Argus
+options:
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Argus.xcconfig
+  Release: Config/Argus.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: true
+    CODE_SIGN_STYLE: $(ARGUS_SIGN_STYLE)
+    CODE_SIGN_IDENTITY: $(ARGUS_SIGN_IDENTITY)
+    DEVELOPMENT_TEAM: $(ARGUS_TEAM)
+
+targets:
+  ArgusBar:
+    type: application
+    platform: macOS
+    sources: [ArgusBar, Shared]
+    dependencies:
+      - target: ArgusWidget
+    info:
+      path: ArgusBar/Info.plist
+      properties:
+        CFBundleDisplayName: Argus
+        LSApplicationCategoryType: public.app-category.productivity
+        LSUIElement: true
+        ArgusBaseURL: $(ARGUS_BASE_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: ArgusBar/ArgusBar.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    settings:
+      base:
+        PRODUCT_NAME: Argus
+        PRODUCT_BUNDLE_IDENTIFIER: $(ARGUS_BUNDLE_ID)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  ArgusWidget:
+    type: app-extension
+    platform: macOS
+    sources: [ArgusWidget, Shared]
+    info:
+      path: ArgusWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Argus
+        ArgusBaseURL: $(ARGUS_BASE_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: ArgusWidget/ArgusWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ARGUS_BUNDLE_ID).widget
+
+  ArgusTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - ArgusTests
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ARGUS_BUNDLE_ID).tests
+        GENERATE_INFOPLIST_FILE: true
+
+schemes:
+  ArgusBar:
+    build:
+      targets:
+        ArgusBar: all
+        ArgusTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [ArgusTests]

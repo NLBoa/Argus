@@ -1,0 +1,9 @@
+// Defaults: the local demo server (`uv run argus serve --demo`) and ad-hoc signing.
+// Put your own values in Local.xcconfig (git-ignored); see Local.example.xcconfig.
+ARGUS_BASE_URL = http:/$()/127.0.0.1:8000
+ARGUS_BUNDLE_ID = local.argus.bar
+ARGUS_SIGN_STYLE = Manual
+ARGUS_SIGN_IDENTITY = -
+ARGUS_TEAM =
+
+#include? "Local.xcconfig"

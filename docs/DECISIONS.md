@@ -630,4 +630,7 @@ reloads. The window pops at 12 h, 3 h, and 1 h left and stays until dismissed. E
 (`mac/Shared/Countdown.swift`), not in the feed: it has to switch on at an exact time, and WidgetKit limits refreshes
 to a budget (roughly every 15 minutes), so the feed can't do it. These windows are extra. Argus's own 24-hour and
 3-hour texts stay the deterministic deadline alerts. The tailnet host and signing team go in the git-ignored
-`mac/Config/Local.xcconfig`.
+`mac/Config/Local.xcconfig`. `make mac` generates the Xcode project (XcodeGen), `make mac-test` runs the Swift
+tests, and SweetPad runs the `ArgusBar` scheme. **Quirks.** Anything time-based in the widget uses timeline entries or
+`Text(timerInterval:)`, never a fetch. A SwiftUI view built inside a SwiftUI update (for example from the `App`'s
+`@State` init) aborts in AttributeGraph, so AppKit panels are opened from a `Task`.

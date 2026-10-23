@@ -9,7 +9,7 @@ CSS_IN := argus/web/static/src/app.css
 CSS_OUT := argus/web/static/dist/app.css
 
 .PHONY: help setup dev css css-watch lint fmt types test-unit test-int cov test-e2e test-a11y \
-        test-visual visual-update visual-linux secrets evals check deploy logs clean
+        test-visual visual-update visual-linux secrets evals check deploy logs mac mac-test clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -83,6 +83,13 @@ deploy: ## Rsync to the Pi and run the installer (PI_HOST=argus-pi)
 
 logs: ## Tail Argus logs on the Pi
 	ssh $(PI_HOST) 'journalctl -f -u "argus-*"'
+
+mac: ## Generate the Mac widget's Xcode project (needs xcodegen; D071)
+	cd mac && xcodegen generate --quiet
+
+mac-test: mac ## Swift tests for the Mac widget (countdown rule, feed decoding)
+	xcodebuild -project mac/Argus.xcodeproj -scheme ArgusBar -destination 'platform=macOS' \
+		-derivedDataPath mac/build -quiet test
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.json .coverage $(CSS_OUT)

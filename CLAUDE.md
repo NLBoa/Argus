@@ -66,7 +66,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
   routes per view, Jinja templates, component macros (`components/`, the header and tab bar in `nav.html`), and static
   assets (vendored by `scripts/vendor_assets.py`, which also pins the display face with fonttools).
 - `argus/store/`: SQLite connection (WAL, FTS5), numbered SQL migrations, and repository functions (including search).
-- `argus/cli.py`: the Typer CLI. `deploy/`: systemd units, installer, kiosk. `scripts/`: dev tooling.
+- `argus/cli.py`: the Typer CLI. `deploy/`: systemd, installer, kiosk. `scripts/`: dev tooling. `mac/`: widget (D071).
 
 ## Data model
 SQLite with WAL and FTS5. Full schema: [docs/schema.md](docs/schema.md).

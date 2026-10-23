@@ -1,0 +1,11 @@
+// Copy to Local.xcconfig (git-ignored), fill in, then run `make mac` again.
+// `/$()/` keeps xcconfig from reading `//` as a comment.
+
+// The dashboard on your tailnet (`tailscale serve`, docs/runbook.md).
+ARGUS_BASE_URL = https:/$()/argus.YOUR-TAILNET.ts.net
+
+// Your Apple ID's Personal Team (Xcode → Settings → Accounts), so the widget shows in the gallery.
+ARGUS_SIGN_STYLE = Automatic
+ARGUS_SIGN_IDENTITY = Apple Development
+ARGUS_TEAM = YOURTEAMID
+ARGUS_BUNDLE_ID = com.YOURNAME.argus
