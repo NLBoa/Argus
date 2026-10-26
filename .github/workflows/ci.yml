@@ -42,8 +42,10 @@ jobs:
             | tar -xz -C /usr/local/bin gitleaks
       - name: Sync dependencies
         run: uv sync --frozen
-      - name: make check
-        run: make check
+      # Visual is out of CI until the overhaul ends: baselines are darwin-only until then, and the
+      # Linux set is re-recorded once (scripts/visual_linux.sh --update). Then switch back to `make check`.
+      - name: make check-ci
+        run: make check-ci
       - name: Upload visual diffs
         if: failure()
         uses: actions/upload-artifact@v4

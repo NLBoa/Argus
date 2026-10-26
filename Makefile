@@ -9,7 +9,7 @@ CSS_IN := argus/web/static/src/app.css
 CSS_OUT := argus/web/static/dist/app.css
 
 .PHONY: help setup dev css css-watch lint fmt types test-unit test-int cov test-e2e test-a11y \
-        test-visual visual-update visual-linux secrets evals check deploy logs mac mac-test clean
+        test-visual visual-update visual-linux secrets evals check check-ci deploy logs mac mac-test clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -75,7 +75,10 @@ evals: ## AI evals against the real API (needs ARGUS_ANTHROPIC_API_KEY; not in C
 secrets: ## gitleaks over the full git history
 	gitleaks git --redact --no-banner .
 
-check: lint types secrets cov test-e2e test-a11y test-visual ## Everything CI runs
+check-ci: lint types secrets cov test-e2e test-a11y ## What CI runs: check minus visual until the Linux baselines are re-recorded
+	@echo "make check-ci: all green"
+
+check: check-ci test-visual ## Everything, including visual against this platform's baselines
 	@echo "make check: all green"
 
 deploy: ## Rsync to the Pi and run the installer (PI_HOST=argus-pi)

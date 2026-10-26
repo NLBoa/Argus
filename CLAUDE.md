@@ -32,7 +32,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | E2E / accessibility / visual | `make test-e2e` / `make test-a11y` / `make test-visual` |
 | Re-record visual baselines | `make visual-update` (macOS) · `scripts/visual_linux.sh --update` (Linux) |
 | AI evals (real API, not in CI) | `make evals` |
-| Everything CI runs | `make check` |
+| Everything / what CI runs (no visual until the overhaul ends) | `make check` / `make check-ci` |
 | Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
 | Webhook / backup / restore | `argus serve-webhook` · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
 | CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, …) |

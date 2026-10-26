@@ -706,7 +706,8 @@ Each is checked against existing marks (Eye of Providence, eye-in-triangle, the 
 
 ## End-to-end verification
 1. **Every phase:** `make check` (lint, mypy --strict, gitleaks, coverage floors with the new `planner/*` and `argus/capabilities.py` at 95%, unit, integration, e2e, a11y, visual, budgets) plus the deadline golden.
-2. **Linux baselines:** `scripts/visual_linux.sh --update`, then a clean re-run.
+2. **Linux baselines:** `scripts/visual_linux.sh --update`, then a clean re-run. Then put visual back in CI:
+   `.github/workflows/ci.yml` runs `make check-ci` (no visual) until this step, then `make check` again.
 3. **Screenshots:** demo shots in both profiles go to `docs/plans/overhaul/after-pN/` and are compared with `before/`.
 4. **Evals:** after a prompt version changes (plan_note.v2 in P2, sms.v2 in P3), run `make evals` (you run it; it needs `ARGUS_ANTHROPIC_API_KEY`).
 5. **Independent review:** a fresh agent reviews the diff against the brief, CLAUDE.md and this plan. Then fixes, then `make check` again.
