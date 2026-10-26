@@ -2,11 +2,12 @@ import AppKit
 import Observation
 import WidgetKit
 
-/// Polls the feed, reloads the widget when it changes, and pops a countdown at each milestone.
+/// Polls the feed every minute, reloads the widget only when what it shows changed, and pops a
+/// countdown at each milestone.
 @MainActor
 @Observable
 final class BarModel {
-    static let poll: Duration = .seconds(5 * 60)
+    static let poll: Duration = .seconds(60)
     static let tick: Duration = .seconds(30)
     private static let shownKey = "shownCountdowns"
 
@@ -53,9 +54,10 @@ final class BarModel {
         }
     }
 
-    func refresh() async {
+    /// `force` (the menu's Refresh) reloads the widget even when nothing changed.
+    func refresh(force: Bool = false) async {
         let next = await client.load()
-        if next.feed != load.feed {
+        if force || next.feed.map({ !$0.shows(sameAs: load.feed) }) ?? false {
             WidgetCenter.shared.reloadAllTimelines()
         }
         load = next

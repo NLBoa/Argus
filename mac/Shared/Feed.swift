@@ -16,6 +16,13 @@ struct Feed: Codable, Equatable, Sendable {
         return try decoder.decode(Feed.self, from: data)
     }
 
+    /// Whether the widget would look the same. `generatedAt` changes on every fetch, so it's ignored:
+    /// reloading on it would spend WidgetKit's daily reload budget on nothing.
+    func shows(sameAs other: Feed?) -> Bool {
+        guard let other else { return false }
+        return summary == other.summary && notes == other.notes && items == other.items
+    }
+
     /// Items still ahead of `now`: the feed can be up to 15 minutes old.
     func upcoming(at now: Date) -> [FeedItem] {
         items.filter { $0.dueAt > now }

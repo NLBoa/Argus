@@ -82,4 +82,16 @@ private func item(_ id: Int = 1, due: Date) -> FeedItem {
         #expect(feed.items[0].dueAt == at(23, 30))
         #expect(feed.upcoming(at: at(23, 31)).isEmpty)
     }
+
+    @Test func aNewTimestampAloneIsNoChange() {
+        let feed = Feed(
+            version: 1, generatedAt: at(9), summary: "1 due today", notes: [],
+            items: [item(due: at(23, 59))])
+        var later = feed
+        later.generatedAt = at(9, 1)
+        #expect(later.shows(sameAs: feed))
+        later.items[0].dueAt = at(23, 30)
+        #expect(!later.shows(sameAs: feed))
+        #expect(!feed.shows(sameAs: nil))
+    }
 }

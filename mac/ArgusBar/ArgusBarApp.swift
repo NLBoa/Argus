@@ -28,7 +28,7 @@ private struct BarMenu: View {
         Divider()
         Button("Open Argus") { NSWorkspace.shared.open(Argus.link("/today")) }
             .keyboardShortcut("o")
-        Button("Refresh") { Task { await model.refresh() } }
+        Button("Refresh") { Task { await model.refresh(force: true) } }
             .keyboardShortcut("r")
         Toggle("Launch at Login", isOn: $atLogin)
             .onChange(of: atLogin) { _, on in
