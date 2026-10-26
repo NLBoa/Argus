@@ -18,8 +18,8 @@ the display face. Everything around it stays quiet.
   normal-vision and colorblind separation in both themes.
 
 **Type (D066).** Atkinson Hyperlegible Next for body and data; times and counts use tabular figures (`.tnum`), and the
-slashed zero keeps 0 and O apart. Bricolage Grotesque, the display face, is for page titles, section titles, the hero
-task, and big numbers (the timer, stats, the kiosk clock). The scale is a perfect fourth: 12.5 / 14 / 16 / 21 / 28 /
+slashed zero keeps 0 and O apart. Bricolage Grotesque, the display face, is for page titles, section titles, and big
+numbers (the timer, stats, the kiosk clock). The scale is a perfect fourth: 12.5 / 14 / 16 / 21 / 28 /
 37 / 50, and 96 on the kiosk. Both faces are self-hosted, preloaded, and swap in over metric-matched local fallbacks.
 
 **Mark (D068).** The wordmark is "argus" in the display face, the g's ear a bronze needle; the square mark is the

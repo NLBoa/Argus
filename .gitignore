@@ -25,3 +25,4 @@ docs/plans/overhaul/
 mac/*.xcodeproj/
 mac/build/
 mac/Config/Local.xcconfig
+.superpowers/

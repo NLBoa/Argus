@@ -1,8 +1,8 @@
 """No layout shift on HTMX swaps (CLAUDE.md UI budgets, D064).
 
 Every `layout-shift` entry is recorded, with `hadRecentInput`. Shifts the student didn't cause
-(no recent input) must total under 0.001 around each same-size swap; a move may change only the
-#queue box, never what sits around it."""
+(no recent input) must total under 0.001 around each same-size swap: a row swaps in place and
+nothing around it moves."""
 
 from __future__ import annotations
 
@@ -54,30 +54,28 @@ def today(page: Page, fresh_server: Callable[..., LiveServer]) -> Page:
 
 
 def test_same_size_swaps_do_not_shift_the_page(today: Page) -> None:
-    enter(today, "Pin to top Quiz 4")
-    expect(today.locator("#queue ol .q-card").first).to_contain_text("Quiz 4")
+    hw3 = today.locator("#item-2")
+    hw3.hover()
+    enter(today, "Start Homework 3")
+    expect(hw3).to_have_attribute("data-running", "true")
     today.wait_for_timeout(200)
     assert unprompted(today) < 0.001
     reset(today)
-    enter(today, "Mark done Quiz 2")
-    expect(today.locator("#q-item-3")).to_have_count(0)
-    today.wait_for_timeout(200)
-    assert unprompted(today) < 0.001
-    reset(today)
-    today.locator("#hero-timer").focus()
-    today.keyboard.press("Enter")  # stop the essay's timer: the hero becomes the next task
-    expect(today.locator("#hero")).to_contain_text("Next up")
+    hw3.hover()
+    enter(today, "Mark done Homework 3")
+    expect(today.locator("#item-2")).to_have_attribute("data-done", "true")
     today.wait_for_timeout(200)
     assert unprompted(today) < 0.001
 
 
-def test_a_move_changes_only_the_queue(today: Page) -> None:
-    around = ("#hero", ".today__aside", "#queue")
+def test_a_row_swap_changes_only_that_row(today: Page) -> None:
+    around = ("#item-6", ".page-head", "#item-3")
     before = boxes(today, *around)
-    enter(today, "Move Homework 3 up")
-    expect(today.locator("#queue ol .q-card").first).to_contain_text("Homework 3")
+    today.locator("#item-2").hover()
+    enter(today, "Start Homework 3")
+    expect(today.locator("#item-2")).to_have_attribute("data-running", "true")
     today.wait_for_timeout(200)
-    assert boxes(today, *around) == before  # same cards, same sizes: nothing around it moved
+    assert boxes(today, *around) == before
     assert unprompted(today) < 0.001
 
 

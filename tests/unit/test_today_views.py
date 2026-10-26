@@ -1,8 +1,9 @@
-"""Today's view models: the queue cards and hero (D058, D064), the confirm line (D060), the day
-strip, and the kiosk rail's lanes and real hours (D063). Pure."""
+"""Today's view models: the week of deadlines filed by the day they're worked on (D072), and the
+kiosk rail's lanes and real hours (D063). Pure."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 from argus.clock import local_datetime
@@ -13,12 +14,10 @@ from argus.planner.risk import RiskLevel
 from argus.web.viewmodels import (
     CourseView,
     ItemView,
-    QueueEntryFacts,
-    confirm_choices,
-    confirm_when,
-    queue_view,
-    strip,
     timeline,
+    today_summary,
+    week_groups,
+    work_day,
 )
 
 MON = date(2026, 10, 19)
@@ -45,134 +44,64 @@ def view(item_id: int, title: str, due: datetime | None = None) -> ItemView:
     )
 
 
-def fact(item_id: int, **kw: object) -> QueueEntryFacts:
-    base: dict[str, object] = {
-        "entry_id": f"item:{item_id}",
-        "kind": "work",
-        "item_id": item_id,
-        "remaining": 2.0,
-        "capacity": 4.0,
-        "demand": 2.0,
-        "level": RiskLevel.OK,
-        "pinned": False,
-        "moved": False,
-        "skipped": False,
-        "tonight_hours": None,
-    }
-    base.update(kw)
-    return QueueEntryFacts(**base)  # type: ignore[arg-type]
+WEEK_NOW = local_datetime(MON, 10, 15)
 
 
-VIEWS = {i: view(i, f"Item {i}") for i in range(1, 6)}
+def at(days: int, h: int, m: int = 0) -> datetime:
+    return local_datetime(MON + timedelta(days=days), h, m)
 
 
-def q(facts: list[QueueEntryFacts], **kw: object):  # type: ignore[no-untyped-def]
-    args: dict[str, object] = {
-        "windows_on": True,
-        "window_text": "Tonight 7-11pm",
-        "can_skip": True,
-        "timer_item_id": None,
-    }
-    args.update(kw)
-    return queue_view(facts, VIEWS, **args)  # type: ignore[arg-type]
+def test_morning_deadlines_are_the_previous_days_work() -> None:
+    assert work_day(at(1, 7, 30), MON) == MON  # Tue 7:30 am is Monday's work
+    assert work_day(at(1, 11, 59), MON) == MON
+    assert work_day(at(1, 12), MON) == MON + timedelta(days=1)  # noon is its own day
+    assert work_day(at(1, 23, 59), MON) == MON + timedelta(days=1)
+    assert work_day(at(0, 11), MON) == MON  # this morning can't be yesterday's work
 
 
-def test_the_hero_is_first_and_the_rest_keep_their_numbers_and_neighbors() -> None:
-    v = q([fact(1), fact(2), fact(3, skipped=True), fact(4)])
-    assert v.hero is not None and v.hero.entry_id == "item:1" and v.hero.position == 1
-    assert [(c.entry_id, c.position) for c in v.cards] == [("item:2", 2), ("item:4", 3)]
-    assert v.hero.up_before is None and v.hero.down_before == "item:2"
-    assert v.cards[-1].down_before is None and v.cards[-1].up_before == "item:2"
-    assert [c.entry_id for c in v.skipped] == ["item:3"] and v.skipped[0].position is None
+def test_the_week_runs_through_the_same_weekday_next_week() -> None:
+    views = [
+        view(1, "Tonight", at(0, 23, 59)),
+        view(2, "Early Tue", at(1, 7, 30)),
+        view(3, "Next Mon", at(7, 18)),
+        view(4, "Next Tue morning", at(8, 7, 30)),  # Monday Nov 2's work: in
+        view(5, "Next Tue afternoon", at(8, 13)),  # out
+        view(6, "Past", at(0, 9)),  # past due: not a day group
+        view(7, "Undated"),
+    ]
+    groups = week_groups(views, WEEK_NOW)
+    assert [(g.label, [v.title for v in g.items]) for g in groups] == [
+        ("Today", ["Tonight", "Early Tue"]),
+        ("Mon, Oct 26", ["Next Mon", "Next Tue morning"]),
+    ]
+    assert groups[0].early == frozenset({2}) and groups[1].early == frozenset({4})
 
 
-def test_while_a_timer_runs_its_card_is_the_hero() -> None:
-    v = q([fact(1), fact(2), fact(3), fact(4)], timer_item_id=3)
-    assert v.hero is not None and v.hero.entry_id == "item:3" and v.hero.position == 3
-    # Mid-list, the timed card stays in the list too, so no row's neighbor is hidden (review).
-    assert [c.entry_id for c in v.cards] == ["item:1", "item:2", "item:3", "item:4"]
-    assert v.cards[3].up_before == "item:3"
-    first = q([fact(1), fact(2)], timer_item_id=1)
-    assert first.hero is not None and [c.entry_id for c in first.cards] == ["item:2"]
-    elsewhere = q([fact(1), fact(2)], timer_item_id=9)  # timing something not in the queue
-    assert elsewhere.hero is None and len(elsewhere.cards) == 2
+def test_the_week_leaves_out_done_work() -> None:
+    done = replace(view(1, "Submitted", at(2, 23, 59)), status=ItemStatus.SUBMITTED)
+    assert week_groups([done], WEEK_NOW) == []
 
 
-def test_focus_names_the_container_the_control_ends_up_in() -> None:
-    assert q([fact(1), fact(2)], focus=("item:2", "up")).focus == "q-item-2:up"
-    assert q([fact(1), fact(2)], focus=("item:1", "down")).focus == "hero:down"
-    assert q([fact(1)], focus=("confirm", "confirm")).focus == "confirm:confirm"
-
-
-def test_reasons_and_labels() -> None:
-    risky = q([fact(1, level=RiskLevel.AT_RISK, capacity=2.0, demand=5.5)]).hero
-    assert risky is not None and risky.marker is RiskLevel.AT_RISK
-    assert risky.reason == "Needs 3.5 h more than your windows have before it's due"
-    ok = q([fact(1, capacity=6.0)]).hero
-    assert (
-        ok is not None and ok.reason == "6 h of window time before it's due" and ok.marker is None
-    )
-    assert q([fact(1, capacity=0.0)]).hero.reason == "No work window before it's due"  # type: ignore[union-attr]
-    assert q([fact(1)], windows_on=False).hero.reason is None  # type: ignore[union-attr]
-    tiny = q([fact(1, remaining=0.05)]).hero
-    assert tiny is not None and tiny.left_text == "~15 min left"  # shown floor, display only
-    done = q([fact(1, remaining=0.0)]).hero
-    assert (
-        done is not None
-        and done.left_text is None
-        and done.reason == "Nothing left by your estimate"
-    )
-    study = q([fact(2, kind="study", entry_id="study:2", remaining=0.75, shortfall=1.5)]).hero
-    assert study is not None and study.title == "Study for Item 2"
-    assert study.left_text == "~45 min set aside" and not study.can_skip
-    assert study.reason == "Study time short by 1.5 h before the exam"
-    pinned = q([fact(1, pinned=True, moved=True)]).hero
-    assert pinned is not None and pinned.pinned and not pinned.moved
-    assert not q([fact(1)], can_skip=False).hero.can_skip  # type: ignore[union-attr]
-
-
-def test_the_confirm_line_words() -> None:
-    assert (
-        confirm_when(local_datetime(MON, 19), local_datetime(MON + timedelta(days=1), 8))
-        == "Last night"
+def test_the_summary_counts_today_the_week_and_past_due() -> None:
+    groups = week_groups(
+        [view(1, "A", at(0, 23)), view(2, "B", at(1, 8)), view(3, "C", at(3, 23))], WEEK_NOW
     )
     assert (
-        confirm_when(local_datetime(MON, 13), local_datetime(MON + timedelta(days=1), 8))
-        == "Yesterday"
+        today_summary(groups, MON, past_due=1, to_confirm=0)
+        == "2 to do today, 3 this week, 1 past due"
     )
-    assert confirm_when(local_datetime(MON, 13), local_datetime(MON, 19)) == "Earlier today"
-    assert (
-        confirm_when(local_datetime(MON, 19), local_datetime(MON + timedelta(days=2), 8))
-        == "On Monday"
-    )
-    assert confirm_choices(4.0) == (4.0, 2.0, 0.0)
-    assert confirm_choices(0.3) == (1.0, 0.5, 0.0)
-    assert confirm_choices(1.4) == (1.5, 1.0, 0.0)
+    later = week_groups([view(3, "C", at(3, 23))], WEEK_NOW)
+    assert today_summary(later, MON, past_due=0, to_confirm=0) == "Nothing to do today, 1 this week"
+    assert today_summary([], MON, past_due=0, to_confirm=0) == "Nothing due this week"
+
+
+def test_the_summary_asks_about_work_no_source_can_confirm() -> None:
+    """D056: past-due work without a submission source is "to confirm", never "past due"."""
+    assert today_summary([], MON, past_due=0, to_confirm=1) == "Nothing to do today, 1 to confirm"
 
 
 def busy(h1: int, m1: int, h2: int, m2: int, title: str = "CMSC351 lecture") -> Busy:
     return Busy(local_datetime(MON, h1, m1), local_datetime(MON, h2, m2), "class", title, "CMSC351")
-
-
-def test_the_strip_covers_the_busy_part_of_the_day_with_overlaps_in_lanes() -> None:
-    s = strip(
-        MON,
-        [busy(10, 0, 11, 0), busy(10, 30, 11, 30, "MATH240 lab")],
-        NOW,
-        courses={"CMSC351": COURSE},
-        due_items=[view(1, "Homework 3", local_datetime(MON, 23, 30))],
-        windows=[(local_datetime(MON, 19), local_datetime(MON, 23))],
-    )
-    assert s.lanes == 2 and sorted(b.lane for b in s.bars) == [0, 1]
-    first = s.ticks[0]
-    assert first[0] == "9 am"  # 8:30 am (now 9 am - 30 min) rounds up to the first whole hour
-    assert s.dues[0].text == "11:30 pm" and s.dues[0].left_pct < 100  # the range runs to midnight
-    assert s.now_pct is not None and s.now_pct > 0
-    assert len(s.windows) == 1 and not s.empty
-
-
-def test_an_empty_day_has_an_empty_strip() -> None:
-    assert strip(MON, [], NOW, courses={}).empty
 
 
 def test_the_kiosk_rail_puts_overlaps_in_columns_and_takes_in_late_deadlines() -> None:

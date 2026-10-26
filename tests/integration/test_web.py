@@ -8,14 +8,15 @@ import re
 import sqlite3
 import time
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from argus.clock import FakeClock
+from argus import tasks
+from argus.clock import FakeClock, local_datetime
 from argus.demo import DEMO_CONFIG, DEMO_SECRETS, seed_demo
 from argus.store import repo
 from argus.store.db import open_db
@@ -78,14 +79,46 @@ def test_today_with_data(client: TestClient) -> None:
     assert r.status_code == 200
     html = r.text
     assert "Monday, October 19" in html
-    assert "2 due today, 1 tomorrow, 1 past due" in html
+    assert "2 to do today, 6 this week, 1 past due" in html
     # Four failures in a row: a banner, not a quiet note (D067)
     assert "Gradescope has failed 4 syncs in a row" in html
     assert "1 note edit to review" in html  # the status line
-    assert "Essay draft: technical description" in html  # running timer
     assert 'aria-current="page"' in html
-    assert "MATH240 lecture" in html  # day strip
-    assert 'id="hero"' in html and "Working on" in html
+    # D072: deadlines in order, grouped by the day they're worked on; no queue, no strip.
+    titles = re.findall(r"data-nav-target>([^<]+)<", html)
+    assert titles == [
+        "Essay draft: technical description",  # Working on (the running timer)
+        "Lab report 2",  # Past due
+        "Homework 3",  # Today
+        "Problem Set 6",
+        "Quiz 2",  # Tomorrow (due at noon: its own day)
+        "Homework 4",  # Saturday
+        "Problem Set 7",  # Sunday
+    ]
+    assert "Midterm 1" not in html  # Wed 9:30 am is Tuesday Oct 27's work: past the week
+    for gone in ('id="hero"', 'id="queue"', 'class="strip"', "Next up", "tonight"):
+        assert gone not in html, gone
+
+
+def test_today_files_a_morning_deadline_under_the_day_before(
+    client: TestClient, clock: FakeClock
+) -> None:
+    db = client.app.state.argus.db_path  # type: ignore[attr-defined]
+    conn = open_db(db, clock)
+    tasks.add_task(
+        conn,
+        course_code="CMSC351",
+        title="Pre-lab quiz",
+        due_at=local_datetime(date(2026, 10, 20), 7, 30),
+        now=clock.now(),
+    )
+    conn.close()
+    html = client.get("/today").text
+    today = html[html.index(">Today <") : html.index(">Tomorrow <")]
+    assert "Pre-lab quiz" in today and "Tomorrow 7:30 am" in today
+    row = today[today.index("Pre-lab quiz") :]
+    assert "Next morning" in row[: row.index("</li>")]
+    assert "3 to do today" in html
 
 
 def test_upcoming_with_filter(client: TestClient) -> None:
@@ -116,11 +149,7 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
         "wl__plot",
         "item-row",
         "day-rail",
-        "q-card",
-        'class="hero"',
-        "confirm-line",
-        "queue-done",
-        'class="strip"',
+        "item-row__early",
         "workload",
         "finding-card",
         "diff__split",
@@ -141,9 +170,8 @@ def test_styleguide_shows_every_component(client: TestClient) -> None:
 
 def test_empty_states(empty: TestClient) -> None:
     today = empty.get("/today").text
-    assert "Nothing in the queue" in today
-    assert "Nothing scheduled today." in today
-    assert "Nothing left due today" in today
+    assert "Nothing due this week" in today
+    assert "Nothing due through Monday, October 26" in today
     assert "Nothing due in the next 14 days" in empty.get("/upcoming").text
     health = empty.get("/health").text
     assert "Waiting for first sync" in health

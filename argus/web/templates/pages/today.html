@@ -1,7 +1,5 @@
 {% extends "base.html" %}
-{% from "components/ui.html" import icon, item_row, error_banner %}
-{% from "components/queue.html" import queue_region %}
-{% from "components/strip.html" import day_strip %}
+{% from "components/ui.html" import icon, item_row, empty_state, error_banner %}
 {% block content %}
 {% if error %}
   <div class="page-head"><h1 class="page-title">Today</h1></div>
@@ -12,33 +10,18 @@
   <p class="page-sub">{{ data.summary }}</p>
   <a class="btn page-head__action" href="/tasks/new">{{ icon("plus", "icon-sm") }}Add a task</a>
 </div>
-<div class="today">
-  <div class="today__main">
-    {% if not data.windows_on %}<p class="panel panel-pad">{{ icon("calendar-clock", "icon-sm") }} <strong>Tell Argus when you study.</strong> It ranks your work for those hours and texts you before each one. <a class="underline underline-offset-2" href="/settings">Set your work windows</a></p>{% endif %}
-    {{ queue_region(data) }}
-    {% for group in data.groups %}
-    <section aria-labelledby="g-{{ loop.index }}">
-      <h2 class="section-title" id="g-{{ loop.index }}">{{ group.label }} <span class="section-count">{{ group.items|length }}</span></h2>
-      <ul class="item-list m-0 p-0 list-none">{% for v in group.items %}{{ item_row(v) }}{% endfor %}</ul>
-    </section>
-    {% endfor %}
-  </div>
-  <aside class="today__aside" aria-label="Your day">
-    <section aria-labelledby="day-heading">
-      <h2 class="section-title" id="day-heading">Your day</h2>
-      <div class="panel panel-pad">{{ day_strip(data.strip) }}</div>
-    </section>
-    {% if data.due_soon %}
-    <section class="today__soon" aria-labelledby="soon-heading">
-      <h2 class="section-title" id="soon-heading">Due soon</h2>
-      <ul class="soon-list m-0 p-0 list-none">
-        {% for v in data.due_soon %}
-        <li class="soon-row" data-accent="{{ v.course.accent }}"><a href="/items/{{ v.id }}">{{ v.title }}</a><span class="soon-row__meta"><span>{{ v.course.code }}</span><span class="tnum">{{ v.due_text }}</span></span></li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endif %}
-  </aside>
+{#- D072: what's due, in order, filed by the day it's worked on. Argus doesn't rank it. -#}
+{% if data.groups %}
+<div class="grid gap-8">
+  {% for group in data.groups %}
+  <section aria-labelledby="g-{{ loop.index }}">
+    <h2 class="section-title" id="g-{{ loop.index }}">{{ group.label }}{% if group.day and group.label not in ("Today", "Tomorrow") and "," not in group.label %} <span class="section-count">{{ group.day.strftime("%b") }} {{ group.day.day }}</span>{% endif %} <span class="section-count">{{ group.items|length }}</span></h2>
+    <ul class="item-list m-0 p-0 list-none">{% for v in group.items %}{{ item_row(v, early=v.id in group.early) }}{% endfor %}</ul>
+  </section>
+  {% endfor %}
 </div>
+{% else %}
+<div class="panel">{{ empty_state("calendar-days", "Nothing due through " ~ data.last_text, "When " ~ caps.deadline_sources() ~ " lists something new, it shows up here within half an hour.", "/upcoming", "See Upcoming", level=2) }}</div>
+{% endif %}
 {% endif %}
 {% endblock %}

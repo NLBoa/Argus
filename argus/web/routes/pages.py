@@ -13,7 +13,6 @@ from argus.capabilities import Feature
 from argus.clock import ensure_utc, to_local
 from argus.planner.windows import DAYS
 from argus.web.data import (
-    CHANGED,
     load_announcements,
     load_course,
     load_health,
@@ -46,15 +45,9 @@ def root() -> RedirectResponse:
 
 
 @router.get("/today", response_class=HTMLResponse)
-def today(request: Request, state: State, conn: Conn, changed: str = "") -> HTMLResponse:
+def today(request: Request, state: State, conn: Conn) -> HTMLResponse:
     try:
-        data = load_today(
-            conn,
-            state.config,
-            state.caps,
-            state.clock.now(),
-            message=CHANGED if changed else None,  # a refused move without JS (D064)
-        )
+        data = load_today(conn, state.config, state.caps, state.clock.now())
     except sqlite3.Error:
         log.exception("today failed")
         return render(

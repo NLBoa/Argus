@@ -75,7 +75,7 @@ def test_today_states_have_no_violations(
     page.goto(s.url + "/today")
     page.wait_for_load_state("networkidle")
     if viewport == "mobile":  # a row's "..." menu, open
-        page.locator("#queue ol .q-card__menu summary").first.click()
+        page.locator(".item-row__menu summary").first.click()
     results = Axe().run(page, options=AXE_OPTIONS)
     assert results.violations_count == 0, (
         f"{state} ({theme}, {viewport}):\n{results.generate_report()}"

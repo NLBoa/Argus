@@ -53,12 +53,12 @@
 
 {#- "Set time" (D069): work with no estimate asks the student, one tap away and never hidden behind
     hover. A <details> popover (Esc and a click outside close it, like "More"): presets, then any
-    number. `view` picks what HTMX swaps back: row (the row), queue (#queue), or item (the page,
-    where the same forms sit inline). -#}
+    number. `view` picks what HTMX swaps back: row (the row) or item (the page, where the same
+    forms sit inline). -#}
 {% set SET_TIME_PRESETS = [0.5, 1, 2, 3, 5, 8] %}
 {% macro set_time_forms(id, title, view, key, question="How long will it take?") -%}
 {% set hx -%}
-{% if view == "queue" %}hx-target="#queue" hx-select="#queue"{% elif view == "row" %}hx-target="#item-{{ id }}"{% else %}hx-target="main" hx-select="main"{% endif %} hx-swap="outerHTML"
+{% if view == "row" %}hx-target="#item-{{ id }}"{% else %}hx-target="main" hx-select="main"{% endif %} hx-swap="outerHTML"
 {%- endset %}
 <p class="set-time__q" id="set-time-q-{{ key }}">{{ question }}</p>
 <form class="set-time__presets" method="post" action="/items/{{ id }}/estimate" hx-post="/items/{{ id }}/estimate" {{ hx }} role="group" aria-labelledby="set-time-q-{{ key }}">
@@ -83,7 +83,8 @@
 
 {#- A row (D065): the title; a muted line (course, kind unless an assignment, "~4 h"); the due date;
     a marker only when something is wrong. Sources live on the item page. -#}
-{% macro item_row(v, actions=True) -%}
+{#- `early`: Today files a deadline before noon under the day before (D072) and says so. -#}
+{% macro item_row(v, actions=True, early=False) -%}
 {% set controls = actions and v.kind.takes_submission %}
 <li class="item-row" id="item-{{ v.id }}" data-accent="{{ v.course.accent }}" data-done="{{ 'true' if v.done else 'false' }}" data-running="{{ 'true' if v.running else 'false' }}" data-controls="{{ 'true' if controls else 'false' }}" data-nav-item>
   <div class="min-w-0">
@@ -102,6 +103,7 @@
   </div>
   <div class="item-row__side">
     {% if v.due_text %}<span class="item-row__due">{{ v.due_text }}</span><span class="item-row__rel">{{ v.due_relative }}</span>
+    {%- if early %}<span class="item-row__early">{{ icon("sun", "icon-sm") }}Next morning</span>{% endif %}
     {% else %}<span class="item-row__rel">No due date</span>{% endif %}
     {% if not v.done and v.risk.slug != "ok" %}{{ risk_badge(v.risk, v.risk_label) }}{% endif %}
   </div>

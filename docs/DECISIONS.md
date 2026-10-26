@@ -635,3 +635,22 @@ to a budget (roughly every 15 minutes), so the feed can't do it. These windows a
 tests, and SweetPad runs the `ArgusBar` scheme. **Quirks.** Anything time-based in the widget uses timeline entries or
 `Text(timerInterval:)`, never a fetch. A SwiftUI view built inside a SwiftUI update (for example from the `App`'s
 `@State` init) aborts in AttributeGraph, so AppKit panels are opened from a `Task`.
+
+## D072 — Today lists the week's deadlines; the web no longer ranks the work (2026-10-26)
+**Decision.** Today shows what's due, in due-time order, and nothing that says what to do or when. From the top: the
+item with a running timer ("Working on"), then "Past due" (recent overdue work and the D056 "Did you submit?"
+items together), then one group per day from today through the same weekday next week, holding only days that have
+something. A deadline before 12 pm is filed under the day before ("Tomorrow 7:30 am" sits under Today) and its row
+says "Next morning"; one due this morning stays under Today. Rows are the usual item rows: the estimate ("~3 h"),
+"Set time" when there is none, Start and Mark done. The summary reads "2 to do today, 9 this week, 1 past due", and
+unconfirmed work still counts as "to confirm" (D056). The hero, the ranked queue, pin / not tonight / move, the
+"time left" field, the confirm line, the day strip, the "Due soon" aside, and the work-windows prompt are gone from
+Today, and with them the web routes `/queue/{entry}/move|pin|skip`, `/items/{id}/left`, and
+`/windows/{id}/confirm`. **Why.** The student wants to decide where their time goes. A queue that said what to do
+tonight hid the deadlines they needed to make that call. One teacher's work is due at 7:30 am, and the student does
+it the day before, so filing a morning deadline under its own date kept catching them off guard. Noon is their line.
+**Details.** This changes Today only. The planner, the work-window texts, SMS replies (pin, not tonight, move, the
+check-in), the kiosk, the widget feed (its summary line keeps D071's wording), and /workload still rank and plan as in
+D058–D064. Risk badges stay on rows: they report what the windows hold, they don't assign work. Undated items aren't
+on Today (Upcoming and the course page list them). The rule is `work_day` in `web/viewmodels.py`. Supersedes the web
+parts of D058, D063 (Today), and D064.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from itertools import groupby
 
 from argus.clock import local_datetime, to_local
@@ -97,7 +97,7 @@ class ItemView:
 
     @property
     def left_text(self) -> str | None:
-        """'~4.5 h': the queue's rounding and 15-minute floor, so a row and its card agree."""
+        """'~4.5 h', rounded to the half hour with a 15-minute floor."""
         return None if self.left_hours is None else _hours(max(self.left_hours, MIN_LEFT))
 
     @property
@@ -189,6 +189,65 @@ def group_by_day(views: Iterable[ItemView], today: date) -> list[DayGroup]:
     if undated:
         groups.append(DayGroup(None, "No due date", tuple(sorted(undated, key=lambda v: v.title))))
     return groups
+
+
+# ---------------------------------------------------------------- Today's week (D072)
+
+WEEK_DAYS = 7  # Today runs from today through the same weekday next week
+MORNING_ENDS = time(12)  # due before noon: the previous day's work
+
+
+@dataclass(frozen=True, slots=True)
+class WorkDayGroup(DayGroup):
+    early: frozenset[int] = frozenset()  # items due the next morning, filed under this day
+
+
+def work_day(due_at: datetime, today: date) -> date:
+    """The day the work gets done: a deadline before noon belongs to the day before, but never
+    to a day already gone."""
+    local = to_local(due_at)
+    day = local.date() - timedelta(days=1) if local.time() < MORNING_ENDS else local.date()
+    return max(day, today)
+
+
+def week_groups(views: Iterable[ItemView], now: datetime) -> list[WorkDayGroup]:
+    """Open deadlines still ahead, one group per work day through WEEK_DAYS from today."""
+    today = to_local(now).date()
+    last = today + timedelta(days=WEEK_DAYS)
+    ahead = sorted(
+        (v for v in views if v.due_at and v.due_at >= now and not v.done),
+        key=lambda v: (v.due_at, v.course.code, v.title),
+    )
+    days: dict[date, list[ItemView]] = {}
+    for v in ahead:
+        assert v.due_at is not None
+        if (day := work_day(v.due_at, today)) <= last:
+            days.setdefault(day, []).append(v)
+    return [
+        WorkDayGroup(
+            day,
+            day_label(day, today),
+            tuple(vs),
+            frozenset(v.id for v in vs if v.due_at and to_local(v.due_at).date() != day),
+        )
+        for day, vs in days.items()
+    ]
+
+
+def today_summary(
+    groups: Sequence[DayGroup], today: date, *, past_due: int, to_confirm: int
+) -> str:
+    """'2 to do today, 9 this week, 1 past due'. Work no source can confirm is "to confirm"
+    (D056)."""
+    week = sum(len(g.items) for g in groups)
+    if not (week or past_due or to_confirm):
+        return "Nothing due this week"
+    now = sum(len(g.items) for g in groups if g.day == today)
+    parts = [f"{now} to do today" if now else "Nothing to do today"]
+    for n, what in ((week, "this week"), (past_due, "past due"), (to_confirm, "to confirm")):
+        if n:
+            parts.append(f"{n} {what}")
+    return ", ".join(parts)
 
 
 # ---------------------------------------------------------------- timeline
@@ -763,68 +822,9 @@ class PracticeView:
     result: str | None = None  # correct | shaky | incorrect
 
 
-# ---------------------------------------------------------------- the queue (Today, D058, D064)
+# ---------------------------------------------------------------- time left
 
-
-@dataclass(frozen=True, slots=True)
-class QueueCardView:
-    entry_id: str  # item:<id> | study:<exam id>
-    kind: str  # work | study
-    item: ItemView  # the work item, or the exam for a study card
-    position: int | None  # 1-based among tonight's entries; None when skipped
-    total: int
-    left_hours: float | None  # E for work (the "time left" field); hours set aside for study
-    tonight_hours: float | None  # hours of the current or next window given to it
-    reason: str | None
-    pinned: bool  # an explicit pin ("Pinned")
-    moved: bool  # a move pin that lasts until tonight's window ends ("For tonight")
-    skipped: bool
-    up_before: str | None  # the neighbor a Move up swaps with (None at the top)
-    down_before: str | None
-    can_skip: bool
-    marker: RiskLevel | None  # creeping, at risk, overdue
-    needs_time: bool = False  # work with no estimate and no "about N h left" (D069)
-
-    @property
-    def dom_id(self) -> str:
-        return "q-" + self.entry_id.replace(":", "-")
-
-    @property
-    def title(self) -> str:
-        return f"Study for {self.item.title}" if self.kind == "study" else self.item.title
-
-    @property
-    def left_text(self) -> str | None:
-        if self.left_hours is None:
-            return None
-        return f"{_hours(self.left_hours)} {'set aside' if self.kind == 'study' else 'left'}"
-
-
-@dataclass(frozen=True, slots=True)
-class DoneNoticeView:
-    """Where a card was marked done from the queue: one line with an undo, until the next swap."""
-
-    item_id: int
-    title: str
-
-
-@dataclass(frozen=True, slots=True)
-class QueueView:
-    hero: QueueCardView | None  # the next task (or, while a timer runs, the timed item's card)
-    cards: tuple[QueueCardView, ...]  # the rest of tonight's entries, in order
-    skipped: tuple[QueueCardView, ...]  # "Not tonight"
-    window_text: str | None  # "Tonight 7-11pm"
-    windows_on: bool
-    message: str | None = None  # "The list changed; try again"
-    done: DoneNoticeView | None = None
-    focus: str | None = None  # "<container id>:<control key>", focused after a swap (app.js)
-
-    @property
-    def empty(self) -> bool:
-        return self.hero is None and not self.cards and not self.skipped
-
-
-MIN_LEFT = 0.25  # the queue shows at least 15 minutes left on unfinished work (display only)
+MIN_LEFT = 0.25  # rows show at least 15 minutes left on unfinished work (display only)
 
 
 def _hours(h: float) -> str:
@@ -832,262 +832,3 @@ def _hours(h: float) -> str:
     if h < 1:
         return f"~{max(5, round(h * 60 / 5) * 5)} min"
     return "~" + f"{round(h * 2) / 2:.1f}".rstrip("0").rstrip(".") + " h"
-
-
-@dataclass(frozen=True, slots=True)
-class QueueEntryFacts:
-    """What the planner knows about one entry, flattened for `queue_view` (kept pure)."""
-
-    entry_id: str
-    kind: str
-    item_id: int
-    remaining: float | None  # E (hours set aside for study); None without an estimate
-    capacity: float | None  # C
-    demand: float | None  # D
-    level: RiskLevel
-    pinned: bool
-    moved: bool
-    skipped: bool
-    tonight_hours: float | None
-    shortfall: float | None = None  # study only
-
-
-def _reason(f: QueueEntryFacts, windows_on: bool) -> str | None:
-    if f.kind == "study":
-        if f.shortfall:
-            return f"Study time short by {_hours(f.shortfall)[1:]} before the exam"
-        return "Set aside in each window before the exam"
-    if f.remaining is None:
-        return None
-    if f.remaining <= 0:
-        return "Nothing left by your estimate"
-    if not windows_on or f.capacity is None or f.demand is None:
-        return None
-    if f.capacity <= 0:
-        return "No work window before it's due"
-    if f.level is RiskLevel.AT_RISK:
-        return (
-            f"Needs {_hours(f.demand - f.capacity)[1:]} more than your windows have before it's due"
-        )
-    return f"{_hours(f.capacity)[1:]} of window time before it's due"
-
-
-def queue_view(
-    facts: Sequence[QueueEntryFacts],
-    views: Mapping[int, ItemView],
-    *,
-    windows_on: bool,
-    window_text: str | None,
-    can_skip: bool,
-    timer_item_id: int | None,
-    focus: tuple[str, str] | None = None,
-    message: str | None = None,
-    done: DoneNoticeView | None = None,
-) -> QueueView:
-    """Cards in queue order. Tonight's entries are numbered; "Not tonight" ones are listed after
-    them. The hero is the first entry, or the timed item's card while its timer runs. `focus`
-    is (entry id or "hero" or "confirm", control key): where keyboard focus goes after a swap."""
-    tonight = [f for f in facts if not f.skipped and f.item_id in views]
-    later = [f for f in facts if f.skipped and f.item_id in views]
-    ids = [f.entry_id for f in tonight]
-
-    def card(f: QueueEntryFacts, pos: int | None) -> QueueCardView:
-        i = ids.index(f.entry_id) if pos is not None else -1
-        return QueueCardView(
-            entry_id=f.entry_id,
-            kind=f.kind,
-            item=views[f.item_id],
-            position=pos,
-            total=len(tonight),
-            left_hours=None
-            if f.remaining is None or (f.kind == "work" and f.remaining <= 0)
-            else max(f.remaining, MIN_LEFT),
-            tonight_hours=f.tonight_hours,
-            reason=_reason(f, windows_on),
-            pinned=f.pinned,
-            moved=f.moved and not f.pinned,
-            skipped=f.skipped,
-            up_before=ids[i - 1] if pos is not None and i > 0 else None,
-            down_before=ids[i + 1] if pos is not None and 0 <= i < len(ids) - 1 else None,
-            can_skip=can_skip and f.kind == "work",
-            marker=f.level
-            if f.level in (RiskLevel.CREEPING, RiskLevel.AT_RISK, RiskLevel.OVERDUE)
-            else None,
-            needs_time=f.kind == "work" and f.remaining is None,
-        )
-
-    cards = [card(f, n) for n, f in enumerate(tonight, 1)]
-    hero_i = next(
-        (
-            n
-            for n, c in enumerate(cards)
-            if timer_item_id is not None and c.kind == "work" and c.item.id == timer_item_id
-        ),
-        0 if timer_item_id is None else None,
-    )
-    hero = cards[hero_i] if hero_i is not None and cards else None
-    # The hero leaves the list only when it is first; a timed card further down stays in its row
-    # too, so every Move swaps with a neighbor the student can see.
-    rest = tuple(c for c in cards if not (c is hero and c.position == 1))
-    target = None
-    if focus is not None:
-        where, key = focus
-        if hero is not None and where == hero.entry_id:
-            where = "hero"
-        elif where.startswith(("item:", "study:")):
-            where = "q-" + where.replace(":", "-")
-        target = f"{where}:{key}"
-    return QueueView(
-        hero=hero,
-        cards=rest,
-        skipped=tuple(card(f, None) for f in later),
-        window_text=window_text,
-        windows_on=windows_on,
-        message=message,
-        done=done,
-        focus=target,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class ConfirmView:
-    """ "Last night: did you work on Homework 3? 2h · 1h · None" (D060)."""
-
-    window_id: str
-    when: str  # "Last night"
-    item_id: int
-    title: str
-    choices: tuple[float, ...]
-
-
-def confirm_when(start: datetime, now: datetime) -> str:
-    s, n = to_local(start), to_local(now)
-    days = (n.date() - s.date()).days
-    if days == 0:
-        return "Earlier today"
-    if days == 1:
-        return "Last night" if s.hour >= 17 else "Yesterday"
-    return f"On {s:%A}"
-
-
-def confirm_choices(allocated: float) -> tuple[float, ...]:
-    """The planned hours (rounded to the half hour, at least 1) and half of them, then None (0)."""
-    full = max(1.0, round(allocated * 2) / 2)
-    half = max(0.5, round(full) / 2)
-    return (full, half, 0.0) if half < full else (full, 0.0)
-
-
-# ---------------------------------------------------------------- the day strip (Today, D063)
-
-
-@dataclass(frozen=True, slots=True)
-class StripBar:
-    kind: str  # class | commitment
-    title: str
-    subtitle: str | None
-    accent: str | None
-    start_text: str
-    end_text: str
-    left_pct: float
-    width_pct: float
-    lane: int
-
-    @property
-    def label(self) -> str:
-        return ", ".join(
-            x for x in (f"{self.start_text} to {self.end_text}", self.title, self.subtitle) if x
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class StripMark:
-    left_pct: float
-    text: str  # "11:30 pm"
-    title: str
-
-
-@dataclass(frozen=True, slots=True)
-class StripView:
-    day: date
-    ticks: tuple[tuple[str, float, bool], ...]  # (label, left %, labelled)
-    bars: tuple[StripBar, ...]
-    lanes: int
-    windows: tuple[WindowBand, ...]  # top_pct/height_pct reused as left/width
-    dues: tuple[StripMark, ...]
-    now_pct: float | None
-    now_text: str | None
-
-    @property
-    def empty(self) -> bool:
-        return not (self.bars or self.windows or self.dues)
-
-
-def strip(
-    day: date,
-    busy: Sequence[Busy],
-    now: datetime,
-    *,
-    courses: Mapping[str, CourseView],
-    due_items: Sequence[ItemView] = (),
-    windows: Sequence[tuple[datetime, datetime]] = (),
-) -> StripView:
-    """A horizontal day: classes and commitments in lanes, work windows shaded, deadlines in their
-    own lane, the now needle. Its range is the busy part of the day ±30 min, clipped to the day:
-    [min(first class, first window, now), max(last class, last window, last deadline)]."""
-    from argus.planner.lanes import assign_lanes, hour_ticks
-
-    day_start = local_datetime(day, 0)
-    day_end = local_datetime(day + timedelta(days=1), 0)
-    dues = [v for v in due_items if v.due_at and day_start <= v.due_at < day_end]
-    starts = [b.start for b in busy] + [w[0] for w in windows]
-    ends = [b.end for b in busy] + [w[1] for w in windows] + [v.due_at for v in dues if v.due_at]
-    if not starts and not ends:
-        return StripView(day, (), (), 0, (), (), None, None)
-    pad = timedelta(minutes=30)
-    lo = max(day_start, min([*starts, *ends, now]) - pad)
-    hi = min(day_end, max([*ends, *starts, now]) + pad)
-    span = (hi - lo).total_seconds()
-
-    def pct(t: datetime) -> float:
-        return round(max(0.0, min(1.0, (t - lo).total_seconds() / span)) * 100, 3)
-
-    shown = [b for b in busy if b.end > lo and b.start < hi]
-    lanes, n = assign_lanes([(b.start, b.end) for b in shown])
-    bars = tuple(
-        StripBar(
-            kind=b.kind,
-            title=b.title,
-            subtitle=b.where,
-            accent=course_view(courses, b.course_code).accent if b.course_code else None,
-            start_text=clock_time(b.start),
-            end_text=clock_time(b.end),
-            left_pct=pct(b.start),
-            width_pct=round(pct(b.end) - pct(b.start), 3),
-            lane=lane,
-        )
-        for b, lane in zip(shown, lanes, strict=True)
-    )
-    hours = hour_ticks(lo, hi)
-    step = 1 if span <= 6 * 3600 else 2 if span <= 12 * 3600 else 3
-    ticks = tuple(
-        (_hour_label(to_local(t).hour), pct(t), to_local(t).hour % step == 0) for t in hours
-    )
-    bands = tuple(
-        WindowBand(
-            pct(a), round(pct(b) - pct(a), 3), f"Work window, {clock_time(a)} to {clock_time(b)}"
-        )
-        for a, b in windows
-        if b > lo and a < hi
-    )
-    marks = tuple(StripMark(pct(v.due_at), clock_time(v.due_at), v.title) for v in dues if v.due_at)
-    inside = lo <= now < hi
-    return StripView(
-        day,
-        ticks,
-        bars,
-        n,
-        bands,
-        marks,
-        pct(now) if inside else None,
-        clock_time(now) if inside else None,
-    )

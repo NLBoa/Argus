@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from argus.capabilities import Capabilities, Feature
@@ -20,23 +20,18 @@ from argus.estimates import (
 )
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
-from argus.planner.queue import Pref, pinned
 from argus.planner.risk import RiskLevel
 from argus.planner.windows import hours_between, overlapping_windows, window_spans
 from argus.planning import (
     Planning,
-    busy_windows,
     compute,
     explanation,
     notice_minutes,
-    pending_confirmation,
     risk_views,
-    skipped,
     workload_curve,
 )
 from argus.reminders.engine import SOURCES
 from argus.reminders.rules import Rule
-from argus.reminders.text import window_phrase
 from argus.store import repo
 from argus.vault.service import health as vault_health
 from argus.vault.service import item_note_path
@@ -45,32 +40,25 @@ from argus.web.settings_form import WindowRow, describe, rows_from_windows
 from argus.web.study_data import obsidian_link
 from argus.web.viewmodels import (
     UNCONFIRMED_ASK_FOR,
-    ConfirmView,
+    WEEK_DAYS,
     CourseView,
     DayGroup,
-    DoneNoticeView,
     FindingView,
     ItemView,
-    QueueEntryFacts,
-    QueueView,
     SourceStatusView,
     StaleNotice,
-    StripView,
     TimelineView,
-    TimerView,
+    WorkDayGroup,
     WorkloadChart,
     WorkloadDay,
-    confirm_choices,
-    confirm_when,
     course_views,
     group_by_day,
     item_view,
-    queue_view,
     source_status,
     stale_notices,
-    strip,
     timeline,
-    timer_view,
+    today_summary,
+    week_groups,
     workload_chart,
     workload_days,
 )
@@ -121,86 +109,15 @@ def _views(
 
 
 @dataclass(frozen=True)
-class TodayGroup(DayGroup):
-    empty_icon: str = "inbox"
-    empty_title: str = ""
-    empty_text: str = ""
-
-
-@dataclass(frozen=True)
 class TodayData:
-    windows_on: bool
     date_text: str
     summary: str
-    queue: QueueView
-    confirm: ConfirmView | None
-    groups: list[TodayGroup]  # "Did you submit?", past due, exams and events
-    strip: StripView
-    due_soon: list[ItemView]  # the desktop aside
-    timer: TimerView | None
+    last_text: str  # "Monday, October 26": the week's last work day, for the empty state
+    groups: list[WorkDayGroup]  # working on, past due, then each work day of the week (D072)
 
 
-def _queue_facts(p: Planning, prefs: Mapping[str, Pref]) -> list[QueueEntryFacts]:
-    tonight = dict(p.allocation(p.window.window_id)) if p.window else {}
-    out = []
-    for e in p.queue:
-        pref = prefs.get(e.entry_id)
-        live = pref is not None and pinned(pref, p.now)
-        ip = p.items.get(e.item_id)
-        if e.kind == "work":
-            remaining = ip.remaining if ip else None
-            load = ip.load if ip else None
-        else:
-            remaining, load = e.remaining, None
-        out.append(
-            QueueEntryFacts(
-                entry_id=e.entry_id,
-                kind=e.kind,
-                item_id=e.item_id,
-                remaining=remaining,
-                capacity=load.capacity if load else None,
-                demand=load.demand if load else None,
-                level=ip.level if ip and e.kind == "work" else RiskLevel.OK,
-                pinned=live and pref is not None and pref.pin_kind == "pin",
-                moved=live and pref is not None and pref.pin_kind == "move",
-                skipped=skipped(p, dict(prefs), e.entry_id),
-                tonight_hours=tonight.get(e.entry_id),
-                shortfall=p.study.shortfall.get(e.item_id) if e.kind == "study" else None,
-            )
-        )
-    return out
-
-
-def _confirm(conn: sqlite3.Connection, p: Planning, now: datetime) -> ConfirmView | None:
-    c = pending_confirmation(conn, p)
-    if c is None:
-        return None
-    ip = p.items.get(c.item_ids[0])
-    if ip is None:
-        return None
-    stored = repo.window_plan(conn, c.window_id)
-    planned = dict(stored.allocation).get(f"item:{ip.item.id}", 1.0) if stored else 1.0
-    return ConfirmView(
-        c.window_id, confirm_when(c.start, now), ip.item.id, ip.item.title, confirm_choices(planned)
-    )
-
-
-@dataclass(frozen=True)
-class _Day:
-    unconfirmed: list[ItemView]
-    overdue: list[ItemView]
-    due_today: list[ItemView]
-    due_soon: list[ItemView]  # due today or tomorrow, not done
-    summary: str  # "2 due today, 1 tomorrow, 1 past due"
-
-
-def _day(views: Sequence[ItemView], plan: Planning, now: datetime) -> _Day:
-    """Today's lists and its summary line, shared by Today and the widget feed (D071)."""
-    today = to_local(now).date()
-    start = local_datetime(today, 0)
-    tomorrow = local_datetime(today + timedelta(days=1), 0)
-    after = local_datetime(today + timedelta(days=2), 0)
-    queued = {e.item_id for e in plan.queue if e.kind == "work"}
+def _past_due(views: Sequence[ItemView], now: datetime) -> tuple[list[ItemView], list[ItemView]]:
+    """Recent work past its deadline: (to confirm, overdue)."""
     recent = now - PAST_DUE_WINDOW
     # D056: past-due work no source can report a submission for asks, it doesn't accuse.
     unconfirmed = [
@@ -215,94 +132,65 @@ def _day(views: Sequence[ItemView], plan: Planning, now: datetime) -> _Day:
         for v in views
         if v.due_at
         and recent <= v.due_at < now
-        and v.id not in queued
         and v.risk is not RiskLevel.UNCONFIRMED
         and (v.status.is_open or v.status == ItemStatus.MISSED)
         and v.kind.takes_submission
     ]
-    due_today = [v for v in views if v.due_at and start <= v.due_at < tomorrow]
-    due_soon = sorted(
-        (
-            v
-            for v in views
-            if v.due_at and now <= v.due_at < after and v.kind.takes_submission and not v.done
-        ),
-        key=lambda v: (v.due_at, v.title),
+    return unconfirmed, overdue
+
+
+def _widget_summary(views: Sequence[ItemView], plan: Planning, now: datetime) -> str:
+    """The widget feed's line (D071): "2 due today, 1 tomorrow, 1 past due"."""
+    today = to_local(now).date()
+    tomorrow = local_datetime(today + timedelta(days=1), 0)
+    after = local_datetime(today + timedelta(days=2), 0)
+    queued = {e.item_id for e in plan.queue if e.kind == "work"}
+    unconfirmed, overdue = _past_due(views, now)
+    overdue = [v for v in overdue if v.id not in queued]
+    open_today = sum(
+        1 for v in views if v.due_at and now <= v.due_at < tomorrow and v.status.is_open
     )
-    open_today = sum(1 for v in due_today if v.status.is_open and v.due_at and v.due_at >= now)
+    soon = sum(
+        1
+        for v in views
+        if v.due_at and tomorrow <= v.due_at < after and v.kind.takes_submission and not v.done
+    )
     parts = [f"{open_today} due today" if open_today else "Nothing left due today"]
-    if n := sum(1 for v in due_soon if v.due_at and v.due_at >= tomorrow):
-        parts.append(f"{n} tomorrow")
+    if soon:
+        parts.append(f"{soon} tomorrow")
     if overdue:
         parts.append(f"{len(overdue)} past due")
     if unconfirmed:
         parts.append(f"{len(unconfirmed)} to confirm")
-    return _Day(unconfirmed, overdue, due_today, due_soon, ", ".join(parts))
+    return ", ".join(parts)
 
 
 def load_today(
-    conn: sqlite3.Connection,
-    config: AppConfig,
-    caps: Capabilities,
-    now: datetime,
-    *,
-    focus: tuple[str, str] | None = None,
-    message: str | None = None,
-    done: DoneNoticeView | None = None,
+    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, now: datetime
 ) -> TodayData:
-    """Today (D058): the next task, the confirm line, the queue, what to confirm or not miss,
-    and the day strip. `focus`, `message`, and `done` come from a queue action (D064)."""
+    """Today (D072): what's due, in order, filed by the day it's worked on, through the same
+    weekday next week. No ranking: the student picks when to do it."""
     today = to_local(now).date()
-    start = local_datetime(today, 0)
-    tomorrow = local_datetime(today + timedelta(days=1), 0)
-    after = local_datetime(today + timedelta(days=2), 0)
-    plan = compute(conn, config, now, tracking_sources=caps.tracking_sources)
-    views = _views(conn, config, now, caps=caps, plan=plan)
-    by_id = {v.id: v for v in views}
-    day = _day(views, plan, now)
-    unconfirmed, overdue = day.unconfirmed, day.overdue
-    events = [
-        v
-        for v in views
-        if v.due_at and max(now, start) <= v.due_at < after and not v.kind.takes_submission
-    ]
-    groups = [
-        TodayGroup(None, label, tuple(vs))
-        for label, vs in (
-            ("Did you submit?", unconfirmed),
-            ("Past due", overdue),
-            ("Exams and events", sorted(events, key=lambda v: (v.due_at, v.title))),
-        )
+    views = _views(conn, config, now, caps=caps)
+    unconfirmed, overdue = _past_due(views, now)
+    past = sorted(unconfirmed + overdue, key=lambda v: (v.due_at, v.title))
+    week = week_groups(views, now)
+    summary = today_summary(week, today, past_due=len(overdue), to_confirm=len(unconfirmed))
+    timer = repo.running_timer(conn)
+    running = next((v for v in views if timer and v.id == timer.item_id), None)
+    if running is not None:
+        week = [replace(g, items=tuple(v for v in g.items if v.id != running.id)) for g in week]
+        past = [v for v in past if v.id != running.id]
+    lead = [
+        WorkDayGroup(None, label, tuple(vs))
+        for label, vs in (("Working on", [running] if running else []), ("Past due", past))
         if vs
     ]
-    timer = repo.running_timer(conn)
-    prefs = repo.queue_prefs(conn)
-    window = plan.window
-    queue = queue_view(
-        _queue_facts(plan, prefs),
-        by_id,
-        windows_on=plan.windows_on,
-        window_text=window_phrase(window.start, window.end, now) if window else None,
-        can_skip=window is not None,
-        timer_item_id=timer.item_id if timer else None,
-        focus=focus,
-        message=message,
-        done=done,
-    )
-    busy = busy_on(today, repo.list_meetings(conn), config.schedule.commitments)
-    windows = [(sp.start, sp.end) for sp in busy_windows(plan, start, tomorrow)]
     return TodayData(
-        windows_on=plan.windows_on,
         date_text=long_date(today),
-        summary=day.summary,
-        queue=queue,
-        confirm=_confirm(conn, plan, now),
-        groups=groups,
-        strip=strip(
-            today, busy, now, courses=course_views(config), due_items=day.due_today, windows=windows
-        ),
-        due_soon=day.due_soon,
-        timer=timer_view(timer, by_id, now),
+        summary=summary,
+        last_text=long_date(today + timedelta(days=WEEK_DAYS)),
+        groups=lead + [g for g in week if g.items],
     )
 
 
@@ -516,7 +404,7 @@ def load_widget(
         key=lambda v: (v.due_at, v.title),
     )
     return WidgetData(
-        summary=_day(views, plan, now).summary,
+        summary=_widget_summary(views, plan, now),
         notes=[n.text for n in notices(conn, caps.sources, now)],
         items=items[:WIDGET_ITEMS],
     )

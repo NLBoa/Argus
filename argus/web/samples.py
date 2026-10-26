@@ -26,20 +26,14 @@ from argus.web.deps import STATIC_DIR
 from argus.web.format import due_text
 from argus.web.viewmodels import (
     Alert,
-    ConfirmView,
     CourseView,
-    DoneNoticeView,
     FindingView,
     PracticeView,
-    QueueEntryFacts,
     StatusLine,
     StatusNote,
-    TimerView,
     course_views,
     diff_view,
     item_view,
-    queue_view,
-    strip,
     timeline,
     workload_chart,
     workload_days,
@@ -168,6 +162,14 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
             risk=RiskLevel.UNCONFIRMED,
         ),
     ]
+    morning = local_datetime(to_local(now).date() + timedelta(days=1), 7, 30)
+    early_row = item_view(
+        it(10, "Pre-lab quiz", "MATH240", morning - now, kind=ItemKind.QUIZ),
+        now,
+        courses,
+        tracking_sources=SUBMISSION_SOURCES,
+        left=0.5,
+    )
     lecture = MeetingRecord(
         "CMSC351", "lecture", tuple(Weekday), time(9, 30), time(10, 45), "IRB", "1101"
     )
@@ -176,73 +178,6 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
     tl = timeline(
         day, meetings_on(day, [lecture, lab]), now, config=cfg, courses=courses, due_items=[rows[1]]
     )
-    evening = (local_datetime(day, 19), local_datetime(day, 23))
-    day_strip = strip(
-        day,
-        meetings_on(day, [lecture, lab]),
-        now,
-        courses=courses,
-        due_items=[rows[1]],
-        windows=[evening],
-    )
-    by_id = {v.id: v for v in rows}
-
-    def fact(row: int, level: RiskLevel = RiskLevel.OK, **kw: Any) -> QueueEntryFacts:
-        base: dict[str, Any] = {
-            "entry_id": f"item:{rows[row].id}",
-            "kind": "work",
-            "item_id": rows[row].id,
-            "remaining": 2.0,
-            "capacity": 6.0,
-            "demand": 4.0,
-            "level": level,
-            "pinned": False,
-            "moved": False,
-            "skipped": False,
-            "tonight_hours": None,
-        }
-        base.update(kw)
-        return QueueEntryFacts(**base)
-
-    facts = [
-        fact(4, RiskLevel.AT_RISK, remaining=3.5, capacity=2.0, demand=5.5, tonight_hours=2.0),
-        fact(1, RiskLevel.CREEPING, remaining=1.5, pinned=True, tonight_hours=1.0),
-        fact(
-            3,
-            entry_id=f"study:{rows[3].id}",
-            kind="study",
-            remaining=0.75,
-            moved=True,
-            capacity=None,
-            demand=None,
-            shortfall=1.5,
-            tonight_hours=0.75,
-        ),
-        fact(7, remaining=None, capacity=None, demand=None),
-        fact(0, skipped=True),
-    ]
-
-    def queue(**kw: Any) -> Any:
-        args: dict[str, Any] = {
-            "windows_on": True,
-            "window_text": "Tonight 7-11pm",
-            "can_skip": True,
-            "timer_item_id": None,
-        }
-        args.update(kw)
-        return queue_view(facts, by_id, **args)
-
-    today_sample = {
-        "queue": queue(done=DoneNoticeView(rows[6].id, rows[6].title)),
-        "timer": None,
-        "confirm": ConfirmView(
-            "2026-10-19T19:00", "Last night", rows[4].id, rows[4].title, (2.0, 1.0, 0.0)
-        ),
-    }
-    timed = queue(
-        timer_item_id=rows[1].id
-    ).hero  # not the main sample's hero: landmarks stay unique
-    hero_timer = TimerView(rows[1], now - timedelta(minutes=42), 42 * 60.0)
     window_h = [4.0, 4.0, 4.0, 4.0, 0.0, 0.0, 3.0, 4.0, 4.0, 4.0, 4.0, 0.0, 0.0, 3.0]
     due_h = [0.0, 3.5, 9.0, 2.0, 0.0, 0.0, 1.0, 4.0, 0.0, 6.0, 1.5, 0.0, 0.0, 2.0]
     curve_days, wt, dt = [], 0.0, 0.0
@@ -337,13 +272,8 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
         ],
         "risks": list(RiskLevel),
         "rows": rows,
+        "early_row": early_row,
         "timeline": tl,
-        "strip": day_strip,
-        "empty_strip": strip(day, [], now, courses=courses),
-        "today": today_sample,
-        "hero_timed": timed,
-        "hero_timer": hero_timer,
-        "queue_changed": "The list changed since you loaded it, so nothing moved. Try again.",
         "workload": workload,
         "findings": findings,
         "diff": diff,

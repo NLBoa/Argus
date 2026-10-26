@@ -261,24 +261,6 @@
       const main = $("#main");
       if (main && e.detail.boosted) main.focus({ preventScroll: true });
     }
-    // The queue (D064): after a swap the server names the control that keeps focus, as
-    // "<container id>:<key>"; the visible one gets it (rows have an inline and a menu copy).
-    const queue = e.detail.target?.id === "queue" ? $("#queue") : null;
-    const [where, key] = (queue?.dataset.focus || "").split(":");
-    // htmx restores focus by id, which fails quietly for a control inside a closed menu.
-    // offsetParent isn't enough: a control inside a closed <details> still has one.
-    const shown = (x) => (x.checkVisibility ? x.checkVisibility() : x.offsetParent !== null);
-    const active = document.activeElement;
-    const kept = active?.closest?.("#queue") && shown(active);
-    if (where && key && !kept) {
-      const box = document.getElementById(where);
-      const usable = () => box && $$(`[data-focus-key="${key}"]`, box).find((x) => shown(x) && !x.disabled);
-      // On touch and narrow screens the controls live in the row's "..." menu: reopen it.
-      const menu = box?.querySelector(".q-card__menu");
-      if (!usable() && menu && getComputedStyle(menu).display !== "none") menu.open = true;
-      const el = usable();
-      (el || box?.querySelector("a, button:not([disabled])") || queue.querySelector("button:not([disabled])"))?.focus();
-    }
   });
 
   // ---------------------------------------------------------------- "More" menus (D067)

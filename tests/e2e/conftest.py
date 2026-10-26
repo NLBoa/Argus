@@ -18,7 +18,7 @@ import uvicorn
 
 from argus.clock import FakeClock
 from argus.demo import DEMO_CONFIG, DemoProfile, DemoTransport, demo_secrets, seed_demo
-from argus.store.db import open_db, transaction
+from argus.store.db import open_db
 from argus.web.app import create_app
 from argus.web.deps import OfflineRunner
 from tests.conftest import DEFAULT_NOW
@@ -129,28 +129,20 @@ def today_state(s: LiveServer, state: str) -> None:
     """Put a fresh demo server into one of pages.TODAY_STATES."""
     from datetime import timedelta
 
-    from argus.capabilities import derive
+    from argus import tasks
     from argus.clock import local_datetime, to_local
-    from argus.planning import compute, pin_to_top, replan, skip_tonight
-    from argus.store import repo
 
     conn = open_db(s.db, s.clock)
-    tracking = derive(DEMO_CONFIG, demo_secrets()).tracking_sources
     try:
-        if state == "confirm-line":  # the morning after a window nothing was logged in
-            monday = to_local(s.clock.now()).date()
-            s.clock.set(local_datetime(monday, 18, 50))
-            replan(conn, DEMO_CONFIG, s.clock, tracking_sources=tracking)
-            s.clock.set(local_datetime(monday + timedelta(days=1), 8))
-        elif state == "no-windows":
-            with transaction(conn):
-                repo.set_work_windows(conn, [], s.clock.now())
-                repo.mark_windows_set(conn, s.clock.now())
-        elif state == "pinned-and-skipped":
-            plan = compute(conn, DEMO_CONFIG, s.clock.now(), tracking_sources=tracking)
-            with transaction(conn):
-                pin_to_top(conn, "item:12", s.clock.now())
-                skip_tonight(conn, plan, "item:3", s.clock.now())
+        if state == "morning":  # due 7:30 tomorrow morning: filed under today (D072)
+            tomorrow = to_local(s.clock.now()).date() + timedelta(days=1)
+            tasks.add_task(
+                conn,
+                course_code="CMSC351",
+                title="Pre-lab quiz",
+                due_at=local_datetime(tomorrow, 7, 30),
+                now=s.clock.now(),
+            )
         else:
             raise ValueError(state)
     finally:

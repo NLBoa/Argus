@@ -118,7 +118,6 @@ def test_removing_every_window_turns_them_off(client: TestClient) -> None:
     r = client.post("/settings/windows", data={"count": "0", "action": "save"}, headers=HX)
     assert json.loads(r.headers["HX-Trigger"])["toast"]["message"] == "Removed your work windows"
     assert windows(client) == []  # and config.yaml does not seed them back
-    assert "Tell Argus when you study." in client.get("/today").text
     assert "needs work windows: set them in Settings" in client.get("/health").text
 
 
@@ -130,7 +129,6 @@ def test_cross_origin_posts_are_refused(client: TestClient) -> None:
 def test_settings_is_in_the_nav_and_the_palette_page_list(client: TestClient) -> None:
     html = client.get("/today").text
     assert 'href="/settings"' in html
-    assert "Tell Argus when you study." not in html  # the demo has windows
 
 
 def test_without_js_save_always_lands_on_settings(client: TestClient) -> None:

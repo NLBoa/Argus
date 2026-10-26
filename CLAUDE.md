@@ -46,7 +46,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
 - `argus/planner/`: work windows, load and risk (C and D), the queue and its forecast, exam study time,
-  calibration, busy time, `lanes` (layout for the day strip and the kiosk rail), and `workload` (the /workload
+  calibration, busy time, `lanes` (layout for the kiosk rail), and `workload` (the /workload
   curve: window time against work due, D065). Pure and deterministic.
 - `argus/reminders/`: rules (what), guards (when and whether), engine (idempotent dispatch), SMS command parser.
 - `argus/ai/`: Anthropic client wrapper (validation, retry, fallback, cache, budget), prompts, task modules.
@@ -59,7 +59,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
   each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
   overrides), `argus/planning.py` (`compute`: remaining, load, risk, queue, study time, window forecast; `replan`:
-  seed windows, legacy conversion, the window's split; the confirm question; queue actions shared by Today and SMS:
+  seed windows, legacy conversion, the window's split; the confirm question; queue actions for SMS:
   pin, not tonight, move; the notice lead time), `argus/study.py` (materials →
   generate → verify → store), `argus/exams.py` (scope, readiness, attempts), and `argus/demo.py` (the synthetic seed).
 - `argus/web/`: the app factory (`app.py`), state and dependencies (`deps.py`), loaders (`data.py`), view models,
@@ -149,7 +149,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
   `scripts/gen_tokens.py` for the rest.
 - Teal is reserved for now/next, the primary action, the active nav, and focus; links are ink with an underline;
   course color is the 3px row stripe (chips only in item, exam and course headers); status is icon + label (D065).
-- Bricolage Grotesque (the display face) is for titles, the hero task, and big numbers only; Atkinson for the rest.
+- Bricolage Grotesque (the display face) is for titles and big numbers only; Atkinson for the rest.
   Type follows the perfect-fourth scale in `@theme` (D066).
 - Components are Jinja macros in `argus/web/components/`. Each appears in every state on `/styleguide`.
 - Every view handles **loading, empty, error, stale** (a status-line note, "Gradescope 3h behind") and **offline**.
