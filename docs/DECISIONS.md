@@ -620,7 +620,7 @@ here: their source would bring them back. A task needs a course, since every ite
 **Decision.** `GET /widget.json` returns Today's summary line, the stale-source notes, and up to 8 open,
 actionable items due in the next 7 days, sorted by due time. Each item has its id, title, course, accent, kind,
 due time (UTC, `Z`), and path. `mac/` is an XcodeGen project with two parts, built with SweetPad or `xcodebuild`.
-ArgusWidget is a medium WidgetKit widget. ArgusBar is a background menu bar app: it polls the feed every
+ArgusWidget is a medium or large WidgetKit widget (large rows always show the exact due time). ArgusBar is a background menu bar app: it polls the feed every
 minute, reloads the widget only when what it shows changed (`generated_at` alone doesn't count, since WidgetKit
 rations reloads), and pops a glass countdown window. **Why.** The student wants the next deadlines on the Mac desktop at a
 glance, without opening the site. The feed is a GET on the tailnet like every page, so it needs no token (D016

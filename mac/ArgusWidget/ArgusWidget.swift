@@ -16,7 +16,7 @@ struct UpNextWidget: Widget {
         }
         .configurationDisplayName("Up next")
         .description("Your next deadlines, with a countdown on the day they're due.")
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
