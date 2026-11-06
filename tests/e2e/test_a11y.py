@@ -7,7 +7,7 @@ from axe_playwright_python.sync_playwright import Axe
 from playwright.sync_api import Page
 
 from tests.e2e.conftest import today_state
-from tests.e2e.pages import TODAY_STATES, VIEWPORTS, case_id, cases
+from tests.e2e.pages import TODAY_STATES, VIEWPORTS, case_id, cases, set_up_cases
 
 pytestmark = [pytest.mark.e2e, pytest.mark.a11y]
 
@@ -18,6 +18,7 @@ AXE_OPTIONS = {
     }
 }
 CASES = cases()
+SET_UP = set_up_cases()
 
 
 @pytest.mark.parametrize(
@@ -37,6 +38,27 @@ def test_no_axe_violations(
     page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
     page.goto(server_url(profile) + path)
     page.wait_for_load_state("load" if name == "kiosk" else "networkidle")
+    results = Axe().run(page, options=AXE_OPTIONS)
+    assert results.violations_count == 0, (
+        f"{name} ({theme}, {viewport}, {profile}):\n{results.generate_report()}"
+    )
+
+
+@pytest.mark.parametrize(("name", "viewport", "profile"), SET_UP, ids=[case_id(*c) for c in SET_UP])
+def test_set_up_pages_have_no_violations(
+    page: Page,
+    set_up_url: Callable[[str, str], str],
+    theme: str,
+    name: str,
+    viewport: str,
+    profile: str,
+) -> None:
+    """Pages that need data the demo doesn't seed (pages.SET_UP_PAGES)."""
+    w, h = VIEWPORTS[viewport]
+    page.set_viewport_size({"width": w, "height": h})
+    page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
+    page.goto(set_up_url(name, profile))
+    page.wait_for_load_state("networkidle")
     results = Axe().run(page, options=AXE_OPTIONS)
     assert results.violations_count == 0, (
         f"{name} ({theme}, {viewport}, {profile}):\n{results.generate_report()}"

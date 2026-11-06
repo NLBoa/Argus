@@ -107,6 +107,55 @@ def server_url(live_server: str) -> Iterator[Callable[[str], str]]:
         s.__exit__()
 
 
+def set_up_pages(s: LiveServer) -> dict[str, str]:
+    """Add what pages.SET_UP_PAGES need to a fresh demo server: an exam the student added,
+    through the form as they would (so its study time is planned). Returns name -> path."""
+    from datetime import timedelta
+
+    import httpx
+
+    from argus.clock import to_local
+
+    friday = to_local(s.clock.now()).date() + timedelta(days=4)
+    r = httpx.post(
+        s.url + "/exams",
+        data={
+            "course": "MATH240",
+            "title": "Linear systems quiz",
+            "due_date": friday.isoformat(),
+            "due_time": "10:00",
+            "hours": "3",
+            "notes": "Sections 1.1 to 1.5. In the lab, bring a calculator.",
+        },
+        headers={"origin": s.url},
+    )
+    assert r.status_code == 303, r.text
+    conn = open_db(s.db, s.clock)
+    try:
+        row = conn.execute("SELECT id FROM items WHERE title = 'Linear systems quiz'").fetchone()
+    finally:
+        conn.close()
+    return {"exam-added": f"/exams/{row[0]}", "exam-edit": f"/exams/{row[0]}/edit"}
+
+
+@pytest.fixture(scope="session")
+def set_up_url() -> Iterator[Callable[[str, str], str]]:
+    """URL of a pages.SET_UP_PAGES page in a demo profile: one set-up server per profile,
+    started on first use and read-only after."""
+    servers: dict[str, tuple[LiveServer, dict[str, str]]] = {}
+
+    def url(name: str, profile: str) -> str:
+        if profile not in servers:
+            s = LiveServer(profile=profile).__enter__()
+            servers[profile] = (s, set_up_pages(s))
+        s, paths = servers[profile]
+        return s.url + paths[name]
+
+    yield url
+    for s, _ in servers.values():
+        s.__exit__()
+
+
 @pytest.fixture
 def fresh_server() -> Iterator[Callable[..., LiveServer]]:
     started: list[LiveServer] = []

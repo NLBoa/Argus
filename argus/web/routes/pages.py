@@ -9,10 +9,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from argus import tasks
 from argus.capabilities import Feature
 from argus.clock import ensure_utc, to_local
-from argus.domain.models import ItemKind
+from argus.domain.models import Item, ItemKind
 from argus.planner.windows import DAYS
+from argus.store import repo
 from argus.web.data import (
     load_announcements,
     load_course,
@@ -294,6 +296,35 @@ def new_task(request: Request, state: State, conn: Conn) -> HTMLResponse:
     return task_page(request, state, conn)
 
 
+def editable(conn: sqlite3.Connection, item_id: int, kind: ItemKind) -> Item:
+    """A live task or exam the student added (D076), of this kind; anything else is a 404."""
+    item = repo.get_item(conn, item_id)
+    if item is None or not item.added_by_you or item.kind is not kind:
+        raise HTTPException(404, f"No such {'exam' if kind is ItemKind.EXAM else 'task'} of yours")
+    return item
+
+
+def edit_page(
+    request: Request, state: State, conn: Conn, item_id: int, kind: ItemKind
+) -> HTMLResponse:
+    """The edit form (D076), filled with the item as stored."""
+    item = editable(conn, item_id, kind)
+    assert item.due_at is not None  # what the student adds always has a due time
+    form = TaskForm.of(
+        course=item.course_code,
+        title=item.title,
+        due_at=item.due_at,
+        hours=tasks.your_hours(conn, item_id),
+        notes=item.description,
+    )
+    return task_page(request, state, conn, form=form, kind=kind, item_id=item_id)
+
+
+@router.get("/tasks/{item_id}/edit", response_class=HTMLResponse)
+def edit_task(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
+    return edit_page(request, state, conn, item_id, ItemKind.ASSIGNMENT)
+
+
 def task_page(
     request: Request,
     state: State,
@@ -303,8 +334,10 @@ def task_page(
     error: FieldError | None = None,
     status_code: int = 200,
     kind: ItemKind = ItemKind.ASSIGNMENT,
+    item_id: int | None = None,
 ) -> HTMLResponse:
     """The Add a task form (D070), or Add an exam (D075): blank or as typed with its error.
+    With `item_id`, the same form edits that task or exam (D076).
 
     A blank task is due tonight; a blank exam leaves the day and time to the student."""
     courses = list(course_views(state.config).values())
@@ -316,14 +349,26 @@ def task_page(
             if exam
             else TaskForm(course=first, due_date=to_local(state.clock.now()).date().isoformat())
         )
+    noun = "exam" if exam else "task"
+    if item_id is None:
+        title = f"Add {'an' if exam else 'a'} {noun}"
+    else:
+        title = f"Edit {noun}"
     return render(
         request,
         state,
         conn,
         "pages/task_new.html",
-        {"form": form, "courses": courses, "form_error": error, "exam": exam},
+        {
+            "form": form,
+            "courses": courses,
+            "form_error": error,
+            "exam": exam,
+            "item_id": item_id,
+            "heading": title,
+        },
         active="/exams" if exam else "/today",
-        title="Add an exam" if exam else "Add a task",
+        title=title,
         status_code=status_code,
     )
 
@@ -419,6 +464,11 @@ def exams_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
 @router.get("/exams/new", response_class=HTMLResponse)
 def new_exam(request: Request, state: State, conn: Conn) -> HTMLResponse:
     return task_page(request, state, conn, kind=ItemKind.EXAM)
+
+
+@router.get("/exams/{item_id}/edit", response_class=HTMLResponse)
+def edit_exam(request: Request, state: State, conn: Conn, item_id: int) -> HTMLResponse:
+    return edit_page(request, state, conn, item_id, ItemKind.EXAM)
 
 
 @router.get("/exams/{item_id}", response_class=HTMLResponse)

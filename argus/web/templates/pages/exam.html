@@ -55,9 +55,12 @@
     <section class="panel panel-pad" aria-labelledby="yours-heading">
       <h2 class="section-title" id="yours-heading">Added by you</h2>
       {% if data.notes %}<p class="whitespace-pre-line">{{ data.notes }}</p>{% endif %}
-      <form class="mt-3" method="post" action="/tasks/{{ data.id }}/delete" hx-post="/tasks/{{ data.id }}/delete" hx-target="main" hx-select="main" hx-swap="outerHTML">
-        <button class="btn btn-sm" type="submit">{{ icon("trash-2", "icon-sm") }}Delete exam</button>
-      </form>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <a class="btn btn-sm" href="/exams/{{ data.id }}/edit">{{ icon("notebook-pen", "icon-sm") }}Edit exam</a>
+        <form method="post" action="/tasks/{{ data.id }}/delete" hx-post="/tasks/{{ data.id }}/delete" hx-target="main" hx-select="main" hx-swap="outerHTML">
+          <button class="btn btn-sm" type="submit">{{ icon("trash-2", "icon-sm") }}Delete exam</button>
+        </form>
+      </div>
     </section>
     {% endif %}
     {% if data.obsidian %}<p><a class="btn" href="{{ data.obsidian }}">{{ icon("book-open", "icon-sm") }}Open exam prep in Obsidian</a></p>{% endif %}

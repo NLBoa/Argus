@@ -33,6 +33,14 @@ VIEWPORTS = {"mobile": (390, 844), "desktop": (1280, 800), "kiosk": (1920, 1080)
 # the empty week.
 TODAY_STATES = ("morning",)
 
+# Pages that need data the demo doesn't seed: an exam the student added, its page ("Added by
+# you", with Edit and Delete) and its edit form (D076). Each demo setup gets one server of its
+# own, set up once by conftest.set_up_pages and then read-only like the shared one.
+SET_UP_PAGES: list[tuple[str, tuple[str, ...]]] = [
+    ("exam-added", ("mobile", "desktop")),
+    ("exam-edit", ("mobile", "desktop")),
+]
+
 # Demo setups each page is checked in. The kiosk has no token-dependent content.
 PROFILES = ("full", "notoken")
 SINGLE_PROFILE = {"kiosk"}
@@ -46,6 +54,11 @@ def cases() -> list[tuple[str, str, str, str]]:
         for vp in vps
         for profile in (("full",) if name in SINGLE_PROFILE else PROFILES)
     ]
+
+
+def set_up_cases() -> list[tuple[str, str, str]]:
+    """(name, viewport, profile) for every SET_UP_PAGES page, viewport, and demo setup."""
+    return [(name, vp, profile) for name, vps in SET_UP_PAGES for vp in vps for profile in PROFILES]
 
 
 def case_id(name: str, viewport: str, profile: str) -> str:

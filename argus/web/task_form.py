@@ -1,4 +1,5 @@
-"""The Add a task form (pure, D070): read what was typed and turn it into a due time and hours.
+"""The Add a task form (pure, D070), also Add an exam (D075) and editing either (D076): read what
+was typed and turn it into a due time and hours, or fill the form from what is stored.
 
 Fields: `course`, `title`, `due_date` (YYYY-MM-DD), `due_time` (HH:MM, local), `hours` (blank =
 set it later), `notes`. Errors name the field, so the form marks that input and says why.
@@ -9,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
-from argus.clock import local_datetime
+from argus.clock import local_datetime, to_local
 
 DEFAULT_TIME = "23:59"
 
@@ -24,6 +25,21 @@ class TaskForm:
     due_time: str = DEFAULT_TIME
     hours: str = ""
     notes: str = ""
+
+    @classmethod
+    def of(
+        cls, *, course: str, title: str, due_at: datetime, hours: float | None, notes: str | None
+    ) -> TaskForm:
+        """The form for an item as stored (local day and time, hours without a trailing .0)."""
+        local = to_local(due_at)
+        return cls(
+            course=course,
+            title=title,
+            due_date=local.date().isoformat(),
+            due_time=local.strftime("%H:%M"),
+            hours="" if hours is None else f"{hours:g}",
+            notes=notes or "",
+        )
 
     def due_at(self) -> datetime:
         """The due time in UTC. Raises FieldError."""
@@ -55,7 +71,7 @@ class FieldError(ValueError):
 
 
 def field_for(message: str) -> str:
-    """Which input a validation message from `tasks.add_task` is about."""
+    """Which input a validation message from `tasks.add_task` or `edit_task` is about."""
     if "course" in message:
         return "course"
     if "notes" in message:

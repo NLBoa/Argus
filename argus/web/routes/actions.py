@@ -423,6 +423,94 @@ def delete_task(request: Request, state: State, conn: Conn, item_id: int) -> Res
     return done(request, state, conn, f"Deleted {item.title}")
 
 
+def _save(
+    request: Request,
+    state: AppState,
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    form: TaskForm,
+    kind: ItemKind,
+) -> Response:
+    """Save an edit to a task or exam the student added (D076). The item keeps its id. A mistake
+    shows the form again, as typed. No JS: 303 to the exam (or the task's item page). HTMX: that
+    page, its URL, and a toast."""
+    from argus.web.routes.pages import editable, exam_view, item_detail, task_page
+
+    editable(conn, item_id, kind)
+    try:
+        item = tasks.edit_task(
+            conn,
+            item_id,
+            course_code=form.course,
+            title=form.title,
+            due_at=form.due_at(),
+            notes=form.notes,
+            hours=form.hours_value(),
+            now=state.clock.now(),
+        )
+    except ValueError as e:
+        error = e if isinstance(e, FieldError) else FieldError(field_for(str(e)), str(e))
+        status = 200 if is_htmx(request) else 422
+        return task_page(
+            request,
+            state,
+            conn,
+            form=form,
+            error=error,
+            status_code=status,
+            kind=kind,
+            item_id=item_id,
+        )
+    if item is None:  # gone between the check and the save
+        raise HTTPException(404, "No such item")
+    _replan(conn, state)
+    exam = kind is ItemKind.EXAM
+    url = f"/exams/{item_id}" if exam else f"/items/{item_id}"
+    if not is_htmx(request):
+        return RedirectResponse(url, status_code=303)
+    page = (exam_view if exam else item_detail)(request, state, conn, item_id)
+    response = toast(page, f"Saved {item.title}")
+    response.headers["HX-Push-Url"] = url
+    return response
+
+
+@router.post("/tasks/{item_id}")
+def save_task(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    item_id: int,
+    course: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    hours: Annotated[str, Form()] = "",
+    notes: Annotated[str, Form()] = "",
+) -> Response:
+    form = TaskForm(course, title, due_date, due_time, hours, notes)
+    return _save(request, state, conn, item_id, form=form, kind=ItemKind.ASSIGNMENT)
+
+
+@router.post("/exams/{item_id}")
+def save_exam(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    item_id: int,
+    course: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    hours: Annotated[str, Form()] = "",
+    notes: Annotated[str, Form()] = "",
+) -> Response:
+    form = TaskForm(course, title, due_date, due_time, hours, notes)
+    return _save(request, state, conn, item_id, form=form, kind=ItemKind.EXAM)
+
+
 # ---------------------------------------------------------------- study and vault
 
 

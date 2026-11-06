@@ -732,3 +732,23 @@ time for them. **Details.** Only `assignment` and `exam` can be added. A task's 
 title, due time); other kinds add the kind, so a task and an exam with the same name and time stay two items. If
 a source later lists the same exam it arrives as its own item (manual records don't merge with synced ones by
 title); delete yours then. No schema change.
+
+## D076 — Edit an exam you added (2026-11-06)
+**Decision.** The exam page of one you added has "Edit exam" next to "Delete exam". It opens `/exams/{id}/edit`,
+the Add an exam form (`task_new.html` in edit mode) filled with the name, course, day, start time, your study
+hours, and notes, and posts to `POST /exams/{id}`. Without JS that is a 303 to the exam page; with HTMX it renders
+the exam page with a "Saved <name>" toast and pushes its URL. A mistake shows the form again as typed (422 without
+JS). Tasks you added (D070) get the same: "Edit task" on their item page, `/tasks/{id}/edit`, `POST /tasks/{id}`,
+back to `/items/{id}`. Anything else (a synced item, a deleted one, an exam on the task route or the reverse) is a
+404. **How.** `tasks.edit_task` rewrites the item's manual record in place and runs `apply_merge` and the search
+rebuild in one transaction, so the item keeps its id and everything that hangs on it (time logs, estimates, queue
+choices, sent reminders, exam scope). The edit then replans. **The record's external id is recomputed** from the
+new details, as `add_task` computes it: otherwise adding the old details again would match the edited record and
+silently undo the edit, and adding the new details again would make a duplicate. If another live record you added
+already has the new id, the edit is refused ("You already added this exam."); if a deleted one has it, that
+leftover record is dropped (its item stays removed) so the id is free. **Hours.** A number sets your estimate,
+appending a version only when it differs; blank retracts yours (`clear_override`, nothing deleted), so the default
+plans again. Exam study is still clamped to 1-6 h (D062). **Reminders.** A moved date re-arms on its own, since
+keys carry the due time. Note: deadline texts (24-hour, 3-hour) are for kinds that take a submission; an exam
+gets the 7/3/1-day countdown instead (D075 overstated this). **Vault.** A renamed exam gets a note under its new title
+and the old note stays (Argus never deletes notes), as with a renamed Canvas item. No schema change.
