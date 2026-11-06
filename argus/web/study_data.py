@@ -77,6 +77,8 @@ class ExamPage:
     practice: list[PracticeView]
     obsidian: str | None
     study_short: str | None = None  # study time that doesn't fit before the exam
+    added_by_you: bool = False  # an exam the student added (D075): can be deleted here
+    notes: str | None = None  # the student's notes on an exam they added
 
 
 def _concept_ids(conn: sqlite3.Connection, item_id: int) -> list[int]:
@@ -196,6 +198,8 @@ def load_exam(
         practice=[practice_view(p, course) for p in practice],
         obsidian=obsidian_link(config, item_note_path(item)),
         study_short=hours(short) if short else None,
+        added_by_you=item.added_by_you,
+        notes=item.description if item.added_by_you else None,
     )
 
 

@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from argus.capabilities import Feature
 from argus.clock import ensure_utc, to_local
+from argus.domain.models import ItemKind
 from argus.planner.windows import DAYS
 from argus.web.data import (
     load_announcements,
@@ -301,22 +302,28 @@ def task_page(
     form: TaskForm | None = None,
     error: FieldError | None = None,
     status_code: int = 200,
+    kind: ItemKind = ItemKind.ASSIGNMENT,
 ) -> HTMLResponse:
-    """The Add a task form (D070), blank (due tonight) or as typed with its error."""
+    """The Add a task form (D070), or Add an exam (D075): blank or as typed with its error.
+
+    A blank task is due tonight; a blank exam leaves the day and time to the student."""
     courses = list(course_views(state.config).values())
+    exam = kind is ItemKind.EXAM
     if form is None:
-        form = TaskForm(
-            course=courses[0].code if courses else "",
-            due_date=to_local(state.clock.now()).date().isoformat(),
+        first = courses[0].code if courses else ""
+        form = (
+            TaskForm(course=first, due_time="")
+            if exam
+            else TaskForm(course=first, due_date=to_local(state.clock.now()).date().isoformat())
         )
     return render(
         request,
         state,
         conn,
         "pages/task_new.html",
-        {"form": form, "courses": courses, "form_error": error},
-        active="/today",
-        title="Add a task",
+        {"form": form, "courses": courses, "form_error": error, "exam": exam},
+        active="/exams" if exam else "/today",
+        title="Add an exam" if exam else "Add a task",
         status_code=status_code,
     )
 
@@ -407,6 +414,11 @@ def exams_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
         active="/exams",
         title="Exam prep",
     )
+
+
+@router.get("/exams/new", response_class=HTMLResponse)
+def new_exam(request: Request, state: State, conn: Conn) -> HTMLResponse:
+    return task_page(request, state, conn, kind=ItemKind.EXAM)
 
 
 @router.get("/exams/{item_id}", response_class=HTMLResponse)

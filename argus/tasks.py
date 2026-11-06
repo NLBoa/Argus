@@ -3,6 +3,8 @@
 A task is a `manual` source record, so it merges into an item, ranks in the queue, gets deadline
 reminders, and lands in the vault like any other. Syncs never mark it absent: only the student
 removes it. Its external id hashes course, title, and due time, so a double submit adds it once.
+An exam the sources don't list is added the same way with `kind=EXAM` (D075), so it gets exam
+study time in the work windows before it.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from argus.store.db import iso, transaction
 
 MAX_TITLE = 200
 MAX_NOTES = 4000
+KINDS = (ItemKind.ASSIGNMENT, ItemKind.EXAM)
 
 
 def add_task(
@@ -30,13 +33,17 @@ def add_task(
     now: datetime,
     notes: str = "",
     hours: float | None = None,
+    kind: ItemKind = ItemKind.ASSIGNMENT,
 ) -> Item:
-    """Add a task (or return the identical one already there). Raises ValueError, worded for
-    the student, on bad input."""
+    """Add a task or an exam (or return the identical one already there). Raises ValueError,
+    worded for the student, on bad input."""
     title = " ".join(title.split())
     notes = notes.strip()
+    if kind not in KINDS:
+        raise ValueError(f"Can't add an item of kind {kind.value}.")
     if not title:
-        raise ValueError("Give the task a name.")
+        noun = "exam" if kind is ItemKind.EXAM else "task"
+        raise ValueError(f"Give the {noun} a name.")
     if len(title) > MAX_TITLE:
         raise ValueError(f"Keep the name under {MAX_TITLE} characters.")
     if len(notes) > MAX_NOTES:
@@ -48,12 +55,16 @@ def add_task(
         raise ValueError("Choose one of your courses.")
     due = iso(ensure_utc(due_at))
     payload = json.dumps([course_code, title, due, notes])
+    # Tasks keep their pre-D075 ids; other kinds add the kind, so a same-named task stays apart.
+    key = [course_code, title.casefold(), due] + (
+        [] if kind is ItemKind.ASSIGNMENT else [kind.value]
+    )
     record = SourceItem(
         source=Source.MANUAL,
-        external_id=repo.sha256(json.dumps([course_code, title.casefold(), due]))[:16],
+        external_id=repo.sha256(json.dumps(key))[:16],
         course_code=course_code,
         title=title,
-        kind=ItemKind.ASSIGNMENT,
+        kind=kind,
         due_at=ensure_utc(due_at).replace(microsecond=0),
         raw_hash=repo.sha256(payload),
         description=notes or None,
@@ -72,7 +83,7 @@ def add_task(
 
 
 def remove_task(conn: sqlite3.Connection, item_id: int, now: datetime) -> bool:
-    """Remove a task the student added. False if there is no such live task (synced items
+    """Remove a task or exam the student added. False if there is no such live task (synced items
     can't be removed here: their source would only bring them back)."""
     item = repo.get_item(conn, item_id)
     if item is None or not item.added_by_you:

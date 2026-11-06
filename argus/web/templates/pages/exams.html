@@ -5,11 +5,12 @@
 <div class="page-head">
   <h1 class="page-title">Exam prep</h1>
   <p class="page-sub">Practice questions from your course materials, checked against the sources</p>
+  <a class="btn page-head__action" href="/exams/new">{{ icon("plus", "icon-sm") }}Add an exam</a>
 </div>
 {% if error %}
   {{ error_banner(error, "/exams") }}
 {% elif not exams %}
-  <div class="panel">{{ empty_state("graduation-cap", "No exams coming up", "Exams from " ~ caps.deadline_sources() ~ " show up here with a review plan.", level=2) }}</div>
+  <div class="panel">{{ empty_state("graduation-cap", "No exams coming up", "Exams from " ~ caps.deadline_sources() ~ " show up here with a review plan. Missing one? Add it yourself.", level=2) }}</div>
 {% else %}
 <ul class="grid gap-4 md:grid-cols-2 m-0 p-0 list-none">
   {% for e in exams %}

@@ -719,3 +719,16 @@ chosen file stays chosen; success retargets `#main` (`HX-Retarget`/`HX-Reselect`
 JS, the page comes back as typed and asks for the file again, since browsers can't keep it. The name preview comes
 from `GET /files/name`, the same code that names the upload, so it can't drift. **Demo.** `DemoDrive` keeps
 nothing and returns no link, so `serve --demo` and the browser suites show the page.
+
+## D075 — Exams you add yourself (2026-11-06)
+**Decision.** "Add an exam" on Exams opens `/exams/new`: what, course, day and start time (no default), optional
+study hours and notes. It posts to `POST /exams`, which stores the exam the way D070 stores a task: a `manual`
+source record, now with `kind=exam` (`tasks.add_task(kind=…)`). The exam then shows on Exams, gets exam study time
+in the week's work windows (D062), the 24-hour and 3-hour texts, and a vault note. Hours, when given, become the
+student's estimate, so they set the study time (still clamped to 1-6 h by D062); blank uses the default. The exam
+page of one you added shows your notes and "Delete exam", which returns to Exams. **Why.** Many quizzes and exams
+are announced in class or on a syllabus PDF and never reach Canvas or Gradescope, so the planner reserved no study
+time for them. **Details.** Only `assignment` and `exam` can be added. A task's external id is unchanged (course,
+title, due time); other kinds add the kind, so a task and an exam with the same name and time stay two items. If
+a source later lists the same exam it arrives as its own item (manual records don't merge with synced ones by
+title); delete yours then. No schema change.

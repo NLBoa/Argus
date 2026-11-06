@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from argus import announcements, estimates, exams, tasks
-from argus.domain.models import Item
+from argus.domain.models import Item, ItemKind
 from argus.planning import (
     compute,
     replan,
@@ -337,6 +337,47 @@ def _today_page(
     return response
 
 
+def _exams_page(
+    request: Request, state: AppState, conn: sqlite3.Connection, message: str
+) -> Response:
+    """No JS: 303 to Exams. HTMX: the Exams page, its URL, and a toast."""
+    if not is_htmx(request):
+        return RedirectResponse("/exams", status_code=303)
+    from argus.web.routes.pages import exams_view
+
+    response = toast(exams_view(request, state, conn), message)
+    response.headers["HX-Push-Url"] = "/exams"
+    return response
+
+
+def _add(
+    request: Request, state: AppState, conn: sqlite3.Connection, form: TaskForm, kind: ItemKind
+) -> Response:
+    """Add a task (D070) or an exam (D075). A mistake shows the form again, as typed."""
+    from argus.web.routes.pages import task_page
+
+    try:
+        item = tasks.add_task(
+            conn,
+            course_code=form.course,
+            title=form.title,
+            due_at=form.due_at(),
+            notes=form.notes,
+            hours=form.hours_value(),
+            kind=kind,
+            now=state.clock.now(),
+        )
+    except ValueError as e:
+        error = e if isinstance(e, FieldError) else FieldError(field_for(str(e)), str(e))
+        status = 200 if is_htmx(request) else 422
+        return task_page(
+            request, state, conn, form=form, error=error, status_code=status, kind=kind
+        )
+    _replan(conn, state)
+    done = _exams_page if kind is ItemKind.EXAM else _today_page
+    return done(request, state, conn, f"Added {item.title}")
+
+
 @router.post("/tasks")
 def add_task(
     request: Request,
@@ -350,36 +391,36 @@ def add_task(
     hours: Annotated[str, Form()] = "",
     notes: Annotated[str, Form()] = "",
 ) -> Response:
-    """A task the student adds (D070). A mistake shows the form again, as typed."""
-    from argus.web.routes.pages import task_page
-
     form = TaskForm(course, title, due_date, due_time, hours, notes)
-    now = state.clock.now()
-    try:
-        item = tasks.add_task(
-            conn,
-            course_code=course,
-            title=title,
-            due_at=form.due_at(),
-            notes=notes,
-            hours=form.hours_value(),
-            now=now,
-        )
-    except ValueError as e:
-        error = e if isinstance(e, FieldError) else FieldError(field_for(str(e)), str(e))
-        status = 200 if is_htmx(request) else 422
-        return task_page(request, state, conn, form=form, error=error, status_code=status)
-    _replan(conn, state)
-    return _today_page(request, state, conn, f"Added {item.title}")
+    return _add(request, state, conn, form, ItemKind.ASSIGNMENT)
+
+
+@router.post("/exams")
+def add_exam(
+    request: Request,
+    state: State,
+    conn: Conn,
+    *,
+    course: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    hours: Annotated[str, Form()] = "",
+    notes: Annotated[str, Form()] = "",
+) -> Response:
+    form = TaskForm(course, title, due_date, due_time, hours, notes)
+    return _add(request, state, conn, form, ItemKind.EXAM)
 
 
 @router.post("/tasks/{item_id}/delete")
 def delete_task(request: Request, state: State, conn: Conn, item_id: int) -> Response:
+    """Delete a task or exam the student added; an exam goes back to Exams."""
     item = _item_or_404(conn, item_id)
     if not tasks.remove_task(conn, item_id, state.clock.now()):
         raise HTTPException(404, "No such task")
     _replan(conn, state)
-    return _today_page(request, state, conn, f"Deleted {item.title}")
+    done = _exams_page if item.kind is ItemKind.EXAM else _today_page
+    return done(request, state, conn, f"Deleted {item.title}")
 
 
 # ---------------------------------------------------------------- study and vault

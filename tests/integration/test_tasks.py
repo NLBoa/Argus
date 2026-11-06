@@ -288,3 +288,124 @@ def test_delete_with_and_without_js(client: TestClient, db_path: Path, clock: Fa
         assert task_titled(conn, "Read ch. 5") is None
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------- exams you add (D075)
+
+
+def exam_form(clock: FakeClock, **over: str) -> dict[str, str]:
+    return form(clock, title="Quiz 4", due_time="10:00", hours="4") | over
+
+
+def test_add_exam_creates_an_exam_with_study_time(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    due = clock.now() + timedelta(days=3)
+    item = tasks.add_task(
+        conn,
+        course_code="MATH240",
+        title="Quiz 4",
+        due_at=due,
+        hours=4,
+        kind=ItemKind.EXAM,
+        now=clock.now(),
+    )
+    assert item.kind == ItemKind.EXAM
+    assert item.added_by_you
+    replan(conn, DEMO_CONFIG, clock, tracking_sources=TRACKING, force=True)
+    study = compute(conn, DEMO_CONFIG, clock.now(), tracking_sources=TRACKING).study
+    assert study.total[item.id] == pytest.approx(4)
+    reserved = sum(q.get(item.id, 0.0) for q in study.quota.values())
+    assert reserved + study.shortfall.get(item.id, 0.0) == pytest.approx(4)
+
+
+def test_an_exam_and_a_task_with_the_same_name_stay_apart(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    args = {
+        "course_code": "CMSC351",
+        "title": "Quiz 4",
+        "due_at": clock.now() + timedelta(days=2),
+        "now": clock.now(),
+    }
+    task = tasks.add_task(conn, **args)  # type: ignore[arg-type]
+    exam = tasks.add_task(conn, kind=ItemKind.EXAM, **args)  # type: ignore[arg-type]
+    assert task.id != exam.id
+    assert task.kind == ItemKind.ASSIGNMENT
+
+
+def test_only_assignments_and_exams_can_be_added(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    with pytest.raises(ValueError, match="kind"):
+        tasks.add_task(
+            conn,
+            course_code="CMSC351",
+            title="Office hours",
+            due_at=clock.now() + timedelta(days=1),
+            kind=ItemKind.EVENT,
+            now=clock.now(),
+        )
+
+
+def test_exams_page_links_to_the_exam_form(client: TestClient) -> None:
+    assert 'href="/exams/new"' in client.get("/exams").text
+    html = client.get("/exams/new").text
+    assert "Add an exam" in html
+    assert 'action="/exams"' in html
+    assert 'value="23:59"' not in html  # exams aren't at midnight
+
+
+def test_add_exam_without_js_redirects_to_exams(
+    client: TestClient, db_path: Path, clock: FakeClock
+) -> None:
+    r = client.post("/exams", data=exam_form(clock), headers=ORIGIN, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/exams"
+    conn = open_db(db_path, clock)
+    try:
+        item_id = task_titled(conn, "Quiz 4")
+        assert item_id is not None
+        item = repo.get_item(conn, item_id)
+        assert item is not None and item.kind == ItemKind.EXAM
+    finally:
+        conn.close()
+    assert "Quiz 4" in client.get("/exams").text
+    page = client.get(f"/exams/{item_id}").text
+    assert "of study" in page or "doesn't fit" in page
+    assert f'action="/tasks/{item_id}/delete"' in page
+    assert "Delete exam" in page
+
+
+def test_add_exam_with_htmx_renders_exams_with_a_toast(
+    client: TestClient, clock: FakeClock
+) -> None:
+    r = client.post("/exams", data=exam_form(clock), headers=HX)
+    assert r.status_code == 200
+    assert json.loads(r.headers["HX-Trigger"])["toast"]["message"] == "Added Quiz 4"
+    assert r.headers["HX-Push-Url"] == "/exams"
+    assert "Quiz 4" in r.text
+
+
+def test_bad_exam_input_shows_the_exam_form_again(client: TestClient, clock: FakeClock) -> None:
+    r = client.post(
+        "/exams", data=exam_form(clock, title=""), headers=ORIGIN, follow_redirects=False
+    )
+    assert r.status_code == 422
+    assert "Give the exam a name." in r.text
+    assert 'action="/exams"' in r.text
+
+
+def test_deleting_an_exam_returns_to_exams(
+    client: TestClient, db_path: Path, clock: FakeClock
+) -> None:
+    client.post("/exams", data=exam_form(clock), headers=ORIGIN)
+    conn = open_db(db_path, clock)
+    try:
+        item_id = task_titled(conn, "Quiz 4")
+    finally:
+        conn.close()
+    r = client.post(f"/tasks/{item_id}/delete", headers=ORIGIN, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/exams"
+    assert "Quiz 4" not in client.get("/exams").text
