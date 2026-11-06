@@ -11,7 +11,7 @@ On the dashboard, More → **Add a file** sends a PDF, PPTX, DOCX, PNG, or JPG t
 inbox, named `<COURSE> · <what> · <type> · by <YYYY-MM-DD HH:MM> · <depth>.<ext>` so the planner knows the course,
 deadline, and depth. "Done by" suggests the course's next class and its upcoming deadlines. The page is tailnet-only
 and hidden until Drive is set up: one Google Cloud OAuth client, then `argus drive-auth` (setup in
-[docs/runbook.md](docs/runbook.md#file-adder-google-drive), design in D074).
+[docs/runbook.md](docs/runbook.md#file-adder-google-drive), design in D074). How it handles Google data: [PRIVACY.md](PRIVACY.md).
 
 ## Claude connector (MCP)
 
