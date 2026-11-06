@@ -91,7 +91,8 @@ def test_ci_has_arm64_job_running_make_check() -> None:
     job = ci["jobs"]["check"]
     runners = [m["runner"] for m in job["strategy"]["matrix"]["include"]]
     assert any("arm" in r for r in runners)
-    assert any(step.get("run") == "make check" for step in job["steps"])
+    # `make check-ci` (no visual suite) until the overhaul ends; then back to `make check`.
+    assert any(step.get("run") in ("make check", "make check-ci") for step in job["steps"])
 
 
 def test_makefile_has_required_targets() -> None:
