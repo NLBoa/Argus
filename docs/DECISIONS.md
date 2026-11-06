@@ -271,7 +271,7 @@ An e2e test walks the main pages and interactions and asserts zero CSP violation
 ## D043 — The webhook is a separate app on its own port (2026-10-19)
 Tailscale Funnel exposes a whole port, so a webhook route inside the dashboard would make the dashboard public. The
 webhook is its own FastAPI app (`argus serve-webhook`, 127.0.0.1:8001, its own unit) with exactly one route. Only it
-goes behind Funnel (port 8443) or Cloudflare Tunnel (with a path rule). The dashboard (127.0.0.1:8000) is reached only
+goes behind Funnel (port 10000 since D073; 8443 before) or Cloudflare Tunnel (with a path rule). The dashboard (127.0.0.1:8000) is reached only
 through `tailscale serve`. It has no webhook route, and it refuses every cross-origin POST. Tests assert both.
 
 ## D044 — Webhook checks (2026-10-19)
@@ -654,3 +654,30 @@ check-in), the kiosk, the widget feed (its summary line keeps D071's wording), a
 D058–D064. Risk badges stay on rows: they report what the windows hold, they don't assign work. Undated items aren't
 on Today (Upcoming and the course page list them). The rule is `work_day` in `web/viewmodels.py`. Supersedes the web
 parts of D058, D063 (Today), and D064.
+
+## D073 — A read-only MCP server lets Claude read deadlines (2026-11-06)
+**Decision.** `argus serve-mcp` (unit `argus-mcp`, 127.0.0.1:8002) is a small MCP server (the official SDK's
+FastMCP, streamable HTTP, stateless, JSON responses). It has three read-only tools: `list_courses`,
+`get_upcoming_work(days)`, and `get_changes(since)`. It reads the database through a `mode=ro` connection and never
+calls Canvas or Gradescope. It returns deadlines and links only: no grades, points, descriptions, or submission
+contents. Each item carries `done`. `get_upcoming_work` also returns work up to 7 days past due that isn't done
+(`overdue: true`), so late work doesn't silently drop out of the student's planner. Item types map from kinds:
+assignments whose title names a project become `project`, and Canvas calendar events stay `event` (titles naming
+an exam or quiz were already reclassified by `infer_kind`). `slides` and `file` are reserved and never sent.
+**Why.** The student schedules their work in Reclaim through Claude (chats and a morning task). Claude needs
+Argus's merged, official dates, and re-fetching from Canvas inside the server would duplicate the collectors.
+**Auth.** A long random secret in the URL path (`/mcp/<secret>`, credential `mcp_path_secret`, at least 32
+URL-safe characters). Every other path is a 404. The access log is off and the secret is redacted. The SDK's
+DNS-rebinding guard stays on: Host must be localhost or one of `mcp.allowed_hosts` (else 421), and Origin
+must be absent, localhost, or claude.ai (else 403). OAuth was considered: the SDK covers the resource-server side,
+but claude.ai needs a full authorization server (dynamic client registration, a consent page, a token store),
+which is too much for read-only deadline data. Rotating the secret means replacing one file and the connector URL.
+**Changes.** Migration 0013 adds `item_changes`, an append-only log that `apply_merge` writes in the sync's
+transaction: `new`, `due` (old and new date), `removed`, and `restored`. `summarize_changes` (`domain/changes.py`)
+nets each item's events after `since`: present before and after with a different date gives `changed` (with
+`old_due`), absent before and present after gives `new`, and present before and absent after gives `removed`.
+Anything else is left out. A log was chosen over per-sync snapshots: `apply_merge` already knows each change as
+it happens, so this is less code and exact.
+**Ports.** Funnel makes a whole port public and allows only 443, 8443, and 10000. The connector gets 443, so
+its URL has no port. The dashboard moves to tailnet-only `serve` on 8443, and the Twilio webhook moves to Funnel
+10000 (amends D043). The unit is skipped until `/etc/argus/credentials/mcp_path_secret` exists.

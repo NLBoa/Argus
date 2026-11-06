@@ -131,7 +131,7 @@ def test_servers_log_through_the_redactor() -> None:
         and isinstance(n.func.value, ast.Name)
         and n.func.value.id == "uvicorn"
     ]
-    assert len(runs) == 4
+    assert len(runs) == 5  # one per server command (serve-mcp added in D073)
     for call in runs:
         kw = {k.arg: k.value for k in call.keywords}
         assert isinstance(kw.get("log_config"), ast.Constant) and kw["log_config"].value is None

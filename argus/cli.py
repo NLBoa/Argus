@@ -67,6 +67,18 @@ def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     for name in type(secrets).model_fields:
         state = "set" if getattr(secrets, name) else "missing"
         typer.echo(f"  {name}: {state}")
+    if secrets.mcp_path_secret:
+        from argus.web.mcp_server import path_secret
+
+        try:
+            path_secret(secrets)
+        except ValueError as exc:
+            typer.echo(f"  warning: {exc}")
+        if not cfg.mcp.allowed_hosts:
+            typer.echo(
+                "  warning: mcp.allowed_hosts is empty; the connector answers only on localhost "
+                "(add your Funnel name, see docs/runbook.md)"
+            )
 
 
 @db_app.command("migrate")
@@ -322,6 +334,32 @@ def serve_webhook(
 
     cfg, secrets = _setup(config)
     uvicorn.run(create_webhook_app(cfg, secrets), host=host, port=port, log_config=None)
+
+
+@app.command("serve-mcp")
+def serve_mcp(
+    config: ConfigOpt = DEFAULT_CONFIG,
+    host: str = "127.0.0.1",
+    port: int = 8002,
+    db: Annotated[
+        Path | None, typer.Option(help="Read this database instead (e.g. var/demo.db).")
+    ] = None,
+) -> None:  # pragma: no cover - runs a server
+    """Run the read-only Claude connector (MCP) on its own port (D073)."""
+    import uvicorn
+
+    from argus.web.mcp_server import create_mcp_app
+
+    cfg, secrets = _setup(config)
+    db_path = db or cfg.paths.db_path
+    if not db_path.exists():
+        raise typer.BadParameter(f"no database at {db_path}; run the worker or `argus sync` first")
+    try:
+        mcp_app = create_mcp_app(cfg, secrets, make_clock(), db_path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    # access_log=False: the request path holds the secret.
+    uvicorn.run(mcp_app, host=host, port=port, log_config=None, access_log=False)
 
 
 @app.command()

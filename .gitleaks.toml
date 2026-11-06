@@ -11,3 +11,13 @@ regex = '''instructure\.com/feeds/calendars/user_[A-Za-z0-9]{20,}'''
 id = "twilio-auth-token-assignment"
 description = "Twilio auth token in an env-style assignment"
 regex = '''ARGUS_TWILIO_AUTH_TOKEN=[0-9a-f]{32}'''
+
+[[rules]]
+id = "mcp-path-secret"
+description = "Claude connector URL with its path secret (the path is the credential)"
+regex = '''/mcp/[A-Za-z0-9_-]{32,}'''
+
+[[rules]]
+id = "tailnet-hostname"
+description = "A real Tailscale MagicDNS name (the repo is public; use argus.<tailnet>.ts.net)"
+regex = '''[a-z0-9-]+\.tail[0-9a-f]{4,}\.ts\.net'''

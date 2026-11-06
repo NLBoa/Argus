@@ -8,7 +8,7 @@ APP=/opt/argus
 DATA=/var/lib/argus
 ETC=/etc/argus
 CREDS=$ETC/credentials
-UNITS=(argus-worker argus-web argus-webhook)
+UNITS=(argus-worker argus-web argus-webhook argus-mcp)
 KIOSK_USER=""
 
 while [[ $# -gt 0 ]]; do

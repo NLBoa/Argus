@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
 from argus.config import AppConfig
+from argus.domain.changes import ChangeEvent, ChangeKind
 from argus.domain.findings import ItemRef
 from argus.domain.merge import merge_sources, resolve_item
 from argus.domain.models import (
@@ -384,6 +385,12 @@ def _update_item_if_changed(
     current = tuple(row[c] for c in _ITEM_FIELDS)
     if current == fields and row["removed_at"] is None:
         return
+    due = fields[_ITEM_FIELDS.index("due_at")]
+    new_due = due if isinstance(due, str) else None
+    if row["removed_at"] is not None:
+        _record_change(conn, item_id, ChangeKind.RESTORED, old=None, new=new_due, at=ts)
+    elif row["due_at"] != new_due:
+        _record_change(conn, item_id, ChangeKind.DUE, old=row["due_at"], new=new_due, at=ts)
     # A changed disagreement must be resolved again.
     resolved_at = row["conflict_resolved_at"] if row["date_conflict"] == fields[-1] else None
     assignments = ", ".join(f"{c} = ?" for c in _ITEM_FIELDS)
@@ -455,6 +462,9 @@ def apply_merge(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
             )
             item_id = int(cur.lastrowid or 0)
             created.append(item_id)
+            _record_change(
+                conn, item_id, ChangeKind.NEW, old=None, new=iso_or_none(resolved.due_at), at=ts
+            )
         else:
             item_id = group.item_id
             _update_item_if_changed(conn, item_id, fields, ts)
@@ -465,15 +475,65 @@ def apply_merge(conn: sqlite3.Connection, ids: dict[str, int], now: datetime) ->
                 (item_id, k.source.value, k.external_id),
             )
     orphans = [
-        r["id"]
-        for r in conn.execute("SELECT id FROM items WHERE removed_at IS NULL")
+        (r["id"], r["due_at"])
+        for r in conn.execute("SELECT id, due_at FROM items WHERE removed_at IS NULL")
         if r["id"] not in live
     ]
-    for item_id in orphans:
+    for item_id, due in orphans:
         conn.execute(
             "UPDATE items SET removed_at = ?, updated_at = ? WHERE id = ?", (ts, ts, item_id)
         )
+        _record_change(conn, item_id, ChangeKind.REMOVED, old=due, new=due, at=ts)
     return created
+
+
+def _record_change(
+    conn: sqlite3.Connection,
+    item_id: int,
+    change: ChangeKind,
+    *,
+    old: str | None,
+    new: str | None,
+    at: str,
+) -> None:
+    """Append to the item change log (D073). Called only from apply_merge, the one place
+    items are created, moved, removed, or restored."""
+    conn.execute(
+        "INSERT INTO item_changes (item_id, change, old_due, new_due, at) VALUES (?, ?, ?, ?, ?)",
+        (item_id, change.value, old, new, at),
+    )
+
+
+def item_changes_since(conn: sqlite3.Connection, since: datetime) -> list[ChangeEvent]:
+    """Change-log events strictly after `since`, oldest first."""
+    rows = conn.execute(
+        "SELECT item_id, change, old_due, new_due, at FROM item_changes WHERE at > ? ORDER BY at, id",
+        (iso(since),),
+    )
+    return [
+        ChangeEvent(
+            item_id=r["item_id"],
+            change=ChangeKind(r["change"]),
+            old_due=parse_iso_or_none(r["old_due"]),
+            new_due=parse_iso_or_none(r["new_due"]),
+            at=parse_iso(r["at"]),
+        )
+        for r in rows
+    ]
+
+
+def latest_change_at(conn: sqlite3.Connection, item_ids: Sequence[int]) -> dict[int, datetime]:
+    """When each item last appeared in the change log."""
+    if not item_ids:
+        return {}
+    marks = ",".join("?" * len(item_ids))
+    return {
+        r[0]: parse_iso(r[1])
+        for r in conn.execute(
+            f"SELECT item_id, MAX(at) FROM item_changes WHERE item_id IN ({marks}) GROUP BY item_id",  # noqa: S608
+            tuple(item_ids),
+        )
+    }
 
 
 def refresh_statuses(
@@ -542,14 +602,15 @@ def _row_to_item(r: sqlite3.Row, links: tuple[ItemLink, ...]) -> Item:
 
 
 def _links_for(
-    conn: sqlite3.Connection, item_ids: Sequence[int]
+    conn: sqlite3.Connection, item_ids: Sequence[int], *, present_only: bool = True
 ) -> dict[int, tuple[ItemLink, ...]]:
     if not item_ids:
         return {}
     marks = ",".join("?" * len(item_ids))
+    present = "present = 1 AND " if present_only else ""
     out: dict[int, list[ItemLink]] = {}
     for r in conn.execute(
-        f"SELECT item_id, source, url FROM item_sources WHERE present = 1 AND item_id IN ({marks})"  # noqa: S608
+        f"SELECT item_id, source, url FROM item_sources WHERE {present}item_id IN ({marks})"  # noqa: S608
         " ORDER BY source",
         tuple(item_ids),
     ):
@@ -589,6 +650,43 @@ def list_items(
     ).fetchall()
     links = _links_for(conn, [r["id"] for r in rows])
     return [_row_to_item(r, links.get(r["id"], ())) for r in rows]
+
+
+def items_by_ids(conn: sqlite3.Connection, item_ids: Sequence[int]) -> list[Item]:
+    """These items, removed ones included. A removed item has no present source record, so it
+    carries the links its records had when they were last seen."""
+    if not item_ids:
+        return []
+    marks = ",".join("?" * len(item_ids))
+    rows = conn.execute(
+        "SELECT i.*, c.code FROM items i JOIN courses c ON c.id = i.course_id"  # noqa: S608
+        f" WHERE i.id IN ({marks}) ORDER BY i.due_at IS NULL, i.due_at, c.code, i.title",
+        tuple(item_ids),
+    ).fetchall()
+    links = _links_for(conn, [r["id"] for r in rows])
+    gone = [r["id"] for r in rows if r["id"] not in links]
+    links.update(_links_for(conn, gone, present_only=False))
+    return [_row_to_item(r, links.get(r["id"], ())) for r in rows]
+
+
+def finding_platforms(conn: sqlite3.Connection) -> dict[int, str]:
+    """Per item: the platform (`piazza`, `canvas`) of the post its present finding record
+    came from."""
+    rows = conn.execute(
+        """SELECT s.item_id, p.platform FROM item_sources s
+             JOIN findings f ON s.external_id = 'finding:' || f.id
+             JOIN posts p ON p.id = f.post_id
+            WHERE s.source = 'finding' AND s.present = 1 AND s.item_id IS NOT NULL"""
+    )
+    return {r["item_id"]: r["platform"] for r in rows}
+
+
+def active_course_titles(conn: sqlite3.Connection) -> dict[str, str | None]:
+    """Active course codes and their titles, by code."""
+    return {
+        r["code"]: r["title"]
+        for r in conn.execute("SELECT code, title FROM courses WHERE active = 1 ORDER BY code")
+    }
 
 
 def get_item(conn: sqlite3.Connection, item_id: int) -> Item | None:

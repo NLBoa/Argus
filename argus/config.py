@@ -134,7 +134,7 @@ class NotificationsConfig(_Strict):
     # Where notification taps should open the dashboard (your Tailscale name), if anywhere.
     dashboard_url: str | None = None
     # The exact public URL Twilio posts replies to (Funnel or Tunnel), used to check signatures,
-    # e.g. https://argus-pi.example.ts.net/webhooks/twilio/sms
+    # e.g. https://argus.example-tailnet.ts.net:10000/webhooks/twilio/sms
     webhook_url: str | None = None
 
 
@@ -151,6 +151,15 @@ class AIConfig(_Strict):
 
 class CanvasConfig(_Strict):
     base_url: str = "https://umd.instructure.com"
+
+
+class MCPConfig(_Strict):
+    """The Claude connector (`argus serve-mcp`, D073). The URL path secret is a credential
+    (`mcp_path_secret`), never here."""
+
+    # Host headers to accept besides localhost: your Funnel name, e.g. "argus.example-tailnet.ts.net".
+    # Anything else gets 421 (the MCP SDK's DNS-rebinding guard).
+    allowed_hosts: list[str] = []
 
 
 class PathsConfig(_Strict):
@@ -180,6 +189,7 @@ class AppConfig(_Strict):
     ai: AIConfig = AIConfig()
     canvas: CanvasConfig = CanvasConfig()
     paths: PathsConfig = PathsConfig()
+    mcp: MCPConfig = MCPConfig()
 
     @model_validator(mode="after")
     def _unique_courses(self) -> Self:
@@ -212,6 +222,8 @@ class Secrets(BaseModel):
     ntfy_topic: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
     healthchecks_url: SecretStr | None = None
+    # The Claude connector's URL path secret: https://<host>/mcp/<this> (D073)
+    mcp_path_secret: SecretStr | None = None
 
     def secret_values(self) -> list[str]:
         """Plain values of every secret field, for the log redactor."""

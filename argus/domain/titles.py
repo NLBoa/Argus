@@ -29,6 +29,7 @@ _NOT_AN_ASSESSMENT = re.compile(
     r"\b(?:review|session|office hours?|study guide|practice|solutions?|worksheet)\b"
 )
 _QUIZ = re.compile(r"\bquiz(?:zes)?\b")
+_PROJECT = re.compile(r"\bproj(?:ect)?s?\b")
 
 
 def clean_display_title(title: str) -> str:
@@ -64,3 +65,9 @@ def infer_kind(title: str, default: ItemKind) -> ItemKind:
     if _QUIZ.search(s):
         return ItemKind.QUIZ
     return default
+
+
+def is_project(title: str) -> bool:
+    """True when the title names a project ("Project 2", "Final Project Report", "Proj3")."""
+    s = _LETTER_DIGIT.sub(" ", title.casefold())
+    return bool(_PROJECT.search(" ".join(_NON_WORD.sub(" ", s).split())))

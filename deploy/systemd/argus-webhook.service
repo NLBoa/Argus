@@ -1,5 +1,5 @@
 [Unit]
-Description=Argus Twilio webhook (the one public route, via tailscale funnel or cloudflared)
+Description=Argus Twilio webhook (public via tailscale funnel on port 10000, or cloudflared)
 Documentation=file:///opt/argus/docs/runbook.md
 After=network-online.target
 

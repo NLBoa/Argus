@@ -36,6 +36,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `queue_prefs` | 0009 | Per queue entry (`item:<id>`, `study:<exam id>`): `pin_rank`, `pin_kind` `pin`/`move`, `pin_until` (move pins expire), `skip_window` ("Not tonight") (D058) |
 | `remaining_marks` | 0009 | The student's "about N h left", append-only; the latest counts minus time logged since (D060) |
 | `window_plans` | 0009 | Per work window (`window_id` = local start, e.g. `2026-10-19T19:00`): its split as JSON `[[entry, hours], ...]`, stored just before it starts and frozen once it starts (D061) |
+| `item_changes` | 0013 | Append-only change log written by `apply_merge` (D073): `change` `new` / `due` / `removed` / `restored`, `old_due`, `new_due`, `at`. Backfilled with `new` at `created_at` and `removed` at `removed_at`. Read by the Claude connector's `get_changes` |
 | `settings` | 0011 | Choices made in Settings that config.yaml only defaults: `window_notice_minutes`. The theme is a per-browser cookie, not stored here |
 | `search_index` | 0003 | FTS5 (porter, unicode61, diacritics removed) over items, modules, and posts. Columns `title`, `body`; unindexed `kind`, `ref_id`, `course`, `url`. Rebuilt after every sync cycle |
 

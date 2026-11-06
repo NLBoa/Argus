@@ -25,16 +25,13 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Always-on loop (sync + reminders) / test a push | `uv run argus worker` / `uv run argus notify-test` |
 | Build CSS (minified) / watch | `make css` / `make css-watch` |
 | Regenerate token blocks / icons from the mark (D068) | `uv run python scripts/gen_tokens.py` / `scripts/make_icons.py` (`--check` in tests) |
-| Lint + format check / auto-fix | `make lint` / `make fmt` |
-| Types | `make types` (mypy --strict on `argus/`) |
-| Unit / integration | `make test-unit` / `make test-int` |
-| Coverage with floors | `make cov` |
-| E2E / accessibility / visual | `make test-e2e` / `make test-a11y` / `make test-visual` |
-| Re-record visual baselines | `make visual-update` (macOS) · `scripts/visual_linux.sh --update` (Linux) |
+| Lint + format check / auto-fix / types | `make lint` / `make fmt` / `make types` (mypy --strict on `argus/`) |
+| Unit / integration / coverage with floors | `make test-unit` / `make test-int` / `make cov` |
+| E2E / accessibility / visual · re-record baselines | `make test-e2e` / `make test-a11y` / `make test-visual` · `make visual-update` (macOS), `scripts/visual_linux.sh --update` (Linux) |
 | AI evals (real API, not in CI) | `make evals` |
 | Everything / what CI runs (no visual until the overhaul ends) | `make check` / `make check-ci` |
 | Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
-| Webhook / backup / restore | `argus serve-webhook` · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
+| Webhook / Claude connector (MCP) / backup / restore | `argus serve-webhook` · `argus serve-mcp` ([README](README.md#claude-connector-mcp)) · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
 | CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, …) |
 
 ## Architecture map
@@ -54,7 +51,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
   vault writer), `render` (pure notes), `gitsync`, and `service` (the 15-minute cycle, inbox, health).
 - `argus/notify/`: Twilio SMS (one attempt), ntfy, and the router (SMS first, ntfy fallback).
 - `argus/sms.py`: replies (parse → AI fallback → ask once → act). `argus/web/webhook.py`: the separate public
-  webhook app (D043). `argus/backup.py`: snapshots, prune, off-device copy, restore.
+  webhook app (D043). `argus/web/mcp_server.py`, `argus/feed.py`: the read-only Claude connector (D073), with
+  `domain/changes.py` netting the `item_changes` log. `argus/backup.py`: snapshots, prune, off-device copy, restore.
 - `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault,
   each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
@@ -78,7 +76,7 @@ questions/flashcards · `practice_attempts` results + confidence · `exams` scop
 `queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
 path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health ·
-`settings` choices made in Settings (the notice lead time).
+`settings` choices made in Settings (the notice lead time) · `item_changes` new/moved/removed items, for `get_changes`.
 
 ## Conventions
 - **Time.** Store UTC only (ISO 8601 with `Z`/offset). Convert to `America/New_York` only at
@@ -116,6 +114,8 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - `piazza-api` login needs a `session_id` cookie. `content.get` is per post, so fetch only staff-relevant posts.
 - The Piazza notification email format is unverified until real mail arrives (`collectors/piazza_email.py`).
 - The newest Playwright Python Docker image is v1.63.0, so Playwright is pinned `==1.63.0` to match.
+- Funnel allows ports 443/8443/10000 and opens a whole port: MCP on 443, dashboard on tailnet-only 8443, webhook on
+  10000 (D073). Never commit the real `*.ts.net` name (gitleaks blocks it). Unknown Host → 421 (`mcp.allowed_hosts`).
 - Twilio signs the exact public URL it posts to: `notifications.webhook_url` must match it character for character.
   STOP/START/HELP are Twilio's (Argus stays silent). `[` and `]` are GSM-7 extension characters (2 septets each).
 

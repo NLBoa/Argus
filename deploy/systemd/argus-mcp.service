@@ -1,0 +1,31 @@
+[Unit]
+Description=Argus Claude connector (read-only MCP server, public via tailscale funnel on 443)
+Documentation=file:///opt/argus/docs/runbook.md
+After=network-online.target
+# Skipped (not failed) until the secret exists: docs/runbook.md, "Claude connector".
+ConditionPathExists=/etc/argus/credentials/mcp_path_secret
+
+[Service]
+Type=simple
+User=argus
+Group=argus
+WorkingDirectory=/var/lib/argus
+ExecStart=/opt/argus/.venv/bin/argus serve-mcp -c /etc/argus/config.yaml --host 127.0.0.1 --port 8002
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+MemoryMax=200M
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/argus
+
+[Install]
+WantedBy=multi-user.target

@@ -40,9 +40,9 @@ notifications:
   daily_text_cap: 6          # at-risk, work-window, and 3-hour messages are not counted
   window_notice_minutes: 20  # the work-window message goes out this long before each window
   ntfy_server: "https://ntfy.sh"
-  dashboard_url: "https://argus-pi.example-tailnet.ts.net"  # opened when you tap a push
-  # Exactly the URL Twilio posts replies to (Funnel port 8443 or your Cloudflare hostname); see docs/runbook.md
-  webhook_url: "https://argus-pi.example-tailnet.ts.net:8443/webhooks/twilio/sms"
+  dashboard_url: "https://argus.example-tailnet.ts.net:8443"  # opened when you tap a push (tailnet only)
+  # Exactly the URL Twilio posts replies to (Funnel port 10000 or your Cloudflare hostname); see docs/runbook.md
+  webhook_url: "https://argus.example-tailnet.ts.net:10000/webhooks/twilio/sms"
 
 ai:
   models:

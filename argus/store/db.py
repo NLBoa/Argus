@@ -38,6 +38,15 @@ def connect(path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(path: Path | str) -> sqlite3.Connection:
+    """A connection that cannot write (SQLite `mode=ro`). The database must already exist."""
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, isolation_level=None, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
+
+
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     if conn.in_transaction:

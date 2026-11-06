@@ -55,6 +55,6 @@ rsync -a --delete \
 "$APP/deploy/install.sh" "$@"
 
 echo "==> running"
-systemctl --no-pager is-active argus-worker argus-web argus-webhook || true
+systemctl --no-pager is-active argus-worker argus-web argus-webhook argus-mcp || true
 journalctl -u argus-worker -u argus-web --since "-2 min" --no-pager -n 15 -o cat || true
 echo "Done. If anything looks wrong: sudo argus-admin restore <snapshot from the backup step> --yes"

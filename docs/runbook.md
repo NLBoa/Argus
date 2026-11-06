@@ -8,8 +8,9 @@ How to install, configure, expose, back up, and fix Argus on the Raspberry Pi. C
 | Piece | systemd unit | Listens on | Reached through |
 |---|---|---|---|
 | Worker: sync, plan, reminders, vault | `argus-worker` | nothing | (outbound only) |
-| Dashboard | `argus-web` | 127.0.0.1:8000 | `tailscale serve`: your tailnet only |
-| Twilio webhook | `argus-webhook` | 127.0.0.1:8001 | `tailscale funnel` on port 8443 (or Cloudflare Tunnel): public |
+| Dashboard | `argus-web` | 127.0.0.1:8000 | `tailscale serve` on port 8443: your tailnet only |
+| Claude connector (MCP, read-only) | `argus-mcp` | 127.0.0.1:8002 | `tailscale funnel` on port 443: public, behind a path secret |
+| Twilio webhook | `argus-webhook` | 127.0.0.1:8001 | `tailscale funnel` on port 10000 (or Cloudflare Tunnel): public |
 | Nightly backup | `argus-backup.timer` | | 03:30 every night |
 | Kiosk | Chromium autostart | | `http://127.0.0.1:8000/kiosk` on the Pi's monitor |
 
@@ -74,14 +75,21 @@ sudo argus-admin check-config                                # every secret show
 | `anthropic_api_key` | console.anthropic.com → API keys. Without it, every AI feature uses its fallback |
 | `healthchecks_url` | healthchecks.io → your check's ping URL (see [Dead-man's switch](#dead-mans-switch)) |
 
-## Tunnels: dashboard private, webhook public
+## Tunnels: dashboard private, connector and webhook public
+
+Funnel can only use ports 443, 8443, and 10000, and it makes a whole port public. So each app gets its own port
+(D073): the Claude connector is public on 443, the dashboard is tailnet-only on 8443, and the Twilio webhook, if
+you use it, is public on 10000. Below, `argus.<tailnet>.ts.net` is your Pi's name (`tailscale status` shows it).
+Never commit that name: this repo is public, and gitleaks blocks it.
+
+**Which Tailscale?** If the Pi runs a second Tailscale for your own account (see "Sharing the Pi" below), add
+`--socket=/run/argus-tailscale/tailscaled.sock` right after `tailscale` in every command here.
 
 **Dashboard (tailnet only):**
 ```sh
-sudo tailscale serve --bg 8000                 # https://argus-pi.<tailnet>.ts.net/ → 127.0.0.1:8000
+sudo tailscale serve --bg --https=8443 8000    # https://argus.<tailnet>.ts.net:8443/ → 127.0.0.1:8000
 ```
-Set `notifications.dashboard_url` to that URL. Never put the dashboard behind Funnel. Funnel exposes a whole port,
-which is why the webhook runs as its own app on its own port.
+Set `notifications.dashboard_url` to that URL, including `:8443`. Never put the dashboard behind Funnel.
 
 **Sharing the Pi (it is already on someone else's tailnet):** run a second Tailscale on your own account. It
 appears as its own machine (`argus`), and you control its Serve and Funnel settings. It uses userspace networking,
@@ -89,17 +97,33 @@ so the Pi's existing Tailscale keeps working unchanged. Every command for it nee
 ```sh
 sudo systemctl enable --now argus-tailscale        # the unit install.sh copied (deploy/systemd/argus-tailscale.service)
 sudo tailscale --socket=/run/argus-tailscale/tailscaled.sock up --hostname=argus   # sign in with YOUR account
-sudo tailscale --socket=/run/argus-tailscale/tailscaled.sock serve --bg 8000       # https://argus.<your-tailnet>.ts.net/
 ```
-Use the same `--socket` flag for the Funnel commands below.
 
-**Webhook with Tailscale Funnel (recommended):**
+**Claude connector (MCP) with Tailscale Funnel.** Set it up once (see [Claude connector](../README.md#claude-connector-mcp)
+for the secret and config):
+1. In the Tailscale admin console: **DNS** → enable **HTTPS Certificates**. Then **Access controls** → add the
+   Funnel attribute for the Pi, if the policy doesn't already have it:
+   `"nodeAttrs": [{"target": ["autogroup:member"], "attr": ["funnel"]}]`. (The first `tailscale funnel` command
+   also prints a link that turns it on for you.)
+2. If the dashboard is still on 443 (older installs ran `tailscale serve --bg 8000`), move it first, so 443 is
+   never public while it points at the dashboard:
+   ```sh
+   sudo tailscale serve --https=443 off
+   sudo tailscale serve --bg --https=8443 8000
+   ```
+3. Make 443 public, pointing at the connector:
+   ```sh
+   sudo tailscale funnel --bg 8002                # public https://argus.<tailnet>.ts.net/ → 127.0.0.1:8002
+   tailscale serve status                          # 443: Funnel on → 8002 · 8443: tailnet only → 8000
+   ```
+Only `/mcp/<secret>` answers on 443; every other path is a 404.
+
+**Webhook with Tailscale Funnel:**
 ```sh
-sudo tailscale funnel --bg --https=8443 8001   # public https://argus-pi.<tailnet>.ts.net:8443/ → 127.0.0.1:8001
+sudo tailscale funnel --bg --https=10000 8001  # public https://argus.<tailnet>.ts.net:10000/ → 127.0.0.1:8001
 tailscale funnel status
 ```
-The first time, the admin console asks you to allow Funnel for this node. Set
-`notifications.webhook_url: https://argus-pi.<tailnet>.ts.net:8443/webhooks/twilio/sms`. It must match exactly what
+Set `notifications.webhook_url: https://argus.<tailnet>.ts.net:10000/webhooks/twilio/sms`. It must match exactly what
 Twilio calls, because the signature check signs that URL.
 
 **Webhook with Cloudflare Tunnel (alternative, needs a domain on Cloudflare):** install `cloudflared` and create a

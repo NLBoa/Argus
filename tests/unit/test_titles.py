@@ -5,7 +5,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from argus.domain.models import ItemKind
-from argus.domain.titles import clean_display_title, infer_kind, normalize_title
+from argus.domain.titles import clean_display_title, infer_kind, is_project, normalize_title
 
 
 @pytest.mark.parametrize(
@@ -79,6 +79,23 @@ def test_infer_kind_keeps_default_for_events() -> None:
     assert infer_kind("Office hours", ItemKind.EVENT) == ItemKind.EVENT
     assert infer_kind("Midterm review session", ItemKind.EVENT) == ItemKind.EVENT
     assert infer_kind("Midterm", ItemKind.EVENT) == ItemKind.EXAM
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Project 2: Sorting", True),
+        ("Final Project Report", True),
+        ("Proj3 checkpoint", True),
+        ("project2", True),
+        ("Group projects: proposal", True),
+        ("Homework 4", False),
+        ("Projection worksheet", False),
+        ("Projector setup", False),
+    ],
+)
+def test_is_project(title: str, expected: bool) -> None:
+    assert is_project(title) is expected
 
 
 @pytest.mark.parametrize(
