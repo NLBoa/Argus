@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1 class="page-title" tabindex="-1" autofocus>Sent to the planner</h1>
-  <p class="page-sub">It's in the planner's Inbox in Google Drive. The planner turns it into tasks on its next morning run.</p>
+  <p class="page-sub">It's in the planner's Inbox in Google Drive. The planner picks it up on its next run.</p>
 </div>
 <section class="file-form panel panel-pad grid gap-4" aria-labelledby="sent-label">
   <div class="grid gap-1">
@@ -11,6 +11,18 @@
     <p class="file-preview__name m-0">{{ sent.name }}</p>
     <p class="text-sm text-muted m-0">{{ size }}</p>
   </div>
+  {#- The text companion (D077): a quiet line either way; the file itself is already in. -#}
+  {% if companion %}
+  <p class="text-sm text-muted m-0" data-companion="{{ companion.extracted if companion.sent else 'failed' }}">
+    {%- if not companion.sent -%}
+    The planner's text copy didn't go through. The file did, and the planner can still open it.
+    {%- elif companion.extracted == "none" -%}
+    A details file went with it. No text to copy: {{ companion.reason }}.
+    {%- else -%}
+    A text copy went with it for the planner ({{ companion.reason }}).
+    {%- endif -%}
+  </p>
+  {% endif %}
   {% if sent.link %}
   <p class="m-0"><a class="file-sent__link" href="{{ sent.link }}" target="_blank" rel="noopener noreferrer">Open in Google Drive{{ icon("external-link", "icon-sm") }}<span class="visually-hidden"> (opens in a new tab)</span></a></p>
   {% else %}

@@ -128,6 +128,13 @@ rm -r var/drive-credentials
 Then open the dashboard on your phone (on Tailscale) → More → **Add a file**. Each upload logs its name and size
 (`journalctl -u argus-web | grep "planner inbox"`), never its contents.
 
+**Text companions (D077).** After the file, Argus sends `<the same name>.md`: the file's details as YAML
+frontmatter and its text page by page or slide by slide, for a scheduled Claude task to turn into vault notes. The
+format, how to find new files, and a prompt for the scheduled task are in [planner-inbox.md](planner-inbox.md).
+**Update the morning planner's prompt to skip `.md` files** when it makes tasks, or each file becomes two tasks.
+If the companion can't be made or sent, the file is still sent and the page says so quietly. Each companion logs
+`planner inbox companion` with its name, size, and `extracted` (`full`, `partial`, `none`), never its text.
+
 **Rotate or revoke:** run `argus drive-auth` again and replace `drive_refresh_token` on the Pi, then
 `sudo systemctl restart argus-web`. To cut Argus off, remove it at
 [myaccount.google.com/connections](https://myaccount.google.com/connections) while signed in as the Drive account.

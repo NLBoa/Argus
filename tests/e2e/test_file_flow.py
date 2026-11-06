@@ -47,6 +47,8 @@ def test_send_a_file(phone: Page, fresh_server: Callable[..., LiveServer]) -> No
     expect(heading).to_be_focused()
     expect(page.locator(".file-preview__name")).to_have_text(NAME)
     expect(page.get_by_text("Demo: nothing was uploaded.")).to_be_visible()
+    # The text companion (D077): this PDF is filler, so a quiet line says there was no text.
+    expect(page.locator("[data-companion=none]")).to_contain_text("No text to copy")
     page.get_by_role("link", name="Add another file").click()
     expect(page.get_by_label("Course")).to_have_value("CMSC351")
 

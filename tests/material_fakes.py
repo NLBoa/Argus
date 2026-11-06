@@ -1,8 +1,9 @@
-"""Build small real PDF and PPTX files in memory for extraction tests."""
+"""Build small real PDF, PPTX, and DOCX files in memory for extraction tests."""
 
 from __future__ import annotations
 
 import io
+import zipfile
 
 
 def pdf(pages: list[str]) -> bytes:
@@ -54,4 +55,37 @@ def pptx(slides: list[tuple[str, str]], notes: str | None = None) -> bytes:
             slide.notes_slide.notes_text_frame.text = notes
     buf = io.BytesIO()
     deck.save(buf)
+    return buf.getvalue()
+
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+
+
+def docx_xml(body: str, *, prolog: str = "") -> bytes:
+    """A `word/document.xml` around `body` (WordprocessingML with `w:` and `mc:` prefixes)."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + prolog
+        + f'<w:document xmlns:w="{W_NS}" xmlns:mc="{MC_NS}"><w:body>{body}</w:body></w:document>'
+    ).encode()
+
+
+def para(*runs: str) -> str:
+    """A paragraph with one run per text."""
+    return "<w:p>" + "".join(f"<w:r><w:t>{r}</w:t></w:r>" for r in runs) + "</w:p>"
+
+
+def docx(document: bytes | None, *, pages: int | None = None, extra: int = 0) -> bytes:
+    """A minimal .docx zip: the document part, Word's page count if given, and `extra` bytes
+    of filler in a part of their own."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        if document is not None:
+            z.writestr("word/document.xml", document)
+        if pages is not None:
+            z.writestr("docProps/app.xml", f"<Properties><Pages>{pages}</Pages></Properties>")
+        if extra:
+            z.writestr("word/media/filler.bin", b"\0" * extra)
     return buf.getvalue()

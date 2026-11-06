@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
+import yaml
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -25,6 +27,7 @@ from argus.web.app import create_app
 from argus.web.mcp_server import create_mcp_app
 from argus.web.webhook import create_webhook_app
 from tests.drive_fakes import LINK, RecordingDrive
+from tests.material_fakes import pdf
 
 ORIGIN = {"Origin": "http://testserver"}
 HX = {**ORIGIN, "HX-Request": "true"}
@@ -182,9 +185,15 @@ def test_send_with_htmx_uploads_and_shows_the_link(
 ) -> None:
     r = send(client)
     assert r.status_code == 200
-    assert [(s.name, s.mime_type, s.size, s.data) for s in drive.sent] == [
-        (NAME, "application/pdf", len(PDF), PDF)
-    ]
+    original, companion = drive.sent  # the file first, then its text companion (D077)
+    assert (original.name, original.mime_type, original.size, original.data) == (
+        NAME,
+        "application/pdf",
+        len(PDF),
+        PDF,
+    )
+    assert (companion.name, companion.mime_type) == (NAME + ".md", "text/markdown")
+    assert companion.size == len(companion.data)
     assert r.headers["HX-Retarget"] == "#main"
     assert r.headers["HX-Reselect"] == "#main"
     assert "Sent to the planner" in r.text
@@ -198,7 +207,7 @@ def test_send_without_js(client: TestClient, drive: RecordingDrive) -> None:
     assert r.status_code == 200
     assert "Sent to the planner" in r.text
     assert "HX-Retarget" not in r.headers
-    assert len(drive.sent) == 1
+    assert [s.name for s in drive.sent] == [NAME, NAME + ".md"]
 
 
 @pytest.mark.parametrize(
@@ -214,7 +223,8 @@ def test_each_file_type_keeps_its_format(
     client: TestClient, drive: RecordingDrive, ext: str, content: bytes, mime: str
 ) -> None:
     assert send(client, filename=f"x.{ext}", content=content).status_code == 200
-    [sent] = drive.sent
+    sent, companion = drive.sent
+    assert companion.name == sent.name + ".md"
     assert sent.name.endswith(f"· deep.{ext.lower()}")
     assert sent.mime_type.endswith(mime)
     assert "google-apps" not in sent.mime_type
@@ -312,6 +322,7 @@ def test_drive_failure_keeps_the_form(tmp_path: Path, clock: FakeClock) -> None:
         assert r.status_code == 200
         assert "Argus can't see the folder." in text(r)
         assert "<form" not in r.text
+        assert [s.name for s in failing.sent] == [NAME]  # no companion without its file
         plain = send(c, headers=ORIGIN)
         assert plain.status_code == 502
         assert "Argus can't see the folder." in text(plain)
@@ -340,22 +351,133 @@ def test_send_through_the_drive_client(tmp_path: Path, clock: FakeClock) -> None
     with respx.mock(assert_all_called=True) as google:
         google.post(TOKEN_URL).respond(200, json={"access_token": "a", "expires_in": 3600})
         start = google.post(UPLOAD_URL).respond(200, headers={"Location": session})
-        put = google.put(session).respond(
-            200,
-            json={
-                "id": "f9",
-                "name": NAME,
-                "webViewLink": "https://drive.google.com/file/d/f9/view",
-            },
+        put = google.put(session).mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "id": "f9",
+                        "name": NAME,
+                        "webViewLink": "https://drive.google.com/file/d/f9/view",
+                    },
+                ),
+                httpx.Response(200, json={"id": "f10", "name": NAME + ".md"}),
+            ]
         )
         with TestClient(create_app(config, secrets, clock, db_path=db)) as c:
             assert c.get("/files/new").status_code == 200
             r = send(c)
     assert r.status_code == 200
     assert 'href="https://drive.google.com/file/d/f9/view"' in r.text
-    assert json.loads(start.calls.last.request.content) == {
-        "name": NAME,
-        "parents": ["Inbox_Folder-0123456789"],
-        "mimeType": "application/pdf",
+    assert [json.loads(c.request.content) for c in start.calls] == [
+        {"name": NAME, "parents": ["Inbox_Folder-0123456789"], "mimeType": "application/pdf"},
+        {"name": NAME + ".md", "parents": ["Inbox_Folder-0123456789"], "mimeType": "text/markdown"},
+    ]
+    assert put.calls[0].request.read() == PDF
+    data, _ = companion(put.calls[1].request.read())
+    assert data["drive_file_id"] == "f9"
+    assert data["drive_link"] == "https://drive.google.com/file/d/f9/view"
+
+
+# ---------------------------------------------------------------- the text companion (D077)
+
+
+def companion(raw: bytes) -> tuple[dict[str, object], str]:
+    text = raw.decode()
+    assert text.startswith("---\n")
+    head, body = text[4:].split("\n---\n", 1)
+    return yaml.safe_load(head), body
+
+
+def test_companion_carries_the_text_and_the_details(
+    client: TestClient, drive: RecordingDrive
+) -> None:
+    lecture = pdf(["Recurrences by substitution", "The master theorem"])
+    r = send(client, headers=ORIGIN, filename="C:\\Users\\me\\lecture 9.pdf", content=lecture)
+    assert r.status_code == 200
+    data, body = companion(drive.sent[1].data)
+    assert data == {
+        "schema_version": 1,
+        "format": "argus-planner-inbox-companion",
+        "file": NAME,
+        "course": "CMSC351",
+        "title": "Week 9 slides recurrences",
+        "type": "slides",
+        "depth": "deep",
+        "done_by_local": "2026-10-20 09:30",
+        "done_by_utc": "2026-10-20T13:30:00Z",
+        "timezone": "America/New_York",
+        "original_name": "lecture 9.pdf",
+        "mime_type": "application/pdf",
+        "size_bytes": len(lecture),
+        "drive_file_id": "file-1",
+        "drive_link": LINK,
+        "unit": "page",
+        "count": 2,
+        "sections": 2,
+        "extracted": "full",
+        "extracted_reason": "all 2 pages read",
+        "uploaded_at": "2026-10-19T13:00:00Z",
     }
-    assert put.calls.last.request.read() == PDF
+    assert "## Page 1\n\nRecurrences by substitution\n" in body
+    assert "## Page 2\n\nThe master theorem\n" in body
+    assert 'data-companion="full"' in r.text
+    assert "A text copy went with it for the planner (all 2 pages read)." in text(r)
+
+
+def test_image_companion_says_there_is_no_text(client: TestClient, drive: RecordingDrive) -> None:
+    r = send(client, filename="board.png", content=PNG, type="notes")
+    data, body = companion(drive.sent[1].data)
+    assert (data["unit"], data["extracted"], data["extracted_reason"]) == (
+        "image",
+        "none",
+        "image — read the file itself",
+    )
+    assert data["count"] is None
+    assert "## " not in body
+    assert "No text to copy: image — read the file itself." in text(r)
+
+
+def test_unreadable_pdf_still_gets_a_companion(client: TestClient, drive: RecordingDrive) -> None:
+    send(client)  # PDF is a header and filler, with no page tree
+    data, _ = companion(drive.sent[1].data)
+    assert data["extracted"] == "none"
+
+
+def test_companion_upload_failure_keeps_the_success(
+    tmp_path: Path, clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    flaky = RecordingDrive(fail_companion=DriveFailure(Problem.RATE, "Slow down.", 429))
+    lecture = pdf(["Private lecture words"])
+    with build(tmp_path, clock, flaky) as c, caplog.at_level(logging.INFO):
+        r = send(c, content=lecture)
+    assert r.status_code == 200
+    assert r.headers["HX-Retarget"] == "#main"
+    assert "Sent to the planner" in r.text
+    assert [s.name for s in flaky.sent] == [NAME, NAME + ".md"]
+    assert 'data-companion="failed"' in r.text
+    assert "The file did, and the planner can still open it." in text(r)
+    assert "Slow down." not in r.text  # quiet: not the error banner
+    assert 'id="file-error"' not in r.text
+    assert "Private lecture words" not in caplog.text
+
+
+def test_companion_build_failure_keeps_the_success(
+    client: TestClient,
+    drive: RecordingDrive,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import argus.web.routes.files as files
+
+    def boom(ext: str, stream: object) -> object:
+        raise MemoryError
+
+    monkeypatch.setattr(files, "extract_inbox", boom)
+    with caplog.at_level(logging.WARNING):
+        r = send(client, headers=ORIGIN)
+    assert r.status_code == 200
+    assert [s.name for s in drive.sent] == [NAME]
+    assert 'data-companion="failed"' in r.text
+    [record] = [x for x in caplog.records if "companion" in x.getMessage()]
+    assert (record.file_name, record.bytes, record.error) == (NAME, len(PDF), "MemoryError")  # type: ignore[attr-defined]

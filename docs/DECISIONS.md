@@ -752,3 +752,33 @@ plans again. Exam study is still clamped to 1-6 h (D062). **Reminders.** A moved
 keys carry the due time. Note: deadline texts (24-hour, 3-hour) are for kinds that take a submission; an exam
 gets the 7/3/1-day countdown instead (D075 overstated this). **Vault.** A renamed exam gets a note under its new title
 and the old note stays (Argus never deletes notes), as with a renamed Canvas item. No schema change.
+
+## D077 — Machine-readable companions in the planner inbox (2026-11-06)
+**Decision.** After each file the file adder sends (D074), Argus sends a text companion to the same Drive folder,
+named `<the file's name>.md` (`text/markdown`), so it sorts right after its file and a name ending `.<ext>.md` is
+always a companion. It is YAML frontmatter (`schema_version: 1`, a fixed field order, every string double-quoted as
+a JSON string, every value on one line): course, title, type, depth, done-by as local wall time and as UTC with
+`Z`, the original's Drive name, device name, MIME type, size, and Drive id and link, the unit (page, slide,
+document, image), the page or slide count, `extracted: full|partial|none` with a one-line reason, and Argus's
+upload time. The body has `## Page n` / `## Slide n` (`(hidden)` for a hidden slide) / `## Document` sections in
+reading order, with line breaks kept and speaker notes under `### Speaker notes`. Extracted lines that Markdown
+would read as a heading or rule get a backslash, so only Argus writes heading lines. The renderer is pure
+(`domain/inbox_companion.py`); the format is documented for the reader in `docs/planner-inbox.md`. **Why.** The
+student's scheduled Claude task (morning, midday, night) turns new Inbox files into Obsidian notes. Argus doesn't
+write those notes itself: the task works outside Argus's regions, in its own `Planner/` notes. Text it can split
+and parse without guessing saves it opening every PDF and deck, and is what a phone-taken photo or a scan lacks,
+which `extracted: none` says up front. **Extraction** (`collectors/extract_text.extract_inbox`, run in a thread
+after the original is uploaded). PDF with pypdf, PPTX with python-pptx (title first, then shapes in slide order,
+groups, and tables as `a | b` rows). DOCX with the standard library only: `word/document.xml` streamed through
+expat, one line per paragraph (table cells, text boxes once, not their `mc:Fallback` copy, no deleted text or
+field codes, `- ` for list items), and Word's page count from `docProps/app.xml`. No new dependency, no OCR:
+images and PDFs with no text layer get `extracted: none`. **Limits** (the Pi 4B, and files from anywhere): 300
+pages or slides, 250,000 characters, and 30 seconds (checked between pages and every 200 Word paragraphs), each
+giving `partial`; a DOCX or PPTX whose declared unpacked size is over 200 MB or has over 5,000 parts is refused
+(zipfile never reads past a part's declared size); a Word part with a DTD is refused, so no entity is expanded;
+pypdf caps its own decompression. A password-protected or damaged file, or any exception, becomes `none` with a
+reason; the extractor never raises. **Failure.** The original always goes first. If the companion can't be built
+or uploaded, the send still succeeds and the result page says so in a muted line; the log carries the name, size,
+and error type, never text. Argus never reads the Inbox back, so the scheduled task keeps its own record of what
+it has handled (Drive `createdTime` plus a processed list by Drive file id). The morning planner that makes tasks
+must skip `.md` companions.

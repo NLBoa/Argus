@@ -4,10 +4,14 @@ can read its course, deadline, and depth.
 Tailnet only. The dashboard is never behind Funnel (D073), and these routes also refuse any
 request Tailscale marks as Funnel traffic, so a Funnel pointed at the dashboard by mistake
 still can't reach them. Hidden (404) when Drive isn't set up (D055).
+
+After the file, its text companion goes to the same folder (D077, `docs/planner-inbox.md`).
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
 import sqlite3
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -20,6 +24,15 @@ from starlette.datastructures import FormData, UploadFile
 
 from argus.capabilities import Feature
 from argus.clock import to_local
+from argus.collectors.extract_text import extract_inbox
+from argus.domain.inbox_companion import (
+    COMPANION_MIME,
+    CompanionMeta,
+    Extracted,
+    Extraction,
+    companion_name,
+    render_companion,
+)
 from argus.domain.inbox_name import (
     MAX_BYTES,
     MIME_TYPES,
@@ -33,7 +46,7 @@ from argus.drive import DriveFailure, Uploaded
 from argus.planner.suggestions import by_suggestions, default_by
 from argus.store import repo
 from argus.web.deps import AppState, get_conn, get_state
-from argus.web.file_form import FileForm, preview
+from argus.web.file_form import CheckedFile, FileForm, preview
 from argus.web.format import due_text
 from argus.web.routes.common import is_htmx, log, render
 from argus.web.task_form import FieldError
@@ -65,6 +78,15 @@ def file_adder_on(request: Request) -> None:
 router = APIRouter(dependencies=[Depends(tailnet_only), Depends(file_adder_on)])
 State = Annotated[AppState, Depends(get_state)]
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+
+
+@dataclass(frozen=True)
+class CompanionView:
+    """How the text companion (D077) went, for a quiet line on the success page."""
+
+    sent: bool
+    extracted: str = ""  # full, partial, none
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -224,7 +246,66 @@ async def _send(
     if isinstance(result, DriveFailure):
         error = FieldError("drive", result.message)
         return _failed(request, state, conn, form=form, error=error, status=502)
-    return _sent(request, state, conn, result, checked.course)
+    companion = await _send_companion(state, upload, ext, checked, result)
+    return _sent(request, state, conn, result, course=checked.course, companion=companion)
+
+
+async def _send_companion(
+    state: AppState, upload: UploadFile, ext: str, checked: CheckedFile, sent: Uploaded
+) -> CompanionView:
+    """The file's text companion (D077), sent after the file itself. Whatever happens here, the
+    file is already in the inbox, so a failure is only logged (name and size, never contents)
+    and noted quietly on the success page."""
+    assert state.drive is not None
+    try:
+        extraction = await asyncio.to_thread(extract_inbox, ext, upload.file)
+        meta = CompanionMeta(
+            file_name=sent.name,
+            course=checked.course,
+            title=checked.what,
+            file_type=checked.file_type.value,
+            depth=checked.depth.value,
+            done_by=checked.by,
+            original_name=re.split(r"[\\/]", upload.filename or "")[-1],
+            mime_type=mime_type(ext),
+            size_bytes=sent.size,
+            uploaded_at=state.clock.now(),
+            drive_file_id=sent.file_id or None,
+            drive_link=sent.link,
+        )
+        data = render_companion(meta, extraction).encode()
+        result = await state.drive.upload(
+            name=companion_name(sent.name),
+            mime_type=COMPANION_MIME,
+            size=len(data),
+            chunks=_once(data),
+        )
+    except Exception as e:  # never lose the success of the upload over its companion
+        log.warning(
+            "planner inbox companion failed",
+            extra={"file_name": sent.name, "bytes": sent.size, "error": type(e).__name__},
+        )
+        return CompanionView(sent=False)
+    if isinstance(result, DriveFailure):
+        return CompanionView(sent=False)  # the Drive client logged it
+    _log_extraction(sent, extraction)
+    return CompanionView(True, extraction.status.value, extraction.reason)
+
+
+def _log_extraction(sent: Uploaded, extraction: Extraction) -> None:
+    log.info(
+        "planner inbox companion",
+        extra={
+            "file_name": sent.name,
+            "bytes": sent.size,
+            "extracted": extraction.status.value,
+            "sections": len(extraction.sections) if extraction.status is not Extracted.NONE else 0,
+        },
+    )
+
+
+async def _once(data: bytes) -> AsyncIterator[bytes]:
+    yield data
 
 
 def _size(upload: UploadFile) -> int:
@@ -276,14 +357,25 @@ def _failed(
 
 
 def _sent(
-    request: Request, state: AppState, conn: sqlite3.Connection, sent: Uploaded, course: str
+    request: Request,
+    state: AppState,
+    conn: sqlite3.Connection,
+    sent: Uploaded,
+    *,
+    course: str,
+    companion: CompanionView,
 ) -> Response:
     response = render(
         request,
         state,
         conn,
         "pages/file_sent.html",
-        {"sent": sent, "course": course, "size": _megabytes(sent.size)},
+        {
+            "sent": sent,
+            "course": course,
+            "size": _megabytes(sent.size),
+            "companion": companion,
+        },
         active="/files/new",
         title="Sent to the planner",
     )
