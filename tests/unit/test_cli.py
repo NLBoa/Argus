@@ -63,3 +63,23 @@ def test_too_many_windows_on_a_day_is_an_error(tmp_path: Path) -> None:
     busy.write_text("schedule:\n  work_windows:\n" + rows)
     result = runner.invoke(app, ["check-config", "-c", str(busy)])
     assert result.exit_code != 0
+
+
+def test_check_config_warns_about_a_half_set_up_file_adder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for var in [v for v in __import__("os").environ if v.startswith("ARGUS_")]:
+        monkeypatch.delenv(var)
+    folder_only = tmp_path / "folder.yaml"
+    folder_only.write_text('planner_inbox: { folder_id: "Inbox_Folder-0123456789" }\n')
+    result = runner.invoke(app, ["check-config", "-c", str(folder_only)])
+    assert result.exit_code == 0
+    assert "the file adder needs planner_inbox.folder_id" in result.output
+    for name in ("DRIVE_CLIENT_ID", "DRIVE_CLIENT_SECRET", "DRIVE_REFRESH_TOKEN"):
+        monkeypatch.setenv(f"ARGUS_{name}", "x-value")
+    complete = runner.invoke(app, ["check-config", "-c", str(folder_only)])
+    assert "the file adder needs" not in complete.output
+    assert "drive_refresh_token: set" in complete.output
+    assert "x-value" not in complete.output
+    plain = runner.invoke(app, ["check-config", "-c", str(REPO_ROOT / "config.example.yaml")])
+    assert "the file adder needs" in plain.output  # credentials without a folder

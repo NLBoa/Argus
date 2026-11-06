@@ -341,7 +341,7 @@ def test_more_menu_keyboard_path(page: Page, base_url: str) -> None:
     menu = nav.locator(".more__menu")
     expect(menu).to_be_visible()
     page.keyboard.press("Tab")
-    expect(nav.get_by_role("link", name="Workload")).to_be_focused()
+    expect(menu.get_by_role("link").first).to_be_focused()  # "Add a file" when Drive is set up
     page.keyboard.press("Escape")
     expect(menu).to_be_hidden()
     expect(more).to_be_focused()

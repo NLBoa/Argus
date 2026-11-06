@@ -18,6 +18,7 @@ from argus.capabilities import Capabilities, derive
 from argus.clock import Clock
 from argus.collectors.http import Fetcher
 from argus.config import AppConfig, Secrets
+from argus.drive import Uploader
 from argus.store.db import connect
 from argus.web import format as fmt
 
@@ -46,13 +47,19 @@ class AppState:
     runner_factory: Callable[[sqlite3.Connection, Fetcher], Runner] | None = None
     kiosk_interval: float = 30.0
     ai_transport: Any = None  # argus.ai.client.Transport; None = build from the API key
+    drive: Uploader | None = None  # the planner inbox (D074); None = not set up
     fetcher: Fetcher | None = None
     sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     caps: Capabilities = field(init=False)
 
     def __post_init__(self) -> None:
-        self.caps = derive(self.config, self.secrets, ai=self.ai_transport is not None)
+        self.caps = derive(
+            self.config,
+            self.secrets,
+            ai=self.ai_transport is not None,
+            drive=self.drive is not None,
+        )
 
 
 class Assets:

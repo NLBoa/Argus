@@ -54,6 +54,13 @@ ai:
 canvas:
   base_url: "https://umd.instructure.com"
 
+# The file adder (/files/new): files you send go into this Google Drive folder, named so your
+# morning planner can read the course, deadline, and depth. The ID is the last part of the
+# folder's URL (drive.google.com/drive/folders/<id>). Without it the page stays hidden.
+# Setup, including the Google sign-in: docs/runbook.md, "File adder".
+# planner_inbox:
+#   folder_id: "your-inbox-folder-id"
+
 paths:
   data_dir: var              # SQLite DB, caches
   vault_dir: var/vault       # git clone of the Obsidian vault

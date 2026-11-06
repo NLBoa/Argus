@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title" tabindex="-1" autofocus>Sent to the planner</h1>
+  <p class="page-sub">It's in the planner's Inbox in Google Drive. The planner turns it into tasks on its next morning run.</p>
+</div>
+<section class="file-form panel panel-pad grid gap-4" aria-labelledby="sent-label">
+  <div class="grid gap-1">
+    <span class="text-sm font-bold" id="sent-label">File name</span>
+    <p class="file-preview__name m-0">{{ sent.name }}</p>
+    <p class="text-sm text-muted m-0">{{ size }}</p>
+  </div>
+  {% if sent.link %}
+  <p class="m-0"><a class="file-sent__link" href="{{ sent.link }}" target="_blank" rel="noopener noreferrer">Open in Google Drive{{ icon("external-link", "icon-sm") }}<span class="visually-hidden"> (opens in a new tab)</span></a></p>
+  {% else %}
+  <p class="m-0 text-muted">Demo: nothing was uploaded.</p>
+  {% endif %}
+  <div class="flex flex-wrap gap-2">
+    <a class="btn btn-primary" href="/files/new?course={{ course }}">{{ icon("plus", "icon-sm") }}Add another file</a>
+    <a class="btn btn-quiet" href="/today">Back to Today</a>
+  </div>
+</section>
+{% endblock %}

@@ -74,6 +74,63 @@ sudo argus-admin check-config                                # every secret show
 | `ntfy_topic` | Any long random name; subscribe to it in the ntfy app. Anyone who knows it can read your pushes |
 | `anthropic_api_key` | console.anthropic.com → API keys. Without it, every AI feature uses its fallback |
 | `healthchecks_url` | healthchecks.io → your check's ping URL (see [Dead-man's switch](#dead-mans-switch)) |
+| `drive_client_id`, `drive_client_secret`, `drive_refresh_token` | `argus drive-auth` writes all three (see [File adder](#file-adder-google-drive)) |
+
+## File adder (Google Drive)
+
+`/files/new` (More → Add a file) sends a file to the morning planner's Drive inbox, named
+`<COURSE> · <what> · <type> · by <YYYY-MM-DD HH:MM> · <depth>.<ext>` (D074). It uploads as you, with an OAuth
+"Desktop app" client and a refresh token. It doesn't use a service account, because service accounts have no Drive
+storage. The page is on the tailnet-only dashboard. It also refuses any request Tailscale marks as Funnel traffic,
+so it stays private even if the dashboard port were ever funneled. Until all four pieces below are set, the page and
+its menu entry don't exist.
+
+**One-time Google Cloud setup** (about 10 minutes, in a browser):
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project (for example "Argus").
+   Any Google account can own the project.
+2. **APIs & Services → Library**: search "Google Drive API" and click **Enable**.
+3. **Google Auth Platform → Branding**: app name "Argus", your email as the support and developer contact. Under
+   **Audience**, choose **External**.
+4. **Audience → Publish app**, so the status is **In production**. This matters: while an app is in *Testing*,
+   Google's refresh tokens expire after 7 days, and the file adder would stop working every week. A personal app
+   doesn't need Google's verification. You'll see a "Google hasn't verified this app" screen when you sign in;
+   choose **Advanced → Go to Argus**.
+5. **Clients → Create client → Application type: Desktop app**, named "Argus file adder". Click **Download JSON**.
+   Keep the file outside the repo (`~/Downloads` is fine). Never commit it.
+
+**Sign in and get the credentials** (on the Mac, which has a browser):
+
+```sh
+uv run argus drive-auth --client-secrets ~/Downloads/client_secret_*.json --folder-id <Inbox folder ID>
+```
+
+The folder ID is the last part of the Inbox folder's URL. Sign in as the **Drive account that owns the planner's
+Inbox**, not your school account. The command asks for the narrow `drive.file` scope first ("only the specific
+files you use with this app"), then checks that the Inbox folder is reachable. `drive.file` only reaches files and
+folders Argus created, so it usually can't see an Inbox you made yourself. When that happens, the command explains
+and asks whether to sign in again with the full `drive` scope. Say yes to use the existing folder. The full scope
+also lets Argus read everything in that Drive account, which is why it's a separate step. `--full-drive` skips
+straight to it. On success the command prints the account and folder name, then writes `drive_client_id`,
+`drive_client_secret`, and `drive_refresh_token` to `var/drive-credentials/` (mode 600, git-ignored).
+
+**Install on the Pi:**
+
+```sh
+scp var/drive-credentials/drive_* argus-pi:
+ssh argus-pi 'sudo install -o root -g root -m 600 drive_client_id drive_client_secret drive_refresh_token /etc/argus/credentials/ && rm drive_client_id drive_client_secret drive_refresh_token'
+ssh argus-pi 'sudo nano /etc/argus/config.yaml'   # add:  planner_inbox: { folder_id: "<Inbox folder ID>" }
+ssh argus-pi 'sudo /opt/argus-src/deploy/update-on-pi.sh <branch>'   # re-runs install.sh, which loads the credentials
+ssh argus-pi 'sudo argus-admin check-config'      # drive_* set, and no file adder warning
+rm -r var/drive-credentials
+```
+
+Then open the dashboard on your phone (on Tailscale) → More → **Add a file**. Each upload logs its name and size
+(`journalctl -u argus-web | grep "planner inbox"`), never its contents.
+
+**Rotate or revoke:** run `argus drive-auth` again and replace `drive_refresh_token` on the Pi, then
+`sudo systemctl restart argus-web`. To cut Argus off, remove it at
+[myaccount.google.com/connections](https://myaccount.google.com/connections) while signed in as the Drive account.
 
 ## Tunnels: dashboard private, connector and webhook public
 
@@ -310,4 +367,7 @@ secrets and phone numbers.
 | Proposals keep coming back | That is a change you edited: approve it, or reject it (rejected changes are never proposed again) |
 | AI features stopped | Monthly budget reached (Health shows spend), or no key. Everything falls back to deterministic behavior |
 | Dashboard unreachable | `systemctl status argus-web`; `tailscale serve status`; the device must be on your tailnet |
+| File adder: "Google turned down Argus's Drive sign-in" | The refresh token expired or was revoked. If the Google app is still in *Testing*, publish it (tokens last 7 days in Testing). Run `argus drive-auth` again and replace `drive_refresh_token` |
+| File adder: "Argus can't see the planner's Inbox folder" | Wrong `planner_inbox.folder_id`, or the `drive.file` scope can't reach a folder Argus didn't create: `argus drive-auth --full-drive` |
+| No "Add a file" in More | `planner_inbox.folder_id` or a `drive_*` credential is missing, or install.sh wasn't re-run after adding them: `sudo argus-admin check-config` |
 | Database corrupted | Restore the latest backup (above) |

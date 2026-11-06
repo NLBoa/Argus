@@ -5,6 +5,14 @@ announcements, and course resources from ELMS (Canvas), Gradescope, Piazza, and 
 by SMS or ntfy. The full guide to working on it is [CLAUDE.md](CLAUDE.md), and the guide to running it on the Pi is
 [docs/runbook.md](docs/runbook.md).
 
+## File adder
+
+On the dashboard, More → **Add a file** sends a PDF, PPTX, DOCX, PNG, or JPG to the morning planner's Google Drive
+inbox, named `<COURSE> · <what> · <type> · by <YYYY-MM-DD HH:MM> · <depth>.<ext>` so the planner knows the course,
+deadline, and depth. "Done by" suggests the course's next class and its upcoming deadlines. The page is tailnet-only
+and hidden until Drive is set up: one Google Cloud OAuth client, then `argus drive-auth` (setup in
+[docs/runbook.md](docs/runbook.md#file-adder-google-drive), design in D074).
+
 ## Claude connector (MCP)
 
 ### What it does

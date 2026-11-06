@@ -23,10 +23,11 @@ from argus import __version__
 from argus.clock import Clock, SystemClock
 from argus.collectors.http import Fetcher, make_client
 from argus.config import AppConfig, Secrets
+from argus.drive import DriveClient, Uploader
 from argus.logging import get_logger
 from argus.store.db import connect, migrate
 from argus.web.deps import STATIC_DIR, AppState, Runner, make_templates
-from argus.web.routes import actions, common, kiosk, pages, pwa
+from argus.web.routes import actions, common, files, kiosk, pages, pwa
 
 log = get_logger(__name__)
 # D017/D042: everything is same-origin. Alpine's standard build evaluates x-* expressions with
@@ -66,16 +67,22 @@ def create_app(
     runner_factory: Callable[[sqlite3.Connection, Fetcher], Runner] | None = None,
     kiosk_interval: float = 30.0,
     ai_transport: Any = None,
+    drive: Uploader | None = None,
 ) -> FastAPI:
+    """`drive` replaces the planner inbox uploader (tests, the demo); by default it is built
+    from the config and secrets, or left out when they aren't set up (D074)."""
     cfg = config or AppConfig()
+    keys = secrets or Secrets()
+    when = clock or SystemClock()
     state = AppState(
         config=cfg,
-        secrets=secrets or Secrets(),
-        clock=clock or SystemClock(),
+        secrets=keys,
+        clock=when,
         db_path=db_path or cfg.paths.db_path,
         runner_factory=runner_factory,
         kiosk_interval=kiosk_interval,
         ai_transport=ai_transport,
+        drive=drive or DriveClient.from_config(cfg, keys, when),
     )
 
     @asynccontextmanager
@@ -151,6 +158,7 @@ def create_app(
 
     app.include_router(pages.router)
     app.include_router(actions.router)
+    app.include_router(files.router)
     app.include_router(kiosk.router)
     app.include_router(pwa.router)
     return app

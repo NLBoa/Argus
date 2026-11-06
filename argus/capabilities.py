@@ -25,6 +25,9 @@ from argus.config import AppConfig, Secrets
 from argus.domain.models import submission_sources
 
 AI = "ai"  # pseudo-source: an Anthropic key (or an injected transport in tests and the demo)
+# pseudo-source: the planner inbox folder and its Google OAuth credentials (or an injected
+# uploader in tests and the demo), D074
+DRIVE = "drive"
 
 
 class Feature(StrEnum):
@@ -39,6 +42,7 @@ class Feature(StrEnum):
     SUBMISSION_TRACKING = "submission_tracking"  # Argus can see that work was submitted
     AI = "ai"
     STUDY_GENERATION = "study_generation"  # concept notes and practice from course files
+    FILE_ADDER = "file_adder"  # send files to the morning planner's Drive inbox (D074)
 
 
 def _any(*options: set[str]) -> tuple[frozenset[str], ...]:
@@ -59,6 +63,7 @@ FEATURES: Mapping[Feature, tuple[frozenset[str], ...]] = {
     Feature.SUBMISSION_TRACKING: _any({"canvas_api"}, {"gradescope"}),
     Feature.AI: _any({AI}),
     Feature.STUDY_GENERATION: _any({"canvas_modules", AI}),
+    Feature.FILE_ADDER: _any({DRIVE}),
 }
 
 
@@ -127,8 +132,21 @@ class Capabilities:
         return replace(self, ai_calls_left=self.has(Feature.AI) and spent < cap)
 
 
-def derive(config: AppConfig, secrets: Secrets, *, ai: bool = False) -> Capabilities:
-    """`ai` is True when an AI transport is injected (tests, the demo) without a key."""
+def drive_configured(config: AppConfig, secrets: Secrets) -> bool:
+    """The file adder has a folder and all three Google OAuth credentials (D074)."""
+    return bool(
+        config.planner_inbox.folder_id
+        and secrets.drive_client_id
+        and secrets.drive_client_secret
+        and secrets.drive_refresh_token
+    )
+
+
+def derive(
+    config: AppConfig, secrets: Secrets, *, ai: bool = False, drive: bool = False
+) -> Capabilities:
+    """`ai` is True when an AI transport is injected (tests, the demo) without a key; `drive`
+    likewise for an injected Drive uploader."""
     # enabled() only reads config and secrets; it never touches the clock or the network.
     ctx = CollectContext(
         config=config, secrets=secrets, clock=cast(Clock, None), fetcher=cast(Fetcher, None)
@@ -137,6 +155,8 @@ def derive(config: AppConfig, secrets: Secrets, *, ai: bool = False) -> Capabili
     on = {s for s, enabled in sources.items() if enabled}
     if ai or secrets.anthropic_api_key is not None:
         on.add(AI)
+    if drive or drive_configured(config, secrets):
+        on.add(DRIVE)
     features = frozenset(f for f, options in FEATURES.items() if any(o <= on for o in options))
     piazza = sources.get("piazza", False) or sources.get("piazza_email", False)
     courses = {

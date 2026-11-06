@@ -1,0 +1,4 @@
+{% from "components/ui.html" import icon %}
+{#- The file adder's message area (D074): a mistake or a Drive failure. HTMX swaps just this, so the
+    form and the chosen file stay as they are. -#}
+{% if form_error %}<p class="field-error m-0" id="file-error" role="alert">{{ icon("circle-alert", "icon-sm") }}<span>{{ form_error.message }}</span></p>{% endif %}

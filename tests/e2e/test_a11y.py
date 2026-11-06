@@ -80,3 +80,28 @@ def test_today_states_have_no_violations(
     assert results.violations_count == 0, (
         f"{state} ({theme}, {viewport}):\n{results.generate_report()}"
     )
+
+
+def test_file_adder_states_have_no_violations(  # type: ignore[no-untyped-def]
+    page: Page, fresh_server, theme: str
+) -> None:
+    """The file adder's filled form, its error message, and the sent page (D074)."""
+    s = fresh_server()
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.emulate_media(color_scheme=theme)  # type: ignore[arg-type]
+    page.goto(s.url + "/files/new?course=CMSC351")
+    page.locator("input[name=file]").set_input_files(
+        files=[{"name": "a.pdf", "mimeType": "application/pdf", "buffer": b"%PDF-1.7\n"}]
+    )
+    page.get_by_label("What it is").fill("Slides")
+    page.get_by_label("Slides", exact=True).check()
+    page.locator("input[name=by_date]").fill("2026-10-01")
+    page.get_by_role("button", name="Upload").click()
+    page.locator("#file-error").wait_for()
+    results = Axe().run(page, options=AXE_OPTIONS)
+    assert results.violations_count == 0, results.generate_report()
+    page.locator("input[name=by_date]").fill("2026-10-22")
+    page.get_by_role("button", name="Upload").click()
+    page.get_by_role("heading", name="Sent to the planner").wait_for()
+    results = Axe().run(page, options=AXE_OPTIONS)
+    assert results.violations_count == 0, results.generate_report()

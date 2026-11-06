@@ -31,7 +31,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | AI evals (real API, not in CI) | `make evals` |
 | Everything / what CI runs (no visual until the overhaul ends) | `make check` / `make check-ci` |
 | Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
-| Webhook / Claude connector (MCP) / backup / restore | `argus serve-webhook` · `argus serve-mcp` ([README](README.md#claude-connector-mcp)) · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
+| Webhook / Claude connector (MCP) / file adder sign-in / backup / restore | `argus serve-webhook` · `argus serve-mcp` ([README](README.md#claude-connector-mcp)) · `argus drive-auth` ([runbook](docs/runbook.md#file-adder-google-drive)) · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
 | CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, …) |
 
 ## Architecture map
@@ -53,8 +53,8 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/sms.py`: replies (parse → AI fallback → ask once → act). `argus/web/webhook.py`: the separate public
   webhook app (D043). `argus/web/mcp_server.py`, `argus/feed.py`: the read-only Claude connector (D073), with
   `domain/changes.py` netting the `item_changes` log. `argus/backup.py`: snapshots, prune, off-device copy, restore.
-- `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault,
-  each isolated.
+- File adder (D074): `domain/inbox_name.py` (the name format), `planner/suggestions.py`, `web/routes/files.py`, `argus/drive.py`, `drive_auth.py`.
+- `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault, each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
   overrides), `argus/planning.py` (`compute`: remaining, load, risk, queue, study time, window forecast; `replan`:
   seed windows, legacy conversion, the window's split; the confirm question; queue actions for SMS:
@@ -94,8 +94,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - **Naming.** Modules are nouns (`merge.py`); functions are verbs (`merge_items`). Records are
   `*Record` (collector output); persisted rows are domain models in `domain/models.py`.
   Course codes are uppercase, no space (`CMSC351`).
-- **Fixtures** live in `tests/fixtures/<source>/`, are synthetic or scrubbed, and never hold real names,
-  emails, ids, or course content.
+- **Fixtures** live in `tests/fixtures/<source>/`, are synthetic or scrubbed, and never hold real names, emails, ids, or course content.
 
 ## Source quirks
 - Canvas iCal times are UTC.
@@ -116,6 +115,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - The newest Playwright Python Docker image is v1.63.0, so Playwright is pinned `==1.63.0` to match.
 - Funnel allows ports 443/8443/10000 and opens a whole port: MCP on 443, dashboard on tailnet-only 8443, webhook on
   10000 (D073). Never commit the real `*.ts.net` name (gitleaks blocks it). Unknown Host → 421 (`mcp.allowed_hosts`).
+- Drive: `drive.file` can't see a folder Argus didn't create (404); Testing-status OAuth tokens die in 7 days; error bodies echo the folder ID (never log them). Funnel traffic carries `Tailscale-Funnel-Request: ?1` (the file adder 404s on it).
 - Twilio signs the exact public URL it posts to: `notifications.webhook_url` must match it character for character.
   STOP/START/HELP are Twilio's (Argus stays silent). `[` and `]` are GSM-7 extension characters (2 septets each).
 

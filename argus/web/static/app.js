@@ -30,6 +30,7 @@
     { id: "go-exams", label: "Go to Exam prep", hint: "g e", href: "/exams" },
     { id: "go-proposals", label: "Review vault proposals", hint: "g p", href: "/proposals" },
     { id: "go-settings", label: "Go to Settings (when you study)", hint: "", href: "/settings" },
+    { id: "add-file", label: "Add a file for the planner", hint: "", href: "/files/new" },
     { id: "go-search", label: "Search", hint: "/", href: "/search" },
     { id: "go-styleguide", label: "Open the styleguide", hint: "", href: "/styleguide" },
     { id: "go-kiosk", label: "Open kiosk view", hint: "", href: "/kiosk" },
@@ -180,6 +181,77 @@
         this.$el.addEventListener("htmx:beforeCleanupElement", () => clearInterval(id), { once: true });
       },
     }));
+
+    // The file adder (D074). The server names the file (GET /files/name), so the preview is the
+    // real name. "Done by" follows the course's first suggestion until the student sets it.
+    Alpine.data("fileAdder", () => {
+      let form = null; // kept out of Alpine's reactive proxy: FormData needs the real element
+      let timer = null;
+      let seq = 0;
+      const sizeText = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
+      return {
+        all: {}, options: [], byDate: "", byTime: "", touched: false,
+        fileName: "", fileSize: "", ext: "", fileError: "", over: false,
+        preview: "", busy: false, percent: 0, phase: "upload",
+        init() {
+          form = this.$el;
+          try { this.all = JSON.parse(form.querySelector("[data-suggestions]")?.textContent || "{}"); } catch { this.all = {}; }
+          this.options = this.all[form.elements.course.value] || [];
+          this.readBy();
+          this.touched = !!(this.byDate || this.byTime) && !this.options.some((s) => s.date === this.byDate && s.time === this.byTime);
+          this.fileChanged(); // a file the browser kept (back/forward)
+        },
+        readBy() { this.byDate = this.$refs.byDate.value; this.byTime = this.$refs.byTime.value; },
+        setBy(date, time) { this.$refs.byDate.value = date; this.$refs.byTime.value = time; this.readBy(); },
+        changed(e) {
+          const name = e.target?.name;
+          if (name === "file") return this.fileChanged();
+          if (name === "course" && e.type === "change") {
+            this.options = this.all[e.target.value] || [];
+            if (!this.touched) this.setBy(this.options[0]?.date || "", this.options[0]?.time || "");
+          }
+          if (name === "by_date" || name === "by_time") { this.readBy(); this.touched = true; }
+          this.refresh();
+        },
+        choose(s) { this.setBy(s.date, s.time); this.touched = true; this.refresh(); },
+        fileChanged() {
+          const f = form.elements.file.files?.[0];
+          const exts = (form.dataset.exts || "").split(",");
+          this.fileError = "";
+          this.fileName = f ? f.name : "";
+          this.fileSize = f ? sizeText(f.size) : "";
+          this.ext = f ? (/\.([a-z0-9]+)$/i.exec(f.name)?.[1] || "").toLowerCase() : "";
+          if (f && !exts.includes(this.ext)) this.fileError = "PDF, PPTX, DOCX, PNG, or JPG files only.";
+          else if (f && f.size > Number(form.dataset.maxBytes)) this.fileError = `That file is over ${form.dataset.maxMb} MB. Send a smaller one, or split it.`;
+          else if (f && f.size === 0) this.fileError = "That file is empty.";
+          this.refresh();
+        },
+        refresh() { clearTimeout(timer); timer = setTimeout(() => this.fetchPreview(), 150); },
+        async fetchPreview() {
+          const q = new URLSearchParams();
+          for (const [k, v] of new FormData(form)) if (typeof v === "string") q.append(k, v);
+          q.set("ext", this.ext);
+          const n = ++seq;
+          try {
+            const r = await fetch(`/files/name?${q}`, { headers: { Accept: "application/json" } });
+            if (r.ok && n === seq) this.preview = (await r.json()).name || "";
+          } catch { /* offline: keep the last preview */ }
+        },
+        start(e) {
+          if (this.fileError) { e.preventDefault(); return; } // the message is already showing
+          const status = document.getElementById("file-status");
+          if (status) status.textContent = "";
+          this.busy = true; this.percent = 0; this.phase = "upload";
+        },
+        progress(e) {
+          const d = e.detail || {};
+          if (this.phase !== "upload" || !d.lengthComputable || !d.total) return;
+          this.percent = Math.min(100, Math.round((100 * d.loaded) / d.total));
+          if (d.loaded >= d.total) this.phase = "drive";
+        },
+        finish() { this.busy = false; this.phase = "upload"; this.percent = 0; },
+      };
+    });
   });
 
   // ---------------------------------------------------------------- HTMX integration

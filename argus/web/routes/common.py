@@ -85,7 +85,8 @@ def page_caps(state: AppState, conn: sqlite3.Connection | None, now: datetime) -
 
 def hidden_pages(caps: Capabilities) -> list[str]:
     """Pages the setup cannot support, so the palette and shortcuts skip them (D055)."""
-    return [] if caps.has(Feature.STAFF_POSTS) else ["/announcements"]
+    hidden = [] if caps.has(Feature.STAFF_POSTS) else ["/announcements"]
+    return hidden if caps.has(Feature.FILE_ADDER) else [*hidden, "/files/new"]
 
 
 def is_htmx(request: Request) -> bool:

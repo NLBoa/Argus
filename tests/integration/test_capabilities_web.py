@@ -7,6 +7,7 @@ so new pages are covered automatically.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -96,7 +97,7 @@ def test_announcements_page_needs_a_post_source(setup: tuple[str, TestClient, Se
     if name == "no-posts":
         assert r.status_code == 307 and r.headers["location"] == "/today"
         boot = re.search(r'id="argus-boot">(.*?)</script>', client.get("/today").text)
-        assert boot and '"pages": ["/announcements"]' in boot.group(1)  # palette skips it
+        assert boot and "/announcements" in json.loads(boot.group(1))["pages"]  # palette skips it
     else:
         assert r.status_code == 200
 

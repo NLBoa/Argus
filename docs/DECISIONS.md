@@ -681,3 +681,41 @@ it happens, so this is less code and exact.
 **Ports.** Funnel makes a whole port public and allows only 443, 8443, and 10000. The connector gets 443, so
 its URL has no port. The dashboard moves to tailnet-only `serve` on 8443, and the Twilio webhook moves to Funnel
 10000 (amends D043). The unit is skipped until `/etc/argus/credentials/mcp_path_secret` exists.
+
+## D074 — A file adder sends files to the morning planner's Drive inbox (2026-11-06)
+**Decision.** `/files/new` (More → Add a file, and the palette) uploads one PDF, PPTX, DOCX, PNG, or JPG (up to
+50 MB) into a Google Drive folder that a Claude scheduled task reads each weekday morning. The planner reads the
+course, deadline, and depth from the file name, so Argus names it exactly
+`<COURSE> · <what> · <type> · by <YYYY-MM-DD HH:MM> · <depth>.<ext>` (`domain/inbox_name.py`). The parts are
+separated by space, U+00B7, space. `what` is NFC-normalized; middle dots and their lookalikes, slashes and their
+lookalikes, line breaks, and control characters become spaces; invisible format characters are dropped; and it is cut
+to 80 characters. `by` is local wall time to the minute. Types are slides, notes, assignment, exam-prep, reading, and
+other. Depth is deep, normal, or skim (default normal). "Done by" suggests the course's next class (strictly after
+now, eight days ahead, DST-correct through `meetings_on`) and its open items due within 30 days, up to 5
+(`planner/suggestions.py`). It defaults to the next class, else the soonest item. Changing the course moves the
+default until the student picks a time. **Why.** The student plans in Reclaim through Claude, and handing it a
+file used to mean naming it by hand. Argus already knows the course codes, class times, and deadlines.
+**Drive.** OAuth installed-app credentials with a stored refresh token (`drive_client_id`, `drive_client_secret`,
+`drive_refresh_token`), never a service account, because those have no Drive storage. `argus drive-auth` runs the
+loopback flow with PKCE on a computer with a browser and writes the three credential files. It asks for `drive.file`
+first, then checks the folder (`files.get` with `canAddChildren`). `drive.file` covers only files the app created
+or was handed through the Picker, so an Inbox the student made returns 404. In that case the command explains and
+offers the full `drive` scope as a separate consent. The Picker was rejected: it would need an API key and a page
+that loads Google's script for a one-time step. The folder ID is `planner_inbox.folder_id` in config.yaml, which
+is not in git. No account email is stored anywhere. Uploads are resumable, sent in a single PUT that streams from
+the spooled temp file with an explicit Content-Length. The session URL must be `https://www.googleapis.com` or
+nothing is sent. The metadata's `mimeType` is the file's real type, so Drive never converts it. Access tokens are
+reused until a minute before they expire, and a 401 gets one fresh token and one retry. Every failure is a
+`DriveFailure` with a message for the student. Drive's own error text echoes the folder ID, so it is never shown or
+logged. Each upload logs its name and size, never its contents.
+**Privacy and safety.** The page is on the tailnet-only dashboard (D073). Its routes also return 404 for any request
+carrying `Tailscale-Funnel-Request`, which tailscaled sets on Funnel traffic and strips from client requests. A
+Funnel pointed at the dashboard by mistake still can't reach it. The webhook and MCP apps don't include the router.
+Hidden, not empty (D055): without the folder ID and all three credentials, `Feature.FILE_ADDER` is off and the
+routes, menu entry, and palette command don't exist. The upload checks the extension, size, and first bytes (a
+renamed file is refused) before anything goes to Drive. **Form.** Without JS it is a plain multipart post, and the result page renders
+directly. With HTMX, a mistake or a Drive failure swaps only the message area, so the
+chosen file stays chosen; success retargets `#main` (`HX-Retarget`/`HX-Reselect`) and focuses the heading. Without
+JS, the page comes back as typed and asks for the file again, since browsers can't keep it. The name preview comes
+from `GET /files/name`, the same code that names the upload, so it can't drift. **Demo.** `DemoDrive` keeps
+nothing and returns no link, so `serve --demo` and the browser suites show the page.

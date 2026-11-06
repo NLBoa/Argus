@@ -162,6 +162,15 @@ class MCPConfig(_Strict):
     allowed_hosts: list[str] = []
 
 
+class PlannerInboxConfig(_Strict):
+    """The file adder (`/files/new`, D074): uploads go to this Google Drive folder, where the
+    morning planner reads them. The OAuth client and refresh token are credentials
+    (`drive_client_id`, `drive_client_secret`, `drive_refresh_token`), never here."""
+
+    # The folder's ID: the last part of its Drive URL (drive.google.com/drive/folders/<id>).
+    folder_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{10,200}$")] | None = None
+
+
 class PathsConfig(_Strict):
     data_dir: Path = Path("var")
     vault_dir: Path = Path("var/vault")
@@ -190,6 +199,7 @@ class AppConfig(_Strict):
     canvas: CanvasConfig = CanvasConfig()
     paths: PathsConfig = PathsConfig()
     mcp: MCPConfig = MCPConfig()
+    planner_inbox: PlannerInboxConfig = PlannerInboxConfig()
 
     @model_validator(mode="after")
     def _unique_courses(self) -> Self:
@@ -224,6 +234,11 @@ class Secrets(BaseModel):
     healthchecks_url: SecretStr | None = None
     # The Claude connector's URL path secret: https://<host>/mcp/<this> (D073)
     mcp_path_secret: SecretStr | None = None
+    # The file adder's Google OAuth client (a "Desktop app") and refresh token (D074);
+    # `argus drive-auth` writes all three.
+    drive_client_id: SecretStr | None = None
+    drive_client_secret: SecretStr | None = None
+    drive_refresh_token: SecretStr | None = None
 
     def secret_values(self) -> list[str]:
         """Plain values of every secret field, for the log redactor."""

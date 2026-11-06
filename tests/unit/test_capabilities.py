@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from argus.capabilities import AI, FEATURES, Capabilities, Feature, derive
-from argus.config import AppConfig, CourseConfig, Secrets
+from argus.capabilities import AI, DRIVE, FEATURES, Capabilities, Feature, derive
+from argus.config import AppConfig, CourseConfig, PlannerInboxConfig, Secrets
 
 COURSES = [
     CourseConfig(
@@ -63,6 +63,7 @@ EXPECTED = {
     Feature.SUBMISSION_TRACKING: (frozenset({"canvas_api"}), frozenset({"gradescope"})),
     Feature.AI: (frozenset({AI}),),
     Feature.STUDY_GENERATION: (frozenset({"canvas_modules", AI}),),
+    Feature.FILE_ADDER: (frozenset({DRIVE}),),
 }
 
 
@@ -133,10 +134,37 @@ def test_every_combination_matches_the_matrix(flags: tuple[bool, ...]) -> None:
         "piazza": piazza,
         "piazza_email": False,
         AI: ai,
+        DRIVE: False,
     }
     for feature, options in EXPECTED.items():
         expected = any(all(on[s] for s in option) for option in options)
         assert caps.has(feature) is expected, feature
+
+
+DRIVE_SECRETS = {
+    "drive_client_id": SecretStr("id.apps.googleusercontent.test"),
+    "drive_client_secret": SecretStr("client-secret"),
+    "drive_refresh_token": SecretStr("refresh-token"),
+}
+INBOX = AppConfig(
+    courses=COURSES, planner_inbox=PlannerInboxConfig(folder_id="Folder_ID-0123456789")
+)
+
+
+def test_file_adder_needs_the_folder_and_all_three_credentials() -> None:
+    assert derive(INBOX, Secrets(**DRIVE_SECRETS)).has(Feature.FILE_ADDER)
+    assert not derive(CONFIG, Secrets(**DRIVE_SECRETS)).has(Feature.FILE_ADDER)  # no folder
+    for missing in DRIVE_SECRETS:
+        partial = {k: v for k, v in DRIVE_SECRETS.items() if k != missing}
+        assert not derive(INBOX, Secrets(**partial)).has(Feature.FILE_ADDER), missing
+    # It is its own setup: no course source is needed, and it enables nothing else.
+    caps = derive(INBOX, Secrets(**DRIVE_SECRETS))
+    assert caps.features == {Feature.FILE_ADDER}
+
+
+def test_an_injected_uploader_counts_as_drive() -> None:
+    assert derive(CONFIG, Secrets(), drive=True).has(Feature.FILE_ADDER)
+    assert not derive(CONFIG, Secrets()).has(Feature.FILE_ADDER)
 
 
 def test_budget_hides_only_new_calls() -> None:

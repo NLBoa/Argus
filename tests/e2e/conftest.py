@@ -17,7 +17,7 @@ import pytest
 import uvicorn
 
 from argus.clock import FakeClock
-from argus.demo import DEMO_CONFIG, DemoProfile, DemoTransport, demo_secrets, seed_demo
+from argus.demo import DEMO_CONFIG, DemoDrive, DemoProfile, DemoTransport, demo_secrets, seed_demo
 from argus.store.db import open_db
 from argus.web.app import create_app
 from argus.web.deps import OfflineRunner
@@ -52,6 +52,7 @@ class LiveServer:
             db_path=self.db,
             runner_factory=lambda c, f: OfflineRunner(),
             ai_transport=DemoTransport(),  # as `argus serve --demo`: AI set up, always offline
+            drive=DemoDrive(),  # the file adder shows; nothing is uploaded
             kiosk_interval=0.5,
         )
         self.port = _free_port()

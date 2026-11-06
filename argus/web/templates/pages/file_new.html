@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon %}
+{#- The file adder (D074). Works without JS (a plain multipart post). With JS: the chosen file's
+    name and size, drop onto the box, suggested "done by" times for the course, a live name
+    preview from the server, and upload progress. -#}
+{% macro invalid(name) %}{% if form_error and form_error.field == name %} aria-invalid="true" aria-describedby="file-error"{% endif %}{% endmacro %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Add a file</h1>
+  <p class="page-sub">Send slides, notes, or a handout to your morning planner. Argus names it so the planner knows the course, when it's due, and how closely to read it.</p>
+</div>
+<form id="file-form" class="file-form panel panel-pad grid gap-5" method="post" action="/files" enctype="multipart/form-data"
+      hx-post="/files" hx-encoding="multipart/form-data" hx-target="#file-status" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type=submit]"
+      x-data="fileAdder" data-max-bytes="{{ max_bytes }}" data-max-mb="{{ max_mb }}" data-exts="{{ exts }}"
+      @input="changed($event)" @change="changed($event)"
+      @htmx:before-request="start($event)" @htmx:xhr:progress="progress($event)" @htmx:after-request="finish()">
+  <script type="application/json" data-suggestions>{{ suggestions|tojson }}</script>
+
+  <div class="grid gap-1">
+    <span class="text-sm font-bold" id="file-label">File</span>
+    <div class="drop" x-init="$el.dataset.enhanced = ''" :data-over="over" @dragenter="over = true" @dragleave="over = false" @drop="over = false">
+      <input class="drop__input" id="file-input" name="file" type="file" accept="{{ accept }}" required aria-labelledby="file-label" aria-describedby="file-hint"{{ invalid("file") }}>
+      <span class="drop__face" aria-hidden="true">
+        {{ icon("inbox") }}
+        <span x-show="!fileName"><span class="font-bold">Choose a file</span><span class="drop__or"> or drop it here</span></span>
+        <span class="drop__chosen" x-show="fileName" x-cloak><span class="font-bold" x-text="fileName"></span> <span class="text-muted" x-text="fileSize"></span></span>
+      </span>
+    </div>
+    <p class="text-sm text-muted m-0" id="file-hint">PDF, PPTX, DOCX, PNG, or JPG, up to {{ max_mb }} MB.{% if file_again %} <strong>Choose the file again:</strong> it isn't kept after a reload.{% endif %}</p>
+    <p class="field-error m-0" role="alert" x-show="fileError" x-cloak>{{ icon("circle-alert", "icon-sm") }}<span x-text="fileError"></span></p>
+  </div>
+
+  <label class="grid gap-1"><span class="text-sm font-bold">Course</span>
+    <select class="field w-auto" name="course" required{{ invalid("course") }}>
+      <option value="" disabled{% if not form.course %} selected{% endif %}>Choose a course</option>
+      {% for c in courses %}<option value="{{ c.code }}"{% if c.code == form.course %} selected{% endif %}>{{ c.code }}</option>{% endfor %}
+    </select>
+  </label>
+
+  <label class="grid gap-1"><span class="text-sm font-bold">What it is</span>
+    <input class="field field-wide" name="what" type="text" required maxlength="80" autocomplete="off" enterkeyhint="done" placeholder="Ch5 lecture slides" value="{{ form.what }}"{{ invalid("what") }}>
+  </label>
+
+  <fieldset class="grid gap-1 m-0 p-0 border-0"{% if form_error and form_error.field == "type" %} aria-describedby="file-error"{% endif %}>
+    <legend class="text-sm font-bold p-0">Type</legend>
+    <div class="pick-chips">
+      {% for t in types %}
+      <label class="pick-chip"><input type="radio" name="type" value="{{ t.value }}" required{% if form.type == t.value %} checked{% endif %}><span>{{ t.label }}</span></label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset class="grid gap-1 m-0 p-0 border-0"{% if form_error and form_error.field in ("by_date", "by_time") %} aria-describedby="file-error"{% endif %}>
+    <legend class="text-sm font-bold p-0">Done by</legend>
+    <div class="pick-chips mt-0 mb-1" role="group" aria-label="Suggested times" x-show="options.length" x-cloak>
+      <template x-for="s in options" :key="s.kind + s.date + s.time + s.label">
+        <button type="button" class="pick-chip pick-chip--two" :aria-pressed="(s.date === byDate && s.time === byTime) ? 'true' : 'false'" @click="choose(s)">
+          <span class="pick-chip__main" x-text="s.label"></span><span class="pick-chip__sub" x-text="s.when"></span>
+        </button>
+      </template>
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <label class="grid gap-1"><span class="text-sm text-muted">Date</span>
+        <input class="field" name="by_date" type="date" required value="{{ form.by_date }}" x-ref="byDate"{{ invalid("by_date") }}>
+      </label>
+      <label class="grid gap-1"><span class="text-sm text-muted">Time</span>
+        <input class="field" name="by_time" type="time" required value="{{ form.by_time }}" x-ref="byTime"{{ invalid("by_time") }}>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="grid gap-1 m-0 p-0 border-0"{% if form_error and form_error.field == "depth" %} aria-describedby="file-error"{% endif %}>
+    <legend class="text-sm font-bold p-0">Depth</legend>
+    <div class="pick-chips">
+      {% for d in depths %}
+      <label class="pick-chip"><input type="radio" name="depth" value="{{ d.value }}"{% if form.depth == d.value %} checked{% endif %}><span>{{ d.label }}</span></label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <div class="file-preview" x-show="preview" x-cloak>
+    <span class="text-sm font-bold" id="preview-label">File name</span>
+    <p class="file-preview__name m-0" aria-labelledby="preview-label" x-text="preview"></p>
+  </div>
+
+  <div id="file-status" class="file-status">{% include "partials/file_status.html" %}</div>
+
+  <div class="file-progress" x-show="busy" x-cloak>
+    <progress class="file-progress__bar" max="100" :value="percent" aria-labelledby="progress-label"></progress>
+    <p class="m-0 text-sm" role="status"><span id="progress-label" x-text="phase === 'drive' ? 'Sending to Google Drive' : 'Uploading to Argus'"></span><span class="text-muted" aria-hidden="true" x-show="phase !== 'drive'" x-text="' ' + percent + '%'"></span></p>
+  </div>
+
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-primary" type="submit">{{ icon("inbox", "icon-sm") }}Upload</button>
+    <a class="btn btn-quiet" href="/today">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -67,6 +67,13 @@ def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     for name in type(secrets).model_fields:
         state = "set" if getattr(secrets, name) else "missing"
         typer.echo(f"  {name}: {state}")
+    drive_keys = (secrets.drive_client_id, secrets.drive_client_secret, secrets.drive_refresh_token)
+    folder = cfg.planner_inbox.folder_id
+    if (any(drive_keys) or folder) and not (all(drive_keys) and folder):
+        typer.echo(
+            "  warning: the file adder needs planner_inbox.folder_id and all three drive_* "
+            "credentials; it stays hidden until then (docs/runbook.md, 'File adder')"
+        )
     if secrets.mcp_path_secret:
         from argus.web.mcp_server import path_secret
 
@@ -362,6 +369,143 @@ def serve_mcp(
     uvicorn.run(mcp_app, host=host, port=port, log_config=None, access_log=False)
 
 
+def open_browser(url: str) -> object:  # pragma: no cover - opens a real browser
+    import webbrowser
+
+    return webbrowser.open(url)
+
+
+@app.command("drive-auth")
+def drive_auth(
+    *,
+    client_secrets: Annotated[
+        Path,
+        typer.Option(
+            "--client-secrets",
+            help="The OAuth client JSON from Google Cloud (a 'Desktop app' client).",
+            exists=True,
+            dir_okay=False,
+        ),
+    ],
+    folder_id: Annotated[
+        str | None,
+        typer.Option(help="The planner's Inbox folder ID (default: planner_inbox.folder_id)."),
+    ] = None,
+    full_drive: Annotated[
+        bool,
+        typer.Option("--full-drive", help="Ask for the full `drive` scope, not `drive.file`."),
+    ] = False,
+    out: Annotated[Path, typer.Option(help="Where to write the three credential files.")] = Path(
+        "var/drive-credentials"
+    ),
+    port: Annotated[int, typer.Option(help="Port for Google's redirect (0 = any free).")] = 0,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Print the sign-in link only.")
+    ] = False,
+    config: ConfigOpt = DEFAULT_CONFIG,
+) -> None:
+    """Sign in to Google Drive once for the file adder (D074) and write its credentials.
+
+    Run it on a computer with a browser. It tries the narrow `drive.file` scope first, checks
+    that the planner's Inbox folder is reachable, and offers the full `drive` scope if not.
+    """
+    import asyncio
+
+    import httpx
+
+    from argus.clock import SystemClock
+    from argus.drive import (
+        SCOPE_FILE,
+        SCOPE_FULL,
+        DriveClient,
+        DriveCredentials,
+        DriveFailure,
+        FolderInfo,
+        Problem,
+    )
+    from argus.drive_auth import (
+        AuthFlowError,
+        LoopbackReceiver,
+        read_client_secrets,
+        sign_in,
+        write_credentials,
+    )
+
+    if folder_id is None and config.exists():
+        folder_id = load_config(config).planner_inbox.folder_id
+    if not folder_id:
+        raise typer.BadParameter("pass --folder-id, or set planner_inbox.folder_id in the config")
+    try:
+        client_app = read_client_secrets(client_secrets)
+    except AuthFlowError as e:
+        raise typer.BadParameter(str(e)) from None
+    scope = SCOPE_FULL if full_drive else SCOPE_FILE
+    while True:
+        typer.echo(f"Scope: {scope.rsplit('/', 1)[1]}. Sign in as the account that owns the Inbox.")
+        try:
+            with httpx.Client(timeout=30.0) as http:
+                grant = sign_in(
+                    client_app,
+                    scope,
+                    receiver=LoopbackReceiver(port),
+                    open_browser=(lambda _url: None) if no_browser else open_browser,
+                    echo=typer.echo,
+                    client=http,
+                )
+        except (AuthFlowError, OSError, httpx.HTTPError) as e:
+            typer.echo(f"drive-auth: {e}", err=True)
+            raise typer.Exit(1) from e
+        drive = DriveClient(
+            DriveCredentials(client_app.client_id, client_app.client_secret, grant.refresh_token),
+            folder_id,
+            SystemClock(),
+        )
+        folder = asyncio.run(drive.folder())
+        if isinstance(folder, FolderInfo) and folder.usable:
+            break
+        if isinstance(folder, FolderInfo):
+            why = "isn't a folder" if not folder.is_folder else "can't take new files"
+            why = "is in the trash" if folder.trashed else why
+            typer.echo(f"drive-auth: the Inbox folder {why} for this account.", err=True)
+            raise typer.Exit(1)
+        assert isinstance(folder, DriveFailure)
+        if folder.problem is Problem.FOLDER and scope == SCOPE_FILE:
+            typer.echo(
+                "\nWith drive.file, Argus can't see the Inbox folder: that scope only reaches "
+                "files and folders Argus created. The full `drive` scope can reach it, but it "
+                "also lets Argus read everything in this Drive account."
+            )
+            if typer.confirm("Sign in again with the full drive scope?", default=False):
+                scope = SCOPE_FULL
+                continue
+            typer.echo("Nothing written. Run again with --full-drive when you're ready.")
+            raise typer.Exit(1)
+        if folder.problem is Problem.FOLDER:
+            typer.echo(
+                "drive-auth: this account can't see that folder. Check the folder ID, and sign "
+                "in as the account that owns it.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"drive-auth: {folder.message}", err=True)
+        raise typer.Exit(1)
+    email = asyncio.run(drive.account_email())
+    account = email if isinstance(email, str) and email else "(account name unavailable)"
+    paths = write_credentials(out, client_app, grant.refresh_token)
+    typer.echo(
+        f"\nSigned in as {account}. The Inbox folder ({folder.name!r}) takes new files.\n"
+        f"Scope: {scope.rsplit('/', 1)[1]}.\n"
+        f"Wrote {', '.join(p.name for p in paths)} to {out} (readable by you only).\n\n"
+        "Next, put them on the Pi (docs/runbook.md, 'File adder'):\n"
+        f"  scp {out}/drive_* argus-pi:\n"
+        "  ssh argus-pi 'sudo install -o root -g root -m 600 drive_client_id "
+        "drive_client_secret drive_refresh_token /etc/argus/credentials/ && "
+        "rm drive_client_id drive_client_secret drive_refresh_token'\n"
+        "  then set planner_inbox.folder_id in /etc/argus/config.yaml and re-run install.sh.\n"
+        f"Delete {out} afterwards."
+    )
+
+
 @app.command()
 def backup(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     """Snapshot the database, keep 14 days, and copy the backups off the Pi."""
@@ -430,7 +574,14 @@ def serve(
     if no_canvas_token and not demo:
         raise typer.BadParameter("--no-canvas-token only applies with --demo")
     if demo:  # pragma: no cover - interactive
-        from argus.demo import DEMO_CONFIG, DemoProfile, DemoTransport, demo_secrets, seed_demo
+        from argus.demo import (
+            DEMO_CONFIG,
+            DemoDrive,
+            DemoProfile,
+            DemoTransport,
+            demo_secrets,
+            seed_demo,
+        )
         from argus.store.db import open_db
         from argus.web.deps import OfflineRunner
 
@@ -447,6 +598,7 @@ def serve(
             db_path=db,
             runner_factory=lambda c, f: OfflineRunner(),
             ai_transport=DemoTransport(),
+            drive=DemoDrive(),
         )
         uvicorn.run(demo_app, host=host, port=port, log_config=None)
         return

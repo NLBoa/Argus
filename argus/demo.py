@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import AsyncIterable
 from datetime import datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -40,6 +41,7 @@ from argus.domain.models import (
     SourceItem,
     Weekday,
 )
+from argus.drive import Uploaded
 from argus.store import repo
 from argus.store.db import iso, transaction
 
@@ -114,6 +116,18 @@ class DemoTransport:
         effort: str,
     ) -> TransportResponse:
         raise TransportError("demo mode: AI calls are offline")
+
+
+class DemoDrive:
+    """A planner inbox that is "set up" but never uploads (D074): the demo shows the file adder,
+    and sending a file reads it and keeps nothing."""
+
+    async def upload(
+        self, *, name: str, mime_type: str, size: int, chunks: AsyncIterable[bytes]
+    ) -> Uploaded:
+        async for _ in chunks:
+            pass
+        return Uploaded(file_id="demo", name=name, size=size, link=None)
 
 
 CANVAS = "https://umd.instructure.com/courses"
