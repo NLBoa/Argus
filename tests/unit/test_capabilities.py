@@ -9,7 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 from argus.capabilities import AI, DRIVE, FEATURES, Capabilities, Feature, derive
-from argus.config import AppConfig, CourseConfig, PlannerInboxConfig, Secrets
+from argus.config import AppConfig, CourseConfig, PlannerInboxConfig, RunnaConfig, Secrets
 
 COURSES = [
     CourseConfig(
@@ -64,6 +64,7 @@ EXPECTED = {
     Feature.AI: (frozenset({AI}),),
     Feature.STUDY_GENERATION: (frozenset({"canvas_modules", AI}),),
     Feature.FILE_ADDER: (frozenset({DRIVE}),),
+    Feature.RUNS: (frozenset({"runna_ical"}),),
 }
 
 
@@ -135,6 +136,7 @@ def test_every_combination_matches_the_matrix(flags: tuple[bool, ...]) -> None:
         "piazza_email": False,
         AI: ai,
         DRIVE: False,
+        "runna_ical": False,
     }
     for feature, options in EXPECTED.items():
         expected = any(all(on[s] for s in option) for option in options)
@@ -224,3 +226,18 @@ def test_sms_help_lists_ok_no_only_with_staff_posts() -> None:
     assert "OK 1" not in help_text(derive(CONFIG, secrets(ical=True)))
     for caps in (derive(CONFIG, secrets(piazza=True)), derive(CONFIG, secrets(ical=True))):
         assert gsm_length(help_text(caps)) <= SEGMENT  # one segment: [ and ] count twice
+
+
+RUNNA_URL = SecretStr("https://cal.runna.com/FAKEFEED.ics")
+
+
+def test_runs_feature_needs_block_and_secret() -> None:
+    with_block = AppConfig(courses=COURSES, runna=RunnaConfig())
+    caps = derive(with_block, Secrets(runna_ical_url=RUNNA_URL))
+    assert caps.has(Feature.RUNS)
+    assert "RUN" in caps.courses and caps.course("RUN") == caps.course("NOPE101")
+    assert not derive(with_block, Secrets()).has(Feature.RUNS)
+    assert "RUN" not in derive(with_block, Secrets()).courses
+    assert not derive(AppConfig(courses=COURSES), Secrets(runna_ical_url=RUNNA_URL)).has(
+        Feature.RUNS
+    )

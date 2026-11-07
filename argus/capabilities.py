@@ -43,6 +43,7 @@ class Feature(StrEnum):
     AI = "ai"
     STUDY_GENERATION = "study_generation"  # concept notes and practice from course files
     FILE_ADDER = "file_adder"  # send files to the morning planner's Drive inbox (D074)
+    RUNS = "runs"  # Runna workouts as assignments in the Running course (D078)
 
 
 def _any(*options: set[str]) -> tuple[frozenset[str], ...]:
@@ -64,6 +65,7 @@ FEATURES: Mapping[Feature, tuple[frozenset[str], ...]] = {
     Feature.AI: _any({AI}),
     Feature.STUDY_GENERATION: _any({"canvas_modules", AI}),
     Feature.FILE_ADDER: _any({DRIVE}),
+    Feature.RUNS: _any({"runna_ical"}),
 }
 
 
@@ -165,7 +167,7 @@ def derive(
             modules=sources.get("canvas_modules", False) and c.canvas_id is not None,
             piazza=piazza and c.piazza_network_id is not None,
         )
-        for c in config.courses
+        for c in config.all_courses(running=sources.get("runna_ical", False))
     }
     return Capabilities(
         sources=sources,
