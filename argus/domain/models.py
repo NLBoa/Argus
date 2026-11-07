@@ -149,6 +149,20 @@ class CompletedRun:
 
 
 @dataclass(frozen=True, slots=True)
+class StoredRun:
+    """A stored Runna record, for matching a completion that replaced its planned event (D078)."""
+
+    external_id: str
+    title: str
+    due_at: datetime | None
+    description: str | None
+    duration_minutes: int | None
+    preferred_start: datetime | None
+    open: bool  # its item isn't done yet
+    raw_hash: str  # the completion's hash once one matched it
+
+
+@dataclass(frozen=True, slots=True)
 class MeetingRecord:
     """A recurring class meeting. Times are local wall-clock (America/New_York)."""
 
