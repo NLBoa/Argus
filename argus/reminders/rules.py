@@ -269,6 +269,7 @@ SOURCE_NAMES = {
     "piazza": "Piazza",
     "piazza_email": "Piazza email",
     "umdio": "umd.io",
+    "runna_ical": "Runna",
     "vault": "Vault git",
 }
 
