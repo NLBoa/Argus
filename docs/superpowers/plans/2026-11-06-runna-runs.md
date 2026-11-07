@@ -90,9 +90,11 @@ def test_runna_block_defaults():
     cfg = AppConfig.model_validate({"runna": {}})
     assert cfg.runna.preferred_time == time(16, 0) and cfg.runna.default_minutes == 45
 
+
 def test_runna_preferred_time_rejects_bad_value():
     with pytest.raises(ValidationError):
         AppConfig.model_validate({"runna": {"preferred_time": "25:00"}})
+
 
 def test_running_course_only_with_block():
     assert AppConfig().running_course() is None
@@ -101,9 +103,11 @@ def test_running_course_only_with_block():
     assert [c.code for c in cfg.all_courses(running=True)] == ["CMSC351", "RUN"]
     assert [c.code for c in cfg.all_courses(running=False)] == ["CMSC351"]
 
+
 def test_run_is_not_a_course_code():
     with pytest.raises(ValidationError):
         AppConfig.model_validate({"courses": [{"code": "RUN", "section": "0101"}]})
+
 
 def test_runna_secret_loads_and_is_redacted():
     s = load_secrets({"ARGUS_RUNNA_ICAL_URL": SYNTHETIC_RUNNA_URL})
@@ -206,88 +210,141 @@ The fixture `feed.ics` holds these synthetic events:
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-@pytest.mark.parametrize("text,minutes", [
-    ("45 min", 45), ("Easy · 50 mins", 50), ("1h 5m", 65), ("1 hr 5 min", 65), ("1:05:00", 65),
-    ("65 min", 65), ("45m", None), ("65:00", None), ("8 km", None), ("5 x 400m", None),
-    ("Zone 2", None), ("", None),
-    ("Warm up 10 min · 4 x 3 min @ 5:10/km · cool down 10 min", None),
-    ("5:30/km", None), ("8:45 min/mi", None), ("6:30-7:00/km", None),
-    ("Estimated duration: 42 min · Warm up 10 min · 4 x 3 min @ 5:10/km · cool down 10 min", 42),
-    ("Estimated duration 1h 5m · easy 6:30/km", 65),
-    ("Duration: 45m", 45),                 # bare m inside a labeled total means minutes
-    ("Easy 45m · strides", None),          # bare m elsewhere is not a duration
-])
+@pytest.mark.parametrize(
+    "text,minutes",
+    [
+        ("45 min", 45),
+        ("Easy · 50 mins", 50),
+        ("1h 5m", 65),
+        ("1 hr 5 min", 65),
+        ("1:05:00", 65),
+        ("65 min", 65),
+        ("45m", None),
+        ("65:00", None),
+        ("8 km", None),
+        ("5 x 400m", None),
+        ("Zone 2", None),
+        ("", None),
+        ("Warm up 10 min · 4 x 3 min @ 5:10/km · cool down 10 min", None),
+        ("5:30/km", None),
+        ("8:45 min/mi", None),
+        ("6:30-7:00/km", None),
+        (
+            "Estimated duration: 42 min · Warm up 10 min · 4 x 3 min @ 5:10/km · cool down 10 min",
+            42,
+        ),
+        ("Estimated duration 1h 5m · easy 6:30/km", 65),
+        ("Duration: 45m", 45),  # bare m inside a labeled total means minutes
+        ("Easy 45m · strides", None),  # bare m elsewhere is not a duration
+    ],
+)
 def test_parse_duration_text(text, minutes):
     assert parse_duration_text(text) == minutes
+
 
 def test_items_from_fixture():
     feed = parse_runna_feed(FIXTURE, RunnaConfig())
     items = {i.title: i for i in feed.runs}
     assert set(items) == {"Tempo run", "Easy run", "Steady run", "Night run", "Long run"}
     a = items["Tempo run"]
-    assert a.due_at == datetime(2026, 11, 11, 4, 59, tzinfo=UTC)   # 23:59 EST Nov 10
-    assert a.duration_minutes == 45 and a.preferred_start == datetime(2026, 11, 10, 21, 0, tzinfo=UTC)
-    assert a.submitted is True                                       # twin (f)
+    assert a.due_at == datetime(2026, 11, 11, 4, 59, tzinfo=UTC)  # 23:59 EST Nov 10
+    assert a.duration_minutes == 45 and a.preferred_start == datetime(
+        2026, 11, 10, 21, 0, tzinfo=UTC
+    )
+    assert a.submitted is True  # twin (f)
     b = items["Easy run"]
-    assert b.duration_minutes == 50 and b.preferred_start == datetime(2026, 11, 11, 21, 0, tzinfo=UTC)
+    assert b.duration_minutes == 50 and b.preferred_start == datetime(
+        2026, 11, 11, 21, 0, tzinfo=UTC
+    )
     assert items["Steady run"].duration_minutes is None and items["Steady run"].submitted is None
-    assert [c.title_key for c in feed.completed] == [G_TITLE_KEY]    # (g) only; (f) had a twin
+    assert [c.title_key for c in feed.completed] == [G_TITLE_KEY]  # (g) only; (f) had a twin
+
 
 def test_rest_days_and_strength_sessions_are_skipped():
     titles = {i.title for i in parse_runna_feed(FIXTURE, RunnaConfig()).runs}
     assert "Rest day" not in titles and "Strength & mobility" not in titles
 
-def test_late_timed_run_is_due_on_its_local_day():      # Review Focus 1
+
+def test_late_timed_run_is_due_on_its_local_day():  # Review Focus 1
     d = by_title("Night run")
-    assert d.due_at == datetime(2026, 11, 14, 4, 59, tzinfo=UTC)    # 23:59 EST Fri Nov 13
+    assert d.due_at == datetime(2026, 11, 14, 4, 59, tzinfo=UTC)  # 23:59 EST Fri Nov 13
     assert d.duration_minutes == 40
 
-def test_fall_back_day_due_is_est():                     # Review Focus 2
+
+def test_fall_back_day_due_is_est():  # Review Focus 2
     assert by_title("Long run").due_at == datetime(2026, 11, 2, 4, 59, tzinfo=UTC)
+
 
 def test_custom_preferred_time():
     b = by_title("Easy run", RunnaConfig(preferred_time=time(7, 30)))
     assert b.preferred_start == datetime(2026, 11, 11, 12, 30, tzinfo=UTC)
 
+
 def test_replaced_run_is_a_completed_orphan():
     feed = parse_runna_feed(FIXTURE_REPLACED, RunnaConfig())
     assert "Tempo run" not in {i.title for i in feed.runs}
-    assert any(c.title_key == "tempo run" and c.local_day == date(2026, 11, 10) for c in feed.completed)
+    assert any(
+        c.title_key == "tempo run" and c.local_day == date(2026, 11, 10) for c in feed.completed
+    )
+
 
 def test_match_completed_by_day_and_title():
     stored = [StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, True)]
-    [hit] = match_completed([CompletedRun("uid-new", date(2026, 11, 10), "tempo run", "h1")], stored)
+    [hit] = match_completed(
+        [CompletedRun("uid-new", date(2026, 11, 10), "tempo run", "h1")], stored
+    )
     assert hit.external_id == TEMPO_ID and hit.submitted is True and hit.duration_minutes == 45
+
 
 def test_match_completed_by_same_uid():
     stored = [StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, True)]
     [hit] = match_completed([CompletedRun(TEMPO_ID, date(2026, 11, 10), "renamed", "h1")], stored)
     assert hit.external_id == TEMPO_ID
 
-def test_match_completed_only_open_run_that_day():             # case (c), renamed
+
+def test_match_completed_only_open_run_that_day():  # case (c), renamed
     stored = [StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, True)]
-    [hit] = match_completed([CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored)
+    [hit] = match_completed(
+        [CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored
+    )
     assert hit.external_id == TEMPO_ID and hit.submitted is True
 
+
 def test_match_completed_two_runs_that_day_is_no_match():
-    stored = [StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, True),
-              StoredRun("uid-x", "Shakeout", TEMPO_DUE, None, 20, TEMPO_START, True)]
-    assert match_completed([CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored) == []
+    stored = [
+        StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, True),
+        StoredRun("uid-x", "Shakeout", TEMPO_DUE, None, 20, TEMPO_START, True),
+    ]
+    assert (
+        match_completed([CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored)
+        == []
+    )
+
 
 def test_match_completed_ignores_done_runs_for_the_day_fallback():
     stored = [StoredRun(TEMPO_ID, "Tempo run", TEMPO_DUE, None, 45, TEMPO_START, False)]
-    assert match_completed([CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored) == []
+    assert (
+        match_completed([CompletedRun("uid-new", date(2026, 11, 10), "morning run", "h1")], stored)
+        == []
+    )
 
-def test_unmatched_completed_is_dropped():                     # fixture (g)
-    assert match_completed([CompletedRun("uid-g", date(2026, 11, 9), G_TITLE_KEY, "h")], STORED) == []
+
+def test_unmatched_completed_is_dropped():  # fixture (g)
+    assert (
+        match_completed([CompletedRun("uid-g", date(2026, 11, 9), G_TITLE_KEY, "h")], STORED) == []
+    )
+
 
 def test_malformed_feed_raises():
     with pytest.raises(ValueError):
         parse_runna_feed(b"not ical", RunnaConfig())
 
+
 def test_every_item_is_a_run_assignment():
-    assert all(i.course_code == "RUN" and i.kind is ItemKind.ASSIGNMENT and i.all_day
-               for i in parse_runna_feed(FIXTURE, RunnaConfig()).runs)
+    assert all(
+        i.course_code == "RUN" and i.kind is ItemKind.ASSIGNMENT and i.all_day
+        for i in parse_runna_feed(FIXTURE, RunnaConfig()).runs
+    )
 ```
 
 - [ ] **Step 2:** Run `uv run pytest tests/unit/test_runna_parse.py -v`. Expected: FAIL (module missing).
@@ -337,41 +394,54 @@ async def test_runs_land_in_the_running_course(runna_env):
     assert len(runs) == 5  # (e) Nov 1 is stored; the lookback only protects it from removal
     assert repo.active_course_titles(runna_env.conn)["RUN"] == "Running"
 
-async def test_second_identical_fetch_is_unchanged(runna_env): ...   # result status UNCHANGED
+
+async def test_second_identical_fetch_is_unchanged(runna_env): ...  # result status UNCHANGED
+
 
 async def test_deleted_workout_is_removed(runna_env):
-    await runna_env.cycle(); runna_env.serve(feed_without("Easy run")); await runna_env.cycle()
+    await runna_env.cycle()
+    runna_env.serve(feed_without("Easy run"))
+    await runna_env.cycle()
     assert "Easy run" not in titles(runna_env.conn)
     assert change_status(runna_env.conn, "Easy run") == "removed"
+
 
 async def test_moved_workout_rearms_reminders(runna_env):
     # move "Easy run" from Nov 11 to Nov 12 -> due changes, item_changes says "changed",
     # and the notifications key for due_24h now carries the new due ISO
     ...
 
+
 async def test_completed_run_is_submitted_and_never_missed(runna_env):
-    runna_env.clock.set(datetime(2026, 11, 13, 12, 0, tzinfo=UTC)); await runna_env.cycle()
+    runna_env.clock.set(datetime(2026, 11, 13, 12, 0, tzinfo=UTC))
+    await runna_env.cycle()
     assert status_of(runna_env.conn, "Tempo run") is ItemStatus.SUBMITTED
     assert status_of(runna_env.conn, "Steady run") is not ItemStatus.MISSED
 
-async def test_completed_replacing_planned_is_submitted_not_removed(runna_env):   # Review Focus 5
-    await runna_env.cycle()                                    # fetch 1: planned "Tempo run"
-    runna_env.serve(FIXTURE_REPLACED); runna_env.clock.set(datetime(2026, 11, 10, 23, 0, tzinfo=UTC))
-    await runna_env.cycle()                                    # fetch 2: replaced by its completed event
+
+async def test_completed_replacing_planned_is_submitted_not_removed(runna_env):  # Review Focus 5
+    await runna_env.cycle()  # fetch 1: planned "Tempo run"
+    runna_env.serve(FIXTURE_REPLACED)
+    runna_env.clock.set(datetime(2026, 11, 10, 23, 0, tzinfo=UTC))
+    await runna_env.cycle()  # fetch 2: replaced by its completed event
     assert status_of(runna_env.conn, "Tempo run") is ItemStatus.SUBMITTED
     assert change_status(runna_env.conn, "Tempo run") != "removed"
 
-async def test_renamed_completed_replacing_planned_is_submitted(runna_env):      # case (c), renamed
+
+async def test_renamed_completed_replacing_planned_is_submitted(runna_env):  # case (c), renamed
     await runna_env.cycle()
-    runna_env.serve(FIXTURE_REPLACED_RENAMED); runna_env.clock.set(datetime(2026, 11, 10, 23, 0, tzinfo=UTC))
-    await runna_env.cycle()                                    # "✓ Morning Run" is the only run that day
+    runna_env.serve(FIXTURE_REPLACED_RENAMED)
+    runna_env.clock.set(datetime(2026, 11, 10, 23, 0, tzinfo=UTC))
+    await runna_env.cycle()  # "✓ Morning Run" is the only run that day
     assert status_of(runna_env.conn, "Tempo run") is ItemStatus.SUBMITTED
     assert change_status(runna_env.conn, "Tempo run") != "removed"
 
-async def test_half_setup_has_no_running_course(tmp_db):           # Review Focus 4
+
+async def test_half_setup_has_no_running_course(tmp_db):  # Review Focus 4
     for cfg, secrets in [(with_block, no_secret), (no_block, with_secret)]:
         await cycle(cfg, secrets)
         assert "RUN" not in repo.active_course_titles(tmp_db)
+
 
 async def test_fetch_error_is_redacted(runna_env):
     runna_env.fail_with(httpx.ConnectError(f"cannot reach {SYNTHETIC_RUNNA_URL}"))
@@ -419,7 +489,8 @@ async def test_fetch_error_is_redacted(runna_env):
 def test_rerun_estimate_refuses_runs(client_with_run_and_fake_transport):
     resp = client.post(f"/items/{RUN_ID}/estimate/rerun", headers=SAME_ORIGIN)
     assert resp.status_code == 404
-    assert fake_transport.calls == []                        # no AI call
+    assert fake_transport.calls == []  # no AI call
+
 
 def test_runs_feature_needs_block_and_secret():
     assert derive(cfg_with_block, secrets_with_url).has(Feature.RUNS)
@@ -427,8 +498,10 @@ def test_runs_feature_needs_block_and_secret():
     assert not derive(AppConfig(), secrets_with_url).has(Feature.RUNS)
     assert "RUN" in derive(cfg_with_block, secrets_with_url).courses
 
+
 def test_run_items_never_go_to_the_ai():
     assert not needs_estimate(run_item, None, None, overridden=False, ai_available=True, now=NOW)
+
 
 # integration
 def test_runna_duration_becomes_the_estimate(db_with_runs):
@@ -436,18 +509,25 @@ def test_runna_duration_becomes_the_estimate(db_with_runs):
     eff = effective_estimates(db, NOW)[tempo_id]
     assert eff.p50 == pytest.approx(0.75) and eff.factor == 1.0
 
+
 def test_changed_duration_appends_a_version(db_with_runs):
-    sync_run_estimates(db, cfg, NOW); set_duration(tempo, 60); sync_run_estimates(db, cfg, NOW)
+    sync_run_estimates(db, cfg, NOW)
+    set_duration(tempo, 60)
+    sync_run_estimates(db, cfg, NOW)
     assert [r.p50 for r in repo.estimates_for(db, tempo_id)] == [0.75, 1.0]
-    assert sync_run_estimates(db, cfg, NOW) == 0   # idempotent
+    assert sync_run_estimates(db, cfg, NOW) == 0  # idempotent
+
 
 def test_missing_duration_uses_default(db_with_runs):
     sync_run_estimates(db, cfg, NOW)
     row = repo.estimates_for(db, steady_id)[-1]
     assert row.p50 == pytest.approx(0.75) and row.confidence == "low"
 
+
 def test_student_override_beats_runna(db_with_runs):
-    sync_run_estimates(db, cfg, NOW); set_override(db, tempo, 1.5, NOW); sync_run_estimates(db, cfg, NOW)
+    sync_run_estimates(db, cfg, NOW)
+    set_override(db, tempo, 1.5, NOW)
+    sync_run_estimates(db, cfg, NOW)
     assert effective_estimates(db, NOW)[tempo_id].p50 == pytest.approx(1.5)
 ```
 
@@ -483,23 +563,32 @@ def test_student_override_beats_runna(db_with_runs):
 
 ```python
 def test_run_work_item():
-    w = to_work_item(run_item, NOW, updated_at=NOW, estimate_minutes=45,
-                     preferred_start=datetime(2026, 11, 10, 21, 0, tzinfo=UTC))
+    w = to_work_item(
+        run_item,
+        NOW,
+        updated_at=NOW,
+        estimate_minutes=45,
+        preferred_start=datetime(2026, 11, 10, 21, 0, tzinfo=UTC),
+    )
     assert w.type == "run" and w.source == "runna" and w.course == "RUN"
     assert w.estimate_minutes == 45 and w.preferred_start == "2026-11-10T16:00:00-05:00"
     assert "description" not in w.model_dump()
+
 
 def test_coursework_gets_estimate_minutes_and_no_preferred_start():
     w = to_work_item(hw_item, NOW, updated_at=NOW, estimate_minutes=90)
     assert w.estimate_minutes == 90 and w.preferred_start is None
 
+
 def test_ended_run_is_not_listed():
     assert not listed(run_due(NOW - timedelta(minutes=1), done=False), NOW)
     assert listed(run_due(NOW + timedelta(hours=3), done=False), NOW)
 
+
 def test_overdue_coursework_is_still_listed():
     assert listed(hw_due(NOW - timedelta(days=2), done=False), NOW)
     assert not listed(hw_due(NOW - timedelta(days=2), done=True), NOW)
+
 
 # integration, through the MCP client
 async def test_upcoming_work_includes_runs(mcp_with_runs):
@@ -508,7 +597,10 @@ async def test_upcoming_work_includes_runs(mcp_with_runs):
     assert run["estimate_minutes"] == 45 and run["preferred_start"].endswith("-05:00")
     assert SYNTHETIC_RUNNA_URL not in json.dumps(out)
 
-async def test_runs_hidden_when_runna_not_set_up(mcp_without_runna_secret): ...  # Review Focus 4: no type "run" (RUN course inactive)
+
+async def test_runs_hidden_when_runna_not_set_up(
+    mcp_without_runna_secret,
+): ...  # Review Focus 4: no type "run" (RUN course inactive)
 ```
 
 - [ ] **Step 2:** Run `uv run pytest tests/unit/test_feed.py tests/integration/test_mcp_server.py -v`. Expected: FAIL.
@@ -548,21 +640,25 @@ Runs already render on the web through the existing assignment rows. Their cours
 def test_health_lists_runna(client_full):
     assert "Runna" in client_full.get("/health").text
 
+
 def test_run_item_page_has_no_course_link_or_rerun(client_full):
     html = client_full.get(f"/items/{DEMO_RUN_ID}").text
     assert 'href="/courses/RUN"' not in html
     assert "/estimate/rerun" not in html
 
+
 def test_search_hit_for_a_run_has_no_course_link(client_full):
     html = client_full.get("/search", params={"q": DEMO_RUN_TITLE}).text
     assert DEMO_RUN_TITLE in html and 'href="/courses/RUN"' not in html
 
-def test_vault_run_lines_are_plain_text(vault_with_runs):            # Today and weekly notes
+
+def test_vault_run_lines_are_plain_text(vault_with_runs):  # Today and weekly notes
     today, weekly = vault_with_runs.read_today(), vault_with_runs.read_weekly()
     for note in (today, weekly):
         assert "Tempo run" in note and "[[" not in line_with(note, "Tempo run")
 
-def test_no_runs_anywhere_without_runna(client_notoken):            # Review Focus 4
+
+def test_no_runs_anywhere_without_runna(client_notoken):  # Review Focus 4
     for path in ("/", "/upcoming", "/workload"):
         assert "Running" not in client_notoken.get(path).text
     assert client_notoken.get("/courses/RUN").status_code == 404
