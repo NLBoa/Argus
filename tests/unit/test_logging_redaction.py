@@ -69,6 +69,7 @@ def test_phone_numbers_redacted(capture: tuple[logging.Logger, io.StringIO], tex
     ("text", "leak"),
     [
         ("GET https://umd.instructure.com/feeds/calendars/user_AbC123xyz.ics", "AbC123xyz"),
+        ("GET https://cal.runna.com/RunNa123xyz.ics", "RunNa123xyz"),  # D078, unregistered
         ("Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
         ("key sk-ant-api03-XYZ_123", "XYZ_123"),
         ("https://x.test/cb?access_token=zzz999&page=2", "zzz999"),

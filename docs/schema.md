@@ -13,7 +13,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `courses` | 0001 | One row per configured class. Rows are upserted from `config.yaml` and deactivated (`active=0`) when removed |
 | `meetings` | 0001 | Class meeting times (`days` = weekday numbers, Mon=0). Replaced per (course, source) |
 | `items` | 0001 | Merged assignments, quizzes, exams, and events: the resolved fields plus derived `status` |
-| `item_sources` | 0001, 0014 | One row per source record, `UNIQUE(source, external_id)`. Links to an item. `present=0` when a complete fetch no longer lists it. Since 0014, Runna records carry `duration_minutes` and `preferred_start` (D078) |
+| `item_sources` | 0001, 0014 | One row per source record, `UNIQUE(source, external_id)`. Links to an item. `present=0` when a complete fetch no longer lists it. Since 0014, Runna records carry `duration_minutes`, `preferred_start`, and `completion_id` (the completed activity that marked a run done) (D078) |
 | `posts` | 0001 | Piazza posts, instructor answers, Canvas announcements. `UNIQUE(platform, external_id)`, so the API and email agree |
 | `sync_runs` | 0001 | One row per collector run: status, redacted error, record count, duration |
 | `source_state` | 0001 | Per (source, key): last payload hash, ETag, Last-Modified, and source-specific JSON `data` |
@@ -73,7 +73,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 ## item_sources
 Stores each source's view: `title`, `kind`, `due_at`, `release_at`, `late_due_at`, `all_day`,
 `points`, `submitted`, `graded`, `description`, `question_count`, `url`, `raw_hash`
-(change detection), `duration_minutes` and `preferred_start` (Runna only, 0014), `present`, `first_seen_at`, `last_seen_at`, and `changed_at`. `item_id` is set by
+(change detection), `duration_minutes`, `preferred_start`, and `completion_id` (Runna only, 0014), `present`, `first_seen_at`, `last_seen_at`, and `changed_at`. `item_id` is set by
 the merge step. Links are sticky (see `domain/merge.py`).
 
 ## posts

@@ -1,7 +1,9 @@
 -- 0014: Runna runs as assignments (D078). A run's source record carries Runna's length for the
--- workout and a good time to start; its length becomes an estimate with source `runna`.
+-- workout, a good time to start, and the id of the completed activity that marked it done; its
+-- length becomes an estimate with source `runna`.
 ALTER TABLE item_sources ADD COLUMN duration_minutes INTEGER;
 ALTER TABLE item_sources ADD COLUMN preferred_start TEXT;
+ALTER TABLE item_sources ADD COLUMN completion_id TEXT;
 
 -- estimates gains source 'runna'. A CHECK can't be altered, so the table is rebuilt in place as
 -- 0009 rebuilt time_logs. Nothing references estimates, and UNIQUE (item_id, version) is its only

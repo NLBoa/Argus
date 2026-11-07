@@ -19,6 +19,7 @@ REDACTED = "[REDACTED]"
 
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(/feeds/calendars/)[A-Za-z0-9_\-]+(\.ics)?"), r"\1" + REDACTED),
+    (re.compile(r"(cal\.runna\.com/)[A-Za-z0-9_\-]+(\.ics)?"), r"\1" + REDACTED),  # D078
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/\-]+=*"), r"\1 " + REDACTED),
     (re.compile(r"sk-ant-[A-Za-z0-9_\-]+"), REDACTED),
     (

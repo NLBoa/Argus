@@ -809,7 +809,8 @@ or not at all. The student asked for runs "treated as an assignment", done by th
 - a labeled total ("Estimated duration: 42 min") wins;
 - paces (`5:30/km`, `8:45 min/mi`, `6:30-7:00/km`) are removed first;
 - otherwise the text must hold exactly one distinct length ("Warm up 10 min · 4 x 3 min · cool down 10 min" gives none);
-- a bare `45m` counts only inside a labeled total (elsewhere it may be metres), and `mm:ss` never counts.
+- a bare `45m` counts only inside a labeled total (elsewhere it may be metres), and `mm:ss` never counts;
+- hours may be decimal ("1.5 hours" is 90), and text with repeats ("3 x 10 min") states no single length.
 
 The length is stored as a versioned estimate with the new source `runna` (migration 0014 widens the CHECK by rebuilding
 `estimates` as 0009 rebuilt `time_logs`). A new version is appended only when the length changes. The student's own
@@ -817,16 +818,20 @@ estimate still wins. Runs are never sent to the AI (`needs_estimate`, and "Re-ru
 and hidden) and never calibrated (factor 1.0: Runna knows the runner's pace).
 
 **Completed runs.** The student sets Runna's completed activities to "Completed plan workouts only". A completed event
-never becomes an item. If its planned twin is in the same fetch, the twin is submitted. Otherwise Runna replaced it, and
-the runner matches the completion to a stored run before marking absences (so a finished run is never "removed"),
-taking the first step that finds exactly one run:
-1. the same id;
-2. the same completion matched before (its hash is stored on the run);
-3. the same local day and normalized title (no emoji, no distance suffix);
-4. the only run still open that day.
+never becomes an item. If its planned twin is in the same fetch, the twin is submitted. The twin's hash then includes the
+completion's, so a run already stored picks up "done". Otherwise Runna replaced it, and the runner matches the
+completion to a stored run that is missing from this fetch, before marking absences (so a finished run is never
+"removed"). A step matches only when it finds exactly one run:
+1. the completion matched it before (the completion's id is stored on the run, `item_sources.completion_id`, so a
+   renamed completion that Runna later edits still matches);
+2. the same local day and normalized title (no emoji, no distance suffix);
+3. the only open run that day (renamed);
+4. an open run with the same normalized title on another day (done early or late);
+5. the only open run within a day (renamed and done after midnight).
 
-Step 4 is safe because only plan workouts are synced, and step 2 keeps a renamed completion matched after the run is
-done. A completion that matches nothing is dropped. Non-plan completions are ignored entirely, so an extra unplanned run
+Stronger steps run first for every completion, and a matched run is claimed, so a weak guess never takes a run that
+another completion matches exactly. Steps 3 to 5 are safe because only plan workouts are synced and missed runs stay
+in the feed (so a missing open run was replaced). A completion that matches nothing is dropped. Non-plan completions are ignored entirely, so an extra unplanned run
 can't complete a planned one.
 
 **Never missed.** `runna_ical` reports no submissions (D056), so a run is never MISSED. A run past its day that isn't
@@ -840,8 +845,10 @@ done is awaiting confirmation, as an untracked assignment is.
 - The instructions say runs are flexible within their day.
 - The feed URL and workout descriptions are never sent.
 
-**Skipped events.** Events whose title says rest, strength, mobility, cross-training, yoga, stretch, or note never
-become items (a guard: the observed plan had none). A race day is a run.
+**Skipped events.** Events whose title has the word rest, strength, mobility, cross-training, yoga, stretch, or
+note (whole words, so "Forest Loop" is a run) never become items, unless the title also says "run" (a guard: the
+observed plan had none). A race day is a run. **Preferred start** is part of an all-day run's record hash, so a
+changed `runna.preferred_time` reaches runs already stored.
 
 **Scope.**
 - Web: Health lists Runna (label, setup hint, 90-minute staleness). `runna_ical` is in the shared source list, so three
@@ -853,6 +860,6 @@ become items (a guard: the observed plan had none). A race day is a run.
 - Hidden, not empty (D055): RUN is synced only while the `runna:` block and the secret are both set. Otherwise it is
   inactive and nothing about runs shows (Health says "Not set up").
 - The schedule slot is :15/:45 (staggered).
-- gitleaks rule `runna-ical-feed` (`cal\.runna\.com/[0-9a-z]{20,}\.ics`) makes a leaked feed URL detectable. Test URLs
-  use the short `FAKEFEED` token.
+- gitleaks rule `runna-ical-feed` (`cal\.runna\.com/[A-Za-z0-9_-]{20,}`) makes a leaked feed URL detectable, and the
+  log redactor has a `cal.runna.com/<token>` pattern as a backstop. Test URLs use short tokens (`FAKEFEED`).
 - Runbook: don't also subscribe FlowSavvy's calendar to the feed, or a timed run is both busy time and a task.

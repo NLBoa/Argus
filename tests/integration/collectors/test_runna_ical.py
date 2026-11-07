@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import httpx
 import pytest
@@ -261,3 +261,101 @@ async def test_fetch_error_is_redacted(
     health = repo.source_health(db, ["runna_ical"])["runna_ical"]
     assert health.last_error is not None
     assert RUNNA_URL not in health.last_error
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def _tempo_done(
+    day: bytes, start: bytes, title: bytes, desc: bytes = b"Synthetic completed tempo."
+) -> bytes:
+    """FEED_REPLACED, with Tempo's completion moved to another time and title."""
+    return (
+        FEED_REPLACED.replace(b"DTSTART:20261110T160512", b"DTSTART:" + day + b"T" + start)
+        .replace(b"DTEND:20261110T164901", b"DTEND:" + day + b"T" + start[:2] + b"5900")
+        .replace(
+            b"SUMMARY:\xf0\x9f\x8f\x83 Tempo Run\r\nDESCRIPTION:Synthetic completed tempo.",
+            b"SUMMARY:\xf0\x9f\x8f\x83 " + title + b"\r\nDESCRIPTION:" + desc,
+        )
+    )
+
+
+async def _planned_then(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock, body: bytes
+) -> tuple[int, datetime]:
+    serve(without(FEED, b"COMPLETED_PLAN_WORKOUT-AAAAAAAA-0000-4000-8000-00000000000A"))
+    await runner.run_cycle()
+    tempo, since = item_ids(db)["Tempo Run"], clock.now()
+    serve(body)
+    clock.set(datetime(2026, 11, 12, 15, 0, tzinfo=UTC))
+    await runner.run_cycle(force=True)
+    return tempo, since
+
+
+@respx.mock
+async def test_run_done_the_next_day_is_submitted(  # review finding 1
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
+) -> None:
+    body = _tempo_done(b"20261111", b"170000", b"Tempo Run")
+    assert body != FEED_REPLACED
+    tempo, since = await _planned_then(runner, db, clock, body)
+    assert runs(db)["Tempo Run"].status is ItemStatus.SUBMITTED
+    assert change_status(db, tempo, since) is None
+
+
+@respx.mock
+async def test_run_done_after_midnight_renamed_is_submitted(  # review finding 1
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
+) -> None:
+    tempo, since = await _planned_then(
+        runner, db, clock, _tempo_done(b"20261111", b"002000", b"Night Owl")
+    )
+    assert runs(db)["Tempo Run"].status is ItemStatus.SUBMITTED
+    assert change_status(db, tempo, since) is None
+
+
+@respx.mock
+async def test_renamed_completion_later_edited_stays_submitted(  # review finding 2
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
+) -> None:
+    tempo, since = await _planned_then(runner, db, clock, FEED_REPLACED_RENAMED)
+    assert runs(db)["Tempo Run"].status is ItemStatus.SUBMITTED
+    edited = FEED_REPLACED_RENAMED.replace(b"Synthetic completed tempo.", b"Edited after sync.")
+    assert edited != FEED_REPLACED_RENAMED
+    serve(edited)
+    clock.advance(timedelta(hours=1))
+    await runner.run_cycle(force=True)
+    assert runs(db)["Tempo Run"].status is ItemStatus.SUBMITTED
+    assert change_status(db, tempo, since) is None
+
+
+@respx.mock
+async def test_twin_appearing_later_marks_the_run_done(  # review finding 3
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock
+) -> None:
+    serve(without(FEED, b"COMPLETED_PLAN_WORKOUT-AAAAAAAA-0000-4000-8000-00000000000A"))
+    await runner.run_cycle()
+    assert runs(db)["Tempo Run"].status is ItemStatus.UPCOMING
+    serve(FEED)  # now with the completed twin next to the planned event
+    clock.advance(timedelta(hours=1))
+    await runner.run_cycle(force=True)
+    assert runs(db)["Tempo Run"].status is ItemStatus.SUBMITTED
+
+
+@respx.mock
+async def test_changed_preferred_time_reaches_stored_runs(  # review finding 4
+    runner: SyncRunner,
+    db: sqlite3.Connection,
+    clock: FakeClock,
+    app_config: AppConfig,
+    runna_secrets: Secrets,
+) -> None:
+    serve(FEED)
+    await runner.run_cycle()
+    early = app_config.model_copy(update={"runna": RunnaConfig(preferred_time=time(7, 30))})
+    clock.advance(timedelta(hours=1))
+    await make_runner(db, early, runna_secrets, clock).run_cycle(force=True)
+    easy = runs(db)["4mi Easy Run"]
+    assert repo.run_details(db, [easy.id])[easy.id].preferred_start == datetime(
+        2026, 11, 11, 12, 30, tzinfo=UTC
+    )
