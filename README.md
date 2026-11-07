@@ -25,7 +25,7 @@ contents. Design notes: [D073](docs/DECISIONS.md).
 | Tool | Returns |
 |---|---|
 | `list_courses()` | `courses`: `code`, `name`, and `meetings` (`kind`, `days` like `["Tue","Thu"]`, `start`/`end` local `HH:MM`, `location`) |
-| `get_upcoming_work(days=14)` | `items` due in the next `days` (1–60), soonest first, **plus** work up to 7 days past due that isn't done (`overdue: true`). Also `as_of`. |
+| `get_upcoming_work(days=14)` | `items` due in the next `days` (1–60), soonest first, **plus** work up to 7 days past due that isn't done (`overdue: true`). A run is listed only until its day ends. Also `as_of`. |
 | `get_changes(since)` | `changes`: items that are new, had their due date moved, or were removed after `since` (ISO 8601 with an offset). Also `as_of`: pass it as the next `since`. |
 
 Each item has these fields:
@@ -35,13 +35,15 @@ Each item has these fields:
 | `id` | Stable Argus item id (a string). The same work keeps its id across syncs. |
 | `course` | Course code, e.g. `CMSC250` |
 | `title` | As the source names it |
-| `type` | `assignment` · `quiz` · `exam` · `project` · `event` (`slides` and `file` are reserved and never sent today) |
+| `type` | `assignment` · `quiz` · `exam` · `project` · `event` · `run` (a Runna workout, D078) (`slides` and `file` are reserved and never sent today) |
 | `due` | ISO 8601 with the America/New_York offset (`2026-11-10T23:59:00-05:00`), or `null`. For an `event`, its start time. |
 | `link` | Canvas, Gradescope, or the post the date came from |
-| `source` | `canvas` · `gradescope` · `piazza` (a date announced in a post) · `manual` (entered by you) |
+| `source` | `canvas` · `gradescope` · `piazza` (a date announced in a post) · `runna` · `manual` (entered by you) |
 | `updated_at` | When Argus last saw the item created or its date moved |
 | `done` | Submitted (Gradescope) or marked done in Argus. An exam or event counts as done once it starts. |
 | `overdue` | Past due and not done |
+| `estimate_minutes` | How long it should take: your own time if you set one, else Runna's length for a run or Argus's estimate; `null` if there is none |
+| `preferred_start` | Runs only: a good time to start (the time set in Runna, else `runna.preferred_time`, 16:00). Flexible: any free time that day works |
 | `status`, `old_due` | `get_changes` only: `new` · `changed` · `removed`, and the due date before `since` for `changed` |
 
 How `type` is chosen:
@@ -49,6 +51,8 @@ How `type` is chosen:
   quiz is already classified as an exam or quiz. "Midterm review session" stays an `event`.
 - An assignment whose title names a project ("Project 2", "Proj3") becomes `project`.
 - Other calendar events (office hours, review sessions) are `event`.
+- Anything in the Running course (`RUN`) is a `run`. It is due 23:59 on its day, and leaves `get_upcoming_work` once
+  that day ends, done or not: a skipped run isn't late work to reschedule.
 
 A caveat: with only the Canvas calendar feed (no Canvas token) and no Gradescope for a course, Argus can't see
 submissions. A past-due item in that course stays `done: false, overdue: true` until you mark it done in Argus
