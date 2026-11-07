@@ -188,6 +188,7 @@ def _add_run(client: TestClient, now: datetime) -> int:
             now,
         )
         repo.apply_merge(conn, ids, now)
+        repo.rebuild_search_index(conn)
     run_id = next(i.id for i in repo.list_items(conn) if i.course_code == "RUN")
     conn.close()
     return run_id
@@ -201,3 +202,24 @@ def test_rerun_estimate_refuses_runs(
     r = client.post(f"/items/{run_id}/estimate/rerun", headers=ORIGIN, follow_redirects=False)
     assert r.status_code == 404
     assert len(transport.calls) == before  # no AI call for a run
+
+
+def test_health_lists_runna(client: TestClient) -> None:
+    assert "Runna" in client.get("/health").text
+
+
+def test_run_item_page_has_no_course_link_or_rerun(client: TestClient, clock: FakeClock) -> None:
+    run_id = _add_run(client, clock.now())
+    html = client.get(f"/items/{run_id}").text
+    assert "Easy Run" in html
+    assert 'href="/courses/RUN"' not in html
+    assert "/estimate/rerun" not in html
+    # Coursework keeps both.
+    hw = client.get(f"/items/{HW3}").text
+    assert 'href="/courses/CMSC351"' in hw and "/estimate/rerun" in hw
+
+
+def test_search_hit_for_a_run_has_no_course_link(client: TestClient, clock: FakeClock) -> None:
+    _add_run(client, clock.now())
+    html = client.get("/search", params={"q": "Easy Run"}).text
+    assert "Easy Run" in html and 'href="/courses/RUN"' not in html

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from argus.capabilities import Capabilities, Feature
 from argus.clock import Clock, local_datetime, to_local
-from argus.config import AppConfig
+from argus.config import RUN_CODE, AppConfig
 from argus.domain.models import Item, ItemKind, MeetingRecord, Weekday
 from argus.domain.status import awaiting_confirmation
 from argus.domain.titles import normalize_title
@@ -72,9 +72,9 @@ def item_note_path(item: Item) -> str | None:
 
 def _line(item: Item, status: str) -> render.ItemLine:
     url = next((link.url for link in item.links if link.url), None)
-    return render.ItemLine(
-        item.title, item.kind.value, item.due_at, status, item_note_path(item), url
-    )
+    # Runs get no notes (D078): plain text, so a click never makes an empty note.
+    note = None if item.course_code == RUN_CODE else item_note_path(item)
+    return render.ItemLine(item.title, item.kind.value, item.due_at, status, note, url)
 
 
 # ---------------------------------------------------------------- confusion inbox

@@ -174,3 +174,11 @@ def test_htmx_row_swaps_keep_the_unconfirmed_state(tmp_path: Path) -> None:
         assert 'data-risk="unconfirmed"' in reopened.text
         assert "Overdue" not in reopened.text
         assert 'value="start"' not in reopened.text  # no Start button for it
+
+
+def test_no_runs_anywhere_without_runna(setup: tuple[str, TestClient, Secrets]) -> None:
+    """The demo never sets up Runna (D078): nothing about runs shows, and there's no course page."""
+    _, client, _ = setup
+    for path in ("/", "/upcoming", "/workload"):
+        assert "Running" not in client.get(path).text, path
+    assert client.get("/courses/RUN").status_code == 404
