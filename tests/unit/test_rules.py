@@ -174,6 +174,13 @@ def test_system_alert_after_three_failures_once_per_streak() -> None:
     assert system_alerts(snap(sources=new_streak, sent=set(r.keys))) != []
 
 
+def test_runna_system_alert_names_runna() -> None:
+    since = NOW - timedelta(hours=1)
+    states = {"runna_ical": SourceAlertState("runna_ical", 3, since, "boom")}
+    [r] = system_alerts(snap(sources=states))
+    assert r.title == "Runna sync failing"  # never the internal id (D078)
+
+
 def test_candidates_most_urgent_first() -> None:
     rs = candidates(snap(item(1, timedelta(hours=20)), item(2, timedelta(hours=2))))
     assert [r.rule for r in rs] == [Rule.DUE_3H, Rule.DUE_24H]
