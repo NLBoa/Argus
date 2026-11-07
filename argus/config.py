@@ -12,13 +12,17 @@ import os
 import re
 from datetime import time
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Final, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 _COURSE_CODE = re.compile(r"^[A-Z]{4}\d{3}[A-Z]?$")
 _SECTION = re.compile(r"^\d{4}[A-Z]?$")
+# The Running pseudo-course for Runna workouts (D078). "RUN" fails the course-code pattern, so it
+# can never be listed under `courses:`; it comes from the `runna:` block instead.
+RUN_CODE: Final = "RUN"
+RUN_TITLE: Final = "Running"
 
 
 class _Strict(BaseModel):
@@ -171,6 +175,16 @@ class PlannerInboxConfig(_Strict):
     folder_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{10,200}$")] | None = None
 
 
+class RunnaConfig(_Strict):
+    """Runna workouts as assignments (D078). The feed URL is a credential (`runna_ical_url`),
+    never here. A run is due at the end of its day; these only shape the plan."""
+
+    # When to aim for a run Runna gave no time to (local, "HH:MM").
+    preferred_time: time = time(16, 0)
+    # A run's length when Runna gives none.
+    default_minutes: Annotated[int, Field(ge=5, le=600)] = 45
+
+
 class PathsConfig(_Strict):
     data_dir: Path = Path("var")
     vault_dir: Path = Path("var/vault")
@@ -200,6 +214,7 @@ class AppConfig(_Strict):
     paths: PathsConfig = PathsConfig()
     mcp: MCPConfig = MCPConfig()
     planner_inbox: PlannerInboxConfig = PlannerInboxConfig()
+    runna: RunnaConfig | None = None
 
     @model_validator(mode="after")
     def _unique_courses(self) -> Self:
@@ -212,6 +227,18 @@ class AppConfig(_Strict):
     def course(self, code: str) -> CourseConfig | None:
         return next((c for c in self.courses if c.code == code), None)
 
+    def running_course(self) -> CourseConfig | None:
+        """The Running pseudo-course, when the `runna:` block is set. Built without validation:
+        its code is reserved and deliberately fails the course-code pattern."""
+        if self.runna is None:
+            return None
+        return CourseConfig.model_construct(code=RUN_CODE, section="0000")
+
+    def all_courses(self, *, running: bool) -> list[CourseConfig]:
+        """The configured courses, plus Running last when `running` (Runna is set up)."""
+        run = self.running_course() if running else None
+        return [*self.courses, run] if run is not None else list(self.courses)
+
 
 class Secrets(BaseModel):
     """Every credential Argus uses. All optional: a missing secret disables that feature."""
@@ -219,6 +246,8 @@ class Secrets(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     canvas_ical_url: SecretStr | None = None
+    # Runna's calendar feed (D078): https://cal.runna.com/<token>.ics. The URL is the token.
+    runna_ical_url: SecretStr | None = None
     canvas_token: SecretStr | None = None
     gradescope_email: str | None = None
     gradescope_password: SecretStr | None = None

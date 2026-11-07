@@ -61,6 +61,12 @@ canvas:
 # planner_inbox:
 #   folder_id: "your-inbox-folder-id"
 
+# Runna workouts as assignments in a "Running" course (D078). Also set the runna_ical_url
+# credential: Runna > Profile > Connected Apps & Devices > Calendars > Other Calendar.
+# runna:
+#   preferred_time: "16:00"  # when to aim for a run Runna gave no time to
+#   default_minutes: 45      # a run's length when Runna gives none
+
 paths:
   data_dir: var              # SQLite DB, caches
   vault_dir: var/vault       # git clone of the Obsidian vault

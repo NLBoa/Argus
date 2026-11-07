@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import date, datetime, time
 from enum import IntEnum, StrEnum
 
 
@@ -20,6 +20,7 @@ class Source(StrEnum):
     PIAZZA = "piazza"
     PIAZZA_EMAIL = "piazza_email"
     UMDIO = "umdio"
+    RUNNA_ICAL = "runna_ical"  # Runna workouts as assignments in the Running course (D078)
     MANUAL = "manual"
     FINDING = "finding"
 
@@ -127,10 +128,24 @@ class SourceItem:
     graded: bool | None = None
     description: str | None = None
     question_count: int | None = None
+    # Runna runs only (D078): Runna's length for the workout, and a good time to start (UTC).
+    duration_minutes: int | None = None
+    preferred_start: datetime | None = None
 
     @property
     def key(self) -> SourceKey:
         return SourceKey(self.source, self.external_id)
+
+
+@dataclass(frozen=True, slots=True)
+class CompletedRun:
+    """A completed Runna plan workout with no planned twin in its fetch (D078): Runna replaced the
+    planned event. The runner matches it to a stored run, which then counts as submitted."""
+
+    external_id: str  # the completed event's own id
+    local_day: date  # the day it was run (America/New_York)
+    title_key: str  # its normalized title
+    raw_hash: str
 
 
 @dataclass(frozen=True, slots=True)
