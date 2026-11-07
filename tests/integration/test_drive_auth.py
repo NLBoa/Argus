@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import stat
 import threading
 from collections.abc import Iterator
@@ -33,6 +34,14 @@ from argus.drive_auth import (
 FOLDER = "Inbox_Folder-0123456789"
 APP = ClientSecrets("client.apps.googleusercontent.test", "client-secret")
 runner = CliRunner()
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(output: str) -> str:
+    """Typer's usage errors as plain words. Rich colours them when it detects CI
+    (GITHUB_ACTIONS), splitting "--folder-id" with escape codes, and boxes and wraps them."""
+    text = _ANSI.sub("", output)
+    return " ".join("".join(" " if "\u2500" <= ch <= "\u257f" else ch for ch in text).split())
 
 
 def client_file(tmp_path: Path, kind: str = "installed") -> Path:
@@ -306,7 +315,7 @@ def test_needs_a_folder_id(tmp_path: Path) -> None:
         ["drive-auth", "--client-secrets", str(client_file(tmp_path)), "-c", "nope.yaml"],
     )
     assert result.exit_code == 2
-    assert "folder-id" in result.output
+    assert "--folder-id" in plain(result.output)
 
 
 def test_web_client_file_is_refused(tmp_path: Path) -> None:
@@ -321,4 +330,4 @@ def test_web_client_file_is_refused(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 2
-    assert "Desktop app" in " ".join(result.output.replace("\u2502", " ").split())
+    assert "Desktop app" in plain(result.output)
