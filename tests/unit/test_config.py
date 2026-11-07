@@ -4,7 +4,15 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from argus.config import AppConfig, CourseConfig, TimeWindow, load_config, load_secrets
+from argus.config import (
+    RUN_CODE,
+    RUN_TITLE,
+    AppConfig,
+    CourseConfig,
+    TimeWindow,
+    load_config,
+    load_secrets,
+)
 from tests.conftest import REPO_ROOT
 
 
@@ -118,3 +126,51 @@ def test_time_window_from_a_time_to_itself_is_refused() -> None:
 
     with pytest.raises(ValueError, match="must differ"):
         TimeWindow(start=time(0), end=time(0))
+
+
+# ---------------------------------------------------------------- Runna runs (D078)
+
+# Shorter than the gitleaks rule's token, like the Canvas test URLs (user_FAKEFEED.ics).
+SYNTHETIC_RUNNA_URL = "https://cal.runna.com/FAKEFEED.ics"
+CMSC351 = {"code": "CMSC351", "section": "0101"}
+
+
+def test_runna_block_defaults() -> None:
+    cfg = AppConfig.model_validate({"runna": {}})
+    assert cfg.runna is not None
+    assert cfg.runna.preferred_time == time(16, 0)
+    assert cfg.runna.default_minutes == 45
+
+
+def test_runna_preferred_time_rejects_bad_value() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"runna": {"preferred_time": "25:00"}})
+
+
+@pytest.mark.parametrize("minutes", [4, 601])
+def test_runna_default_minutes_bounds(minutes: int) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"runna": {"default_minutes": minutes}})
+
+
+def test_running_course_only_with_block() -> None:
+    assert AppConfig().running_course() is None
+    cfg = AppConfig.model_validate({"runna": {}, "courses": [CMSC351]})
+    running = cfg.running_course()
+    assert running is not None and running.code == RUN_CODE == "RUN"
+    assert cfg.course("RUN") is None  # no course page for runs
+    assert [c.code for c in cfg.all_courses(running=True)] == ["CMSC351", "RUN"]
+    assert [c.code for c in cfg.all_courses(running=False)] == ["CMSC351"]
+    assert [c.code for c in AppConfig().all_courses(running=True)] == []
+    assert RUN_TITLE == "Running"
+
+
+def test_run_is_not_a_course_code() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"courses": [{"code": "RUN", "section": "0101"}]})
+
+
+def test_runna_secret_loads_and_is_redacted() -> None:
+    s = load_secrets({"ARGUS_RUNNA_ICAL_URL": SYNTHETIC_RUNNA_URL})
+    assert s.runna_ical_url is not None
+    assert SYNTHETIC_RUNNA_URL in s.secret_values()
