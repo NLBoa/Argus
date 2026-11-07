@@ -40,7 +40,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/capabilities.py`: which features exist for the configured sources (D054), from each collector's `enabled()`.
   One object per process, passed to views (`caps` in templates), the vault, reminders, and SMS.
 - `argus/logging.py`: JSON logs and the redactor. Call `configure_logging(secrets=…)` at every entry point.
-- `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary.
+- `argus/collectors/`: one module per source. Fetch → typed records + raw payload hash. Never raises past its boundary. Runna (D078): `runna_ical.py`; `argus/runs.py` turns its length into a `runna` estimate for the `RUN` pseudo-course (`AppConfig.all_courses`).
 - `argus/domain/`: pure models, merge rules, status transitions, finding application. No I/O.
 - `argus/planner/`: work windows, load and risk (C and D), the queue and its forecast, exam study time,
   calibration, busy time, `lanes` (layout for the kiosk rail), and `workload` (the /workload
@@ -69,10 +69,10 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 ## Data model
 SQLite with WAL and FTS5. Full schema: [docs/schema.md](docs/schema.md).
 `courses` classes · `meetings` class times · `items` merged assignments/quizzes/exams + status ·
-`item_sources` per-source links · `posts` Piazza posts / Canvas announcements · `findings` extracted
+`item_sources` per-source links (Runna: length, preferred start) · `posts` Piazza posts / Canvas announcements · `findings` extracted
 facts + applied state · `modules` Canvas modules · `concepts` concept notes · `practice_items`
 questions/flashcards · `practice_attempts` results + confidence · `exams` scope/logistics ·
-`estimates` versioned, never overwritten · `estimate_misses` AI declined or failed (D069) · `time_logs` actuals and check-ins · `work_windows` when the student works ·
+`estimates` versioned, never overwritten (`ai`, `user`, `runna`, …) · `estimate_misses` AI declined or failed (D069) · `time_logs` actuals and check-ins · `work_windows` when the student works ·
 `queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
 path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health ·
@@ -116,6 +116,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - Funnel allows ports 443/8443/10000 and opens a whole port: MCP on 443, dashboard on tailnet-only 8443, webhook on
   10000 (D073). Never commit the real `*.ts.net` name (gitleaks blocks it). Unknown Host → 421 (`mcp.allowed_hosts`).
 - Drive: `drive.file` can't see a folder Argus didn't create (404); Testing-status OAuth tokens die in 7 days; error bodies echo the folder ID (never log them). Funnel traffic carries `Tailscale-Funnel-Request: ?1` (the file adder 404s on it).
+- Runna (D078): the feed URL (`cal.runna.com/<token>.ics`) is the token (gitleaks `runna-ical-feed`). Runs carry `X-WORKOUT-ESTIMATED-DURATION` (s); a finished workout *replaces* its planned event under a new UID (`COMPLETED_PLAN_WORKOUT-`, the runner matches it back); `COMPLETED_NON_PLAN_WORKOUT-` is ignored; DTSTAMP is the fetch time; real events carry LOCATION/GEO (never in fixtures).
 - Twilio signs the exact public URL it posts to: `notifications.webhook_url` must match it character for character.
   STOP/START/HELP are Twilio's (Argus stays silent). `[` and `]` are GSM-7 extension characters (2 septets each).
 
@@ -127,8 +128,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 
 ## Vault rules
 - Argus writes only between `%% argus:begin <id> %%` and `%% argus:end <id> %%`. The `core`
-  region holds generated note content. "Explain it yourself" and "My notes" sit after the
-  markers and are never written.
+  region holds generated note content. "Explain it yourself" and "My notes" sit after the markers and are never written.
 - `vault_regions` stores each region's last-written hash. The ownership decision (`vault/ownership.py`):
   new Argus note → write · region hash unchanged → rewrite · region edited by the user → leave, create a proposal
   · user text elsewhere → leave, propose only · `argus-edit: allow` in frontmatter (note or folder) →

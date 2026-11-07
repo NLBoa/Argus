@@ -384,6 +384,7 @@ student sees. The matrix (pinned by `tests/unit/test_capabilities.py`):
 | submission_tracking | canvas_api, gradescope |
 | ai | an Anthropic key (or an injected transport in tests and the demo) |
 | study_generation | canvas_modules and ai |
+| runs (D078) | runna_ical (the `runna:` block and the `runna_ical_url` secret) |
 
 Per-course flags add the course's own id, so a token does nothing for a course without a `canvas_id`. The AI budget
 is applied at request time (`with_budget`) and hides only buttons that make new calls (Re-run AI estimate), never
@@ -782,3 +783,76 @@ or uploaded, the send still succeeds and the result page says so in a muted line
 and error type, never text. Argus never reads the Inbox back, so the scheduled task keeps its own record of what
 it has handled (Drive `createdTime` plus a processed list by Drive file id). The morning planner that makes tasks
 must skip `.md` companions.
+
+## D078 — Runna runs as assignments (2026-11-06)
+**Decision.** Argus reads the student's Runna running plan from its private calendar feed
+(`https://cal.runna.com/<token>.ics`, the `runna_ical_url` secret) and makes each planned run an assignment in a
+**Running** pseudo-course (`RUN`, built from a `runna:` block in `config.yaml`, never listed under `courses:`). A run
+is due **23:59 local on its day**, even when Runna gave it a time. Its estimate is Runna's own length. Runs go through
+the queue, workload, and the normal `due_24h` / `due_3h` texts like any assignment. The Claude connector sends each
+run as `type: run` with `estimate_minutes` and `preferred_start`, so the scheduled morning task can place it.
+**Why.** The morning Claude plans the day from the connector. Runs lived outside it, so they were planned elsewhere
+or not at all. The student asked for runs "treated as an assignment", done by the end of the day, ideally around 4 pm.
+
+**The feed** (read once from the real feed, never committed):
+- Planned runs: UID `UPCOMING_PLAN_WORKOUT-<plan>_plan_week_<n>_<TYPE>_<i>`, all-day unless the student set a
+  time, with `X-WORKOUT-ESTIMATED-DURATION` in seconds and a SUMMARY like "🏃 4mi Easy Run • 4mi".
+- Finished runs: Runna **replaces** the planned event with a `COMPLETED_PLAN_WORKOUT-<activity id>` event (floating
+  local start and end, title without the " • 4mi" suffix, location and GPS).
+- Missed runs stay as planned events after their day.
+- `COMPLETED_NON_PLAN_WORKOUT-` events are runs outside the plan.
+- DTSTAMP is the fetch time on every event, so record hashes leave it out.
+- The plan had only runs: no rest days, strength sessions, or notes.
+
+**Length.** In this order: `X-WORKOUT-ESTIMATED-DURATION`; a timed event's end minus start; the event's text; else
+`runna.default_minutes` (45) with low confidence. The text rules are strict, because workout text lists parts:
+- a labeled total ("Estimated duration: 42 min") wins;
+- paces (`5:30/km`, `8:45 min/mi`, `6:30-7:00/km`) are removed first;
+- otherwise the text must hold exactly one distinct length ("Warm up 10 min · 4 x 3 min · cool down 10 min" gives none);
+- a bare `45m` counts only inside a labeled total (elsewhere it may be metres), and `mm:ss` never counts.
+
+The length is stored as a versioned estimate with the new source `runna` (migration 0014 widens the CHECK by rebuilding
+`estimates` as 0009 rebuilt `time_logs`). A new version is appended only when the length changes. The student's own
+estimate still wins. Runs are never sent to the AI (`needs_estimate`, and "Re-run AI estimate" is refused with a 404
+and hidden) and never calibrated (factor 1.0: Runna knows the runner's pace).
+
+**Completed runs.** The student sets Runna's completed activities to "Completed plan workouts only". A completed event
+never becomes an item. If its planned twin is in the same fetch, the twin is submitted. Otherwise Runna replaced it, and
+the runner matches the completion to a stored run before marking absences (so a finished run is never "removed"),
+taking the first step that finds exactly one run:
+1. the same id;
+2. the same completion matched before (its hash is stored on the run);
+3. the same local day and normalized title (no emoji, no distance suffix);
+4. the only run still open that day.
+
+Step 4 is safe because only plan workouts are synced, and step 2 keeps a renamed completion matched after the run is
+done. A completion that matches nothing is dropped. Non-plan completions are ignored entirely, so an extra unplanned run
+can't complete a planned one.
+
+**Never missed.** `runna_ical` reports no submissions (D056), so a run is never MISSED. A run past its day that isn't
+done is awaiting confirmation, as an untracked assignment is.
+
+**Connector.**
+- Every item now carries `estimate_minutes` (the effective estimate). Runs also carry `preferred_start`: the time set
+  in Runna, else `runna.preferred_time` (16:00).
+- **A run leaves `get_upcoming_work` once its day ends**, done or not. Coursework keeps its 7-day overdue tail, but a
+  skipped run isn't late work, and Claude shouldn't reschedule it.
+- The instructions say runs are flexible within their day.
+- The feed URL and workout descriptions are never sent.
+
+**Skipped events.** Events whose title says rest, strength, mobility, cross-training, yoga, stretch, or note never
+become items (a guard: the observed plan had none). A race day is a run.
+
+**Scope.**
+- Web: Health lists Runna (label, setup hint, 90-minute staleness). `runna_ical` is in the shared source list, so three
+  failures in a row alert like any source. Runs otherwise render through the existing assignment rows with the
+  `slate` fallback stripe. There is no `/courses/RUN` page, so the RUN course chip (item page) and course code
+  (search) aren't links.
+- Vault: no course or item notes for runs (the vault writes those only for `config.courses`). Runs appear in the
+  Today and weekly notes as plain text with no `[[link]]`, so Obsidian never makes an empty note.
+- Hidden, not empty (D055): RUN is synced only while the `runna:` block and the secret are both set. Otherwise it is
+  inactive and nothing about runs shows (Health says "Not set up").
+- The schedule slot is :15/:45 (staggered).
+- gitleaks rule `runna-ical-feed` (`cal\.runna\.com/[0-9a-z]{20,}\.ics`) makes a leaked feed URL detectable. Test URLs
+  use the short `FAKEFEED` token.
+- Runbook: don't also subscribe FlowSavvy's calendar to the feed, or a timed run is both busy time and a task.

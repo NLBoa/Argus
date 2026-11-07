@@ -75,6 +75,26 @@ sudo argus-admin check-config                                # every secret show
 | `anthropic_api_key` | console.anthropic.com → API keys. Without it, every AI feature uses its fallback |
 | `healthchecks_url` | healthchecks.io → your check's ping URL (see [Dead-man's switch](#dead-mans-switch)) |
 | `drive_client_id`, `drive_client_secret`, `drive_refresh_token` | `argus drive-auth` writes all three (see [File adder](#file-adder-google-drive)) |
+| `runna_ical_url` | Runna → Profile → Connected Apps & Devices → Calendars → Other Calendar (the URL is the secret; see [Runna](#runna-runs)) |
+
+## Runna runs
+
+Argus reads the Runna running plan's calendar feed and makes each planned run an assignment in a **Running** course
+(`RUN`), due by the end of its day, with Runna's estimated length as its time (D078). The morning Claude task gets
+runs from the connector with `estimate_minutes` and `preferred_start`.
+
+1. In Runna: Profile → Connected Apps & Devices → Calendars. Set completed activities to **Completed plan workouts
+   only**, then copy the **Other Calendar** link (`https://cal.runna.com/<token>.ics`). The link is the secret:
+   never paste it in a chat, an issue, or git (gitleaks has a rule for it).
+2. Save it as the `runna_ical_url` credential (see [Credentials](#credentials)), and add a `runna:` block to
+   `config.yaml` (`runna: {}` takes the defaults: aim for 16:00, 45 min when Runna gives no length).
+3. Run `sudo /opt/argus/deploy/install.sh`, then check Health: **Runna** should say it synced.
+
+A finished run shows as done: Runna replaces the planned workout with the completed activity, and Argus matches it
+back. A run is never "missed". If you skip one, it leaves the connector at the end of its day.
+
+**Don't double-book.** Don't also subscribe the Google or Apple calendar that FlowSavvy reads to the Runna feed. If
+you do, a timed run shows up both as a busy event and as a task Claude schedules.
 
 ## File adder (Google Drive)
 
