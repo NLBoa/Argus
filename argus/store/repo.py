@@ -12,7 +12,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
-from argus.config import AppConfig
+from argus.config import RUN_CODE, RUN_TITLE, AppConfig
 from argus.domain.changes import ChangeEvent, ChangeKind
 from argus.domain.findings import ItemRef
 from argus.domain.merge import merge_sources, resolve_item
@@ -34,6 +34,7 @@ from argus.domain.models import (
     Source,
     SourceItem,
     SourceKey,
+    StoredRun,
     Weekday,
 )
 from argus.domain.status import StatusFacts, derive_status
@@ -63,10 +64,14 @@ def sha256(text: str | bytes) -> str:
 # ---------------------------------------------------------------- courses
 
 
-def sync_courses(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> dict[str, int]:
-    """Upsert configured courses; deactivate ones no longer configured. Returns code -> id."""
+def sync_courses(
+    conn: sqlite3.Connection, config: AppConfig, now: datetime, *, running: bool = False
+) -> dict[str, int]:
+    """Upsert configured courses (plus Running while Runna is set up, D078); deactivate the rest.
+    Returns code -> id."""
     ts = iso(now)
-    for c in config.courses:
+    courses = config.all_courses(running=running)
+    for c in courses:
         conn.execute(
             """INSERT INTO courses (code, section, canvas_id, gradescope_id, piazza_network_id,
                                     accent, active, created_at, updated_at)
@@ -87,7 +92,12 @@ def sync_courses(conn: sqlite3.Connection, config: AppConfig, now: datetime) -> 
                 ts,
             ),
         )
-    codes = [c.code for c in config.courses]
+    if any(c.code == RUN_CODE for c in courses):
+        conn.execute(
+            "UPDATE courses SET title = ? WHERE code = ? AND title IS NOT ?",
+            (RUN_TITLE, RUN_CODE, RUN_TITLE),
+        )
+    codes = [c.code for c in courses]
     marks = ",".join("?" * len(codes))
     conn.execute(
         f"UPDATE courses SET active = 0, updated_at = ? WHERE code NOT IN ({marks})",  # noqa: S608
@@ -227,14 +237,16 @@ def upsert_source_items(
             it.question_count,
             it.url,
             it.raw_hash,
+            it.duration_minutes,
+            iso_or_none(it.preferred_start),
         )
         if row is None:
             conn.execute(
                 """INSERT INTO item_sources (course_id, title, kind, due_at, release_at,
                      late_due_at, all_day, points, submitted, graded, description,
-                     question_count, url, raw_hash, source, external_id, present,
-                     first_seen_at, last_seen_at, changed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                     question_count, url, raw_hash, duration_minutes, preferred_start, source,
+                     external_id, present, first_seen_at, last_seen_at, changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
                 (*values, it.source.value, it.external_id, ts, ts, ts),
             )
             changed += 1
@@ -243,6 +255,7 @@ def upsert_source_items(
                 """UPDATE item_sources SET course_id = ?, title = ?, kind = ?, due_at = ?,
                      release_at = ?, late_due_at = ?, all_day = ?, points = ?, submitted = ?,
                      graded = ?, description = ?, question_count = ?, url = ?, raw_hash = ?,
+                     duration_minutes = ?, preferred_start = ?,
                      present = 1, last_seen_at = ?, changed_at = ?
                    WHERE source = ? AND external_id = ?""",
                 (*values, ts, ts, it.source.value, it.external_id),
@@ -254,6 +267,58 @@ def upsert_source_items(
                 (ts, it.source.value, it.external_id),
             )
     return changed
+
+
+@dataclass(frozen=True, slots=True)
+class RunDetail:
+    """What Runna says about a run (D078): its length and a good time to start."""
+
+    duration_minutes: int | None
+    preferred_start: datetime | None
+
+
+def run_details(conn: sqlite3.Connection, item_ids: Sequence[int]) -> dict[int, RunDetail]:
+    """Runna details by item id, from each item's present Runna record."""
+    if not item_ids:
+        return {}
+    marks = ",".join("?" * len(item_ids))
+    rows = conn.execute(
+        "SELECT item_id, duration_minutes, preferred_start FROM item_sources"  # noqa: S608
+        f" WHERE source = ? AND present = 1 AND item_id IN ({marks})",
+        (Source.RUNNA_ICAL.value, *item_ids),
+    )
+    return {
+        r["item_id"]: RunDetail(r["duration_minutes"], parse_iso_or_none(r["preferred_start"]))
+        for r in rows
+    }
+
+
+def stored_runs(
+    conn: sqlite3.Connection, *, since: datetime, exclude: Iterable[str]
+) -> list[StoredRun]:
+    """Stored Runna records due at or after `since`, except those in `exclude` (this fetch's)."""
+    skip = set(exclude)
+    rows = conn.execute(
+        """SELECT s.external_id, s.title, s.due_at, s.description, s.duration_minutes,
+                  s.preferred_start, s.raw_hash, i.status
+           FROM item_sources s LEFT JOIN items i ON i.id = s.item_id
+           WHERE s.source = ? AND s.due_at >= ?""",
+        (Source.RUNNA_ICAL.value, iso(since)),
+    )
+    return [
+        StoredRun(
+            external_id=r["external_id"],
+            title=r["title"],
+            due_at=parse_iso_or_none(r["due_at"]),
+            description=r["description"],
+            duration_minutes=r["duration_minutes"],
+            preferred_start=parse_iso_or_none(r["preferred_start"]),
+            open=r["status"] is None or ItemStatus(r["status"]).is_open,
+            raw_hash=r["raw_hash"],
+        )
+        for r in rows
+        if r["external_id"] not in skip
+    ]
 
 
 class SuspiciousListingError(Exception):

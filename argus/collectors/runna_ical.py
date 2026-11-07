@@ -22,13 +22,20 @@ from datetime import UTC, date, datetime, time, timedelta
 from icalendar import Calendar, Component
 
 from argus.clock import LOCAL_TZ
+from argus.collectors.base import CollectContext, CollectResult, RunStatus
 from argus.config import RUN_CODE, RunnaConfig
-from argus.domain.models import CompletedRun, ItemKind, Source, SourceItem
-from argus.store.repo import sha256
+from argus.domain.models import CompletedRun, ItemKind, Source, SourceItem, StoredRun
+from argus.store.repo import SourceState, sha256
+
+__all__ = ["RunnaFeed", "RunnaIcalCollector", "StoredRun", "match_completed", "parse_runna_feed"]
 
 PLANNED_PREFIX = "UPCOMING_PLAN_WORKOUT-"
 COMPLETED_PREFIX = "COMPLETED_PLAN_WORKOUT-"
 NON_PLAN_PREFIX = "COMPLETED_NON_PLAN_WORKOUT-"
+STATE_KEY = "feed"
+# How far back a run is protected from removal when the feed stops listing it, and how far back
+# a completion is matched to stored runs.
+RUNNA_LOOKBACK = timedelta(days=7)
 MAX_MINUTES = 600
 DUE_TIME = time(23, 59)
 
@@ -63,20 +70,6 @@ _DTSTAMP = re.compile(rb"^DTSTAMP[^\r\n]*\r?\n", re.MULTILINE)
 class RunnaFeed:
     runs: list[SourceItem]  # planned runs (some already marked done by a completed twin)
     completed: list[CompletedRun]  # completed plan workouts with no planned twin in this fetch
-
-
-@dataclass(frozen=True)
-class StoredRun:
-    """A stored Runna record, for matching a completion that replaced its planned event."""
-
-    external_id: str
-    title: str
-    due_at: datetime | None
-    description: str | None
-    duration_minutes: int | None
-    preferred_start: datetime | None
-    open: bool  # its item isn't done yet
-    raw_hash: str
 
 
 # ---------------------------------------------------------------- text
@@ -324,3 +317,40 @@ def match_completed(
             )
         )
     return out
+
+
+# ---------------------------------------------------------------- collector
+
+
+class RunnaIcalCollector:
+    source = Source.RUNNA_ICAL
+
+    def enabled(self, ctx: CollectContext) -> bool:
+        return ctx.config.runna is not None and ctx.secrets.runna_ical_url is not None
+
+    async def collect(self, ctx: CollectContext) -> CollectResult:
+        assert ctx.config.runna is not None
+        assert ctx.secrets.runna_ical_url is not None
+        prev = ctx.state(self.source, STATE_KEY)
+        resp = await ctx.fetcher.get(
+            ctx.secrets.runna_ical_url.get_secret_value(),
+            etag=prev.etag,
+            last_modified=prev.last_modified,
+        )
+        if resp.not_modified:
+            return CollectResult(self.source, RunStatus.UNCHANGED)
+        # The body changes every fetch (DTSTAMP), so there is no whole-payload shortcut.
+        state = SourceState(
+            payload_hash=sha256(resp.body),
+            etag=resp.headers.get("etag"),
+            last_modified=resp.headers.get("last-modified"),
+        )
+        feed = parse_runna_feed(resp.body, ctx.config.runna)
+        return CollectResult(
+            self.source,
+            RunStatus.OK,
+            items=tuple(feed.runs),
+            completed_runs=tuple(feed.completed),
+            complete_scopes={RUN_CODE: ctx.clock.now() - RUNNA_LOOKBACK},
+            state_updates={STATE_KEY: state},
+        )

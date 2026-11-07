@@ -13,7 +13,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `courses` | 0001 | One row per configured class. Rows are upserted from `config.yaml` and deactivated (`active=0`) when removed |
 | `meetings` | 0001 | Class meeting times (`days` = weekday numbers, Mon=0). Replaced per (course, source) |
 | `items` | 0001 | Merged assignments, quizzes, exams, and events: the resolved fields plus derived `status` |
-| `item_sources` | 0001 | One row per source record, `UNIQUE(source, external_id)`. Links to an item. `present=0` when a complete fetch no longer lists it |
+| `item_sources` | 0001, 0014 | One row per source record, `UNIQUE(source, external_id)`. Links to an item. `present=0` when a complete fetch no longer lists it. Since 0014, Runna records carry `duration_minutes` and `preferred_start` (D078) |
 | `posts` | 0001 | Piazza posts, instructor answers, Canvas announcements. `UNIQUE(platform, external_id)`, so the API and email agree |
 | `sync_runs` | 0001 | One row per collector run: status, redacted error, record count, duration |
 | `source_state` | 0001 | Per (source, key): last payload hash, ETag, Last-Modified, and source-specific JSON `data` |
@@ -28,7 +28,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `findings` | 0004 | Facts extracted from posts: kind, title, `date` (UTC; `date_only` when the post gave a day only), scope, quote, confidence, matched `item_id`, `status` (`applied`, `pending`, `conflict`, `linked`, `stored`, `confirmed`, `dismissed`, `superseded`), and the decision's `reason` |
 | `item_overrides` | 0004 | Student decisions: a confirmed due date that wins over sources, or a confirmed cancellation (item hidden) |
 | `items.scope`, `items.logistics` | 0004 | Text applied from staff findings |
-| `estimates` | 0004 | Versioned, append-only: `source` (`ai`, `default`, `user`), p50/p80 hours, confidence, breakdown and assumptions (JSON), reasoning, input hash, model, prompt version. User overrides can be retracted (`retracted_at`), never rewritten. Since D069, `default` rows and `estimate.v1` AI rows are kept but no longer count |
+| `estimates` | 0004, 0014 | Versioned, append-only: `source` (`ai`, `default`, `user`, and since 0014 `runna`: Runna's length for a run, D078), p50/p80 hours, confidence, breakdown and assumptions (JSON), reasoning, input hash, model, prompt version. User overrides can be retracted (`retracted_at`), never rewritten. Since D069, `default` rows and `estimate.v1` AI rows are kept but no longer count |
 | `estimate_misses` | 0012 | One row per item the AI gave no estimate for (D069): `input_hash`, `outcome` (`incomplete`: the description doesn't cover the whole task, never re-asked for the same input; `failed`: retried after 24 h), `reason`, `prompt_version`. Cleared when an estimate arrives |
 | `plan_blocks` | 0004 | Removed in 0009: renamed `plan_blocks_legacy`, converted once to `legacy` time, dropped in 0010 (D060). `migrate()` holds 0010 back until the conversion has run |
 | `plan_state` | 0004, 0009 | The facts hash of the plan, its one-line explanation, when it was made; `model_since`, `legacy_converted_at`, `windows_seeded_at` (D057) |
@@ -73,7 +73,7 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 ## item_sources
 Stores each source's view: `title`, `kind`, `due_at`, `release_at`, `late_due_at`, `all_day`,
 `points`, `submitted`, `graded`, `description`, `question_count`, `url`, `raw_hash`
-(change detection), `present`, `first_seen_at`, `last_seen_at`, and `changed_at`. `item_id` is set by
+(change detection), `duration_minutes` and `preferred_start` (Runna only, 0014), `present`, `first_seen_at`, `last_seen_at`, and `changed_at`. `item_id` is set by
 the merge step. Links are sticky (see `domain/merge.py`).
 
 ## posts

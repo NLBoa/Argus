@@ -17,6 +17,7 @@ from argus.clock import Clock
 from argus.collectors.http import Fetcher
 from argus.config import AppConfig, Secrets
 from argus.domain.models import (
+    CompletedRun,
     CourseInfo,
     GradeRecord,
     MaterialRecord,
@@ -67,6 +68,8 @@ class CollectResult:
     materials: tuple[MaterialRecord, ...] = ()
     state_updates: Mapping[str, SourceState] = field(default_factory=dict)
     error: str | None = None
+    # Runna (D078): completed workouts whose planned event is gone; the runner matches them.
+    completed_runs: tuple[CompletedRun, ...] = ()
 
     @property
     def record_count(self) -> int:

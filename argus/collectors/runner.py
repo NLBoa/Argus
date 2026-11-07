@@ -26,6 +26,7 @@ from argus.collectors.gradescope import GradescopeCollector
 from argus.collectors.http import AuthError, Fetcher
 from argus.collectors.piazza import PiazzaCollector
 from argus.collectors.piazza_email import PiazzaEmailCollector
+from argus.collectors.runna_ical import RUNNA_LOOKBACK, RunnaIcalCollector, match_completed
 from argus.collectors.schedule import POLICIES, is_due
 from argus.collectors.umdio import UmdioCollector
 from argus.config import AppConfig, Secrets
@@ -49,6 +50,7 @@ def default_collectors() -> list[Collector]:
         PiazzaCollector(),
         PiazzaEmailCollector(),
         UmdioCollector(),
+        RunnaIcalCollector(),
     ]
 
 
@@ -147,9 +149,10 @@ class SyncRunner:
     async def run_cycle(
         self, *, only: set[Source] | None = None, force: bool = False
     ) -> CycleReport:
-        with transaction(self.conn):
-            ids = repo.sync_courses(self.conn, self.config, self.clock.now())
         ctx = self._context()
+        running = any(c.source == Source.RUNNA_ICAL and c.enabled(ctx) for c in self.collectors)
+        with transaction(self.conn):
+            ids = repo.sync_courses(self.conn, self.config, self.clock.now(), running=running)
         primary = [
             c
             for c in self.collectors
@@ -254,6 +257,13 @@ class SyncRunner:
         with transaction(self.conn):
             # An error result may still carry what did work (umd.io's other courses).
             if result.status in (RunStatus.OK, RunStatus.UNCHANGED, RunStatus.ERROR):
+                if result.completed_runs:  # before absence marking, so a done run stays (D078)
+                    fetched = {i.external_id for i in result.items}
+                    stored = repo.stored_runs(
+                        self.conn, since=now - RUNNA_LOOKBACK, exclude=fetched
+                    )
+                    matched = match_completed(result.completed_runs, stored)
+                    result = replace(result, items=(*result.items, *matched))
                 repo.upsert_source_items(self.conn, result.items, ids, now)
                 for code, window_start in result.complete_scopes.items():
                     if code not in ids:
