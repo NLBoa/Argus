@@ -1850,6 +1850,20 @@ def _row_to_estimate(r: sqlite3.Row) -> EstimateRow:
     )
 
 
+def latest_runna_estimates(conn: sqlite3.Connection, item_ids: Sequence[int]) -> dict[int, str]:
+    """Each item's newest `runna` estimate's input hash (D078)."""
+    if not item_ids:
+        return {}
+    marks = ",".join("?" * len(item_ids))
+    rows = conn.execute(
+        "SELECT item_id, input_hash FROM estimates e"  # noqa: S608
+        f" WHERE source = 'runna' AND item_id IN ({marks}) AND version = ("
+        "   SELECT MAX(version) FROM estimates WHERE item_id = e.item_id AND source = 'runna')",
+        tuple(item_ids),
+    )
+    return {r["item_id"]: r["input_hash"] for r in rows}
+
+
 def insert_estimate(
     conn: sqlite3.Connection,
     *,

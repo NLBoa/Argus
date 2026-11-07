@@ -29,7 +29,9 @@ from argus.notify.router import Router
 from argus.notify.twilio_sms import TwilioChannel
 from argus.planning import explain, replan
 from argus.reminders.engine import ReminderEngine
+from argus.runs import sync_run_estimates
 from argus.store import repo
+from argus.store.db import transaction
 from argus.study import ensure_study, targeted_practice
 from argus.vault import service as vault
 
@@ -100,6 +102,7 @@ class Worker:
         steps: list[tuple[str, Callable[[], Awaitable[object]], float | None]] = [
             ("reminders", self.engine.tick, None),
             ("sync", self.runner.run_cycle, SYNC_BUDGET),
+            ("runs", self._runs, SYNC_BUDGET),
             (
                 "announcements",
                 lambda: scan_posts(
@@ -158,6 +161,13 @@ class Worker:
             log.warning("heartbeat ping failed", extra={"error": str(e)})
             return
         self._last_ping = now
+
+    async def _runs(self) -> None:
+        """Runna's length for each run becomes its estimate (D078)."""
+        if not self.caps.has(Feature.RUNS):
+            return
+        with transaction(self.conn):
+            sync_run_estimates(self.conn, self.config, self.clock.now())
 
     async def _plan(self) -> None:
         tracking = self.caps.tracking_sources

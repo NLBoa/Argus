@@ -21,9 +21,9 @@ from argus.ai import prompts
 from argus.ai.client import AIClient, Tier
 from argus.ai.schemas import EstimateOut
 from argus.clock import Clock, to_local
-from argus.config import AppConfig
+from argus.config import RUN_CODE, AppConfig
 from argus.domain.models import Item, ItemKind
-from argus.planner.calibration import Effective, Finished, calibrate, factor
+from argus.planner.calibration import Effective, Factor, Finished, calibrate, factor
 from argus.store import repo
 from argus.store.db import transaction
 
@@ -51,7 +51,8 @@ def counts(row: repo.EstimateRow | None) -> bool:
     """An estimate Argus uses: the student's, or an AI estimate from the current rules (not a
     per-kind default or a title-only guess from a retired prompt)."""
     return row is not None and (
-        row.source == "user" or (row.source == "ai" and row.prompt_version not in RETIRED_PROMPTS)
+        row.source in ("user", "runna")
+        or (row.source == "ai" and row.prompt_version not in RETIRED_PROMPTS)
     )
 
 
@@ -165,6 +166,8 @@ def needs_estimate(
     can't describe the task, or the AI already answered (or declined) this exact input."""
     if not ai_available or overridden or item.kind not in ESTIMATED_KINDS:
         return False
+    if item.course_code == RUN_CODE:  # Runna gives a run's length; never the AI (D078)
+        return False
     if not item.status.is_open or (item.due_at is not None and item.due_at < now):
         return False
     if not readable(item):
@@ -215,6 +218,8 @@ def estimate_state(
     | no_description | incomplete | failed | pending (the AI will read it shortly)."""
     if user is not None:
         return "user"
+    if base is not None and base.source == "runna":
+        return "runna"
     if counts(base):
         return "ai"
     if not ai or item.kind not in ESTIMATED_KINDS:
@@ -236,7 +241,12 @@ def effective_estimates(conn: sqlite3.Connection, now: datetime) -> dict[int, Ef
         base = latest if counts(latest) else None
         if item is None or (base is None and user is None):
             continue
-        f = factor(history, item.course_code, item.kind)
+        # Runna knows the runner's pace: its length is used as given (D078).
+        f = (
+            Factor(m=1.0, n=0, r_bar=1.0)
+            if base is not None and base.source == "runna"
+            else factor(history, item.course_code, item.kind)
+        )
         raw50 = base.p50 if base else (user.p50 if user else 0.0)
         raw80 = base.p80 if base else raw50
         out[item_id] = calibrate(

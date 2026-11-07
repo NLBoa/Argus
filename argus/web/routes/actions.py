@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from argus import announcements, estimates, exams, tasks
+from argus.config import RUN_CODE
 from argus.domain.models import Item, ItemKind
 from argus.planning import (
     compute,
@@ -293,6 +294,8 @@ def clear_estimate(request: Request, state: State, conn: Conn, item_id: int) -> 
 @router.post("/items/{item_id}/estimate/rerun")
 async def rerun_estimate(request: Request, state: State, conn: Conn, item_id: int) -> Response:
     item = _item_or_404(conn, item_id)
+    if item.course_code == RUN_CODE:  # Runna gives a run's length; never the AI (D078)
+        raise HTTPException(404, "No such item")
     await estimates.estimate_item(
         conn, ai_client(state, conn), state.config, state.clock, item, force_ai=True
     )

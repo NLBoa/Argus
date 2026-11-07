@@ -6,15 +6,18 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from argus.clock import FakeClock
+from argus.config import RunnaConfig
 from argus.demo import DEMO_CONFIG, DEMO_SECRETS, seed_demo
+from argus.domain.models import ItemKind, Source, SourceItem
 from argus.store import repo
-from argus.store.db import open_db
+from argus.store.db import open_db, transaction
 from argus.web.app import create_app
 from argus.web.deps import OfflineRunner
 from tests.ai_fakes import FakeTransport, ok, recorded
@@ -157,3 +160,44 @@ def test_health_shows_ai_spend(client: TestClient) -> None:
     html = client.get("/health").text
     assert "$0.00 of $10.00" in html
     assert "(AI not set up)" not in html  # a transport is configured
+
+
+def _add_run(client: TestClient, now: datetime) -> int:
+    """A Runna run in the demo database (D078)."""
+    conn = conn_of(client)
+    config = DEMO_CONFIG.model_copy(update={"runna": RunnaConfig()})
+    with transaction(conn):
+        ids = repo.sync_courses(conn, config, now, running=True)
+        repo.upsert_source_items(
+            conn,
+            [
+                SourceItem(
+                    Source.RUNNA_ICAL,
+                    "uid-run",
+                    "RUN",
+                    "Easy Run",
+                    ItemKind.ASSIGNMENT,
+                    now + timedelta(hours=8),
+                    "r",
+                    all_day=True,
+                    description="Easy Run • 4mi • 35m - 40m " + "x" * 300,
+                    duration_minutes=40,
+                )
+            ],
+            ids,
+            now,
+        )
+        repo.apply_merge(conn, ids, now)
+    run_id = next(i.id for i in repo.list_items(conn) if i.course_code == "RUN")
+    conn.close()
+    return run_id
+
+
+def test_rerun_estimate_refuses_runs(
+    client: TestClient, transport: FakeTransport, clock: FakeClock
+) -> None:
+    run_id = _add_run(client, clock.now())
+    before = len(transport.calls)
+    r = client.post(f"/items/{run_id}/estimate/rerun", headers=ORIGIN, follow_redirects=False)
+    assert r.status_code == 404
+    assert len(transport.calls) == before  # no AI call for a run

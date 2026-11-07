@@ -7,7 +7,7 @@ import pytest
 
 from argus.ai.client import AIClient
 from argus.clock import FakeClock
-from argus.config import AIConfig, AppConfig
+from argus.config import AIConfig, AppConfig, RunnaConfig
 from argus.domain.models import ItemKind, Source, SourceItem
 from argus.estimates import (
     clear_override,
@@ -20,6 +20,7 @@ from argus.estimates import (
     needs_estimate,
     set_override,
 )
+from argus.runs import sync_run_estimates
 from argus.store import repo
 from argus.store.db import transaction
 from tests.ai_fakes import FakeTransport, ok, recorded
@@ -274,3 +275,115 @@ async def test_calibration_applies_to_effective(
     eff = effective_estimates(db, now)[items["Homework 3"].id]
     assert eff.factor == pytest.approx(1.4)  # two items, both 2x
     assert (eff.p50, eff.p80) == (pytest.approx(4.2), pytest.approx(5.6))
+
+
+# ---------------------------------------------------------------- Runna runs (D078)
+
+
+def _run(external_id: str, title: str, minutes: int | None, raw: str, now: Any) -> SourceItem:
+    return SourceItem(
+        Source.RUNNA_ICAL,
+        external_id,
+        "RUN",
+        title,
+        ItemKind.ASSIGNMENT,
+        now + timedelta(days=1),
+        raw,
+        all_day=True,
+        description="Easy Run • 4mi • 35m - 45m",
+        duration_minutes=minutes,
+    )
+
+
+@pytest.fixture
+def runs(db: sqlite3.Connection, app_config: AppConfig, clock: FakeClock) -> dict[str, Any]:
+    now = clock.now()
+    config = app_config.model_copy(update={"runna": RunnaConfig()})
+    with transaction(db):
+        ids = repo.sync_courses(db, config, now, running=True)
+        repo.upsert_source_items(
+            db,
+            [
+                _run("uid-tempo", "Tempo Run", 45, "a", now),
+                _run("uid-steady", "Steady Run", None, "b", now),
+            ],
+            ids,
+            now,
+        )
+        repo.apply_merge(db, ids, now)
+    by_title = {i.title: i for i in repo.list_items(db) if i.course_code == "RUN"}
+    return {
+        "config": config,
+        "ids": ids,
+        "tempo": by_title["Tempo Run"],
+        "steady": by_title["Steady Run"],
+    }
+
+
+def test_run_items_never_go_to_the_ai(runs: dict[str, Any], clock: FakeClock) -> None:
+    tempo = runs["tempo"]
+    assert len(" ".join((tempo.description or "").split())) > 0
+    assert not needs_estimate(
+        replace(tempo, description="x" * 500),
+        None,
+        None,
+        overridden=False,
+        ai_available=True,
+        now=clock.now(),
+    )
+
+
+def test_runna_duration_becomes_the_estimate(
+    db: sqlite3.Connection, runs: dict[str, Any], clock: FakeClock
+) -> None:
+    with transaction(db):
+        assert sync_run_estimates(db, runs["config"], clock.now()) == 2
+    eff = effective_estimates(db, clock.now())[runs["tempo"].id]
+    assert eff.p50 == pytest.approx(0.75) and eff.factor == 1.0
+    base, user = repo.latest_estimates(db)[runs["tempo"].id]
+    assert user is None and base is not None and base.source == "runna"
+    assert estimate_state(runs["tempo"], base, None, None, ai=True) == "runna"
+
+
+def test_changed_duration_appends_a_version(
+    db: sqlite3.Connection, runs: dict[str, Any], clock: FakeClock
+) -> None:
+    now = clock.now()
+    with transaction(db):
+        sync_run_estimates(db, runs["config"], now)
+        repo.upsert_source_items(
+            db, [_run("uid-tempo", "Tempo Run", 60, "a2", now)], runs["ids"], now
+        )
+        assert sync_run_estimates(db, runs["config"], now) == 1
+        assert sync_run_estimates(db, runs["config"], now) == 0  # idempotent
+    assert [r.p50 for r in repo.estimates_for(db, runs["tempo"].id)] == [0.75, 1.0]
+
+
+def test_missing_duration_uses_default(
+    db: sqlite3.Connection, runs: dict[str, Any], clock: FakeClock
+) -> None:
+    with transaction(db):
+        sync_run_estimates(db, runs["config"], clock.now())
+    row = repo.estimates_for(db, runs["steady"].id)[-1]
+    assert row.source == "runna" and row.p50 == pytest.approx(0.75) and row.confidence == "low"
+    assert row.assumptions == ("Runna gave no length; using the default",)
+
+
+def test_student_override_beats_runna(
+    db: sqlite3.Connection, runs: dict[str, Any], clock: FakeClock
+) -> None:
+    now = clock.now()
+    with transaction(db):
+        sync_run_estimates(db, runs["config"], now)
+        set_override(db, runs["tempo"], 1.5, now)
+        sync_run_estimates(db, runs["config"], now)
+    assert effective_estimates(db, now)[runs["tempo"].id].p50 == pytest.approx(1.5)
+
+
+def test_done_runs_get_no_new_estimate(
+    db: sqlite3.Connection, runs: dict[str, Any], clock: FakeClock
+) -> None:
+    db.execute("UPDATE items SET status = 'submitted' WHERE id = ?", (runs["steady"].id,))
+    with transaction(db):
+        assert sync_run_estimates(db, runs["config"], clock.now()) == 1
+    assert repo.estimates_for(db, runs["steady"].id) == []
