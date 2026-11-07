@@ -57,6 +57,7 @@ SOURCES = (
     "piazza",
     "piazza_email",
     "umdio",
+    "runna_ical",
 )
 _TAGS = {
     Rule.AT_RISK: ("warning",),

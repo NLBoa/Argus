@@ -4,12 +4,13 @@ the token was removed."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
 from argus.capabilities import derive
-from argus.clock import FakeClock
+from argus.clock import FakeClock, to_local
 from argus.config import PathsConfig
 from argus.demo import DEMO_CONFIG, DemoProfile, demo_secrets, seed_demo
 from argus.store.db import open_db
@@ -55,3 +56,46 @@ def test_without_token_no_modules_or_grade(
         # Due 3h ago, and no source can say whether it was submitted (D056).
         lab = (root / layout.assignment_note("MATH240", "Lab report 2")).read_text()
         assert "**Status:** not marked done" in lab
+
+
+def test_vault_run_lines_are_plain_text(tmp_path: Path, clock: FakeClock) -> None:
+    """Runs get no notes, so their lines in Today and the weekly note aren't links (D078)."""
+    from argus.config import RunnaConfig
+    from argus.domain.models import ItemKind, Source, SourceItem
+    from argus.store import repo
+    from argus.store.db import transaction
+
+    config = DEMO_CONFIG.model_copy(
+        update={
+            "paths": PathsConfig(data_dir=tmp_path, vault_dir=tmp_path / "vault"),
+            "runna": RunnaConfig(),
+        }
+    )
+    conn = open_db(tmp_path / "v.db", clock)
+    seed_demo(conn, clock.now(), DemoProfile.FULL)
+    now = clock.now()
+    with transaction(conn):
+        ids = repo.sync_courses(conn, config, now, running=True)
+        run = SourceItem(
+            Source.RUNNA_ICAL,
+            "uid-run",
+            "RUN",
+            "Tempo Run",
+            ItemKind.ASSIGNMENT,
+            now + timedelta(hours=2),
+            "r",
+            all_day=True,
+            duration_minutes=45,
+        )
+        repo.upsert_source_items(conn, [run], ids, now)
+        repo.apply_merge(conn, ids, now)
+    root = config.paths.vault_dir
+    root.mkdir()
+    caps = derive(config, demo_secrets(DemoProfile.FULL))
+    Builder(conn, config, clock, VaultWriter(root, conn, clock), caps).build()
+    today = (root / layout.REVIEW_TODAY).read_text()
+    weekly = (root / layout.weekly(to_local(now).date())).read_text()
+    for note in (today, weekly):
+        line = next(ln for ln in note.splitlines() if "Tempo Run" in ln)
+        assert "[[" not in line, line
+    assert not list(root.rglob("*Tempo Run*"))  # no note of its own

@@ -415,6 +415,7 @@ SOURCE_NAMES = {
     "piazza": "Piazza",
     "piazza_email": "Piazza email",
     "umdio": "Class schedule",
+    "runna_ical": "Runna",
 }
 SOURCE_HINTS = {
     "canvas_ical": "Set ARGUS_CANVAS_ICAL_URL (ELMS > Calendar > Calendar Feed).",
@@ -424,6 +425,8 @@ SOURCE_HINTS = {
     "piazza": "Set ARGUS_PIAZZA_EMAIL and ARGUS_PIAZZA_PASSWORD, and add piazza_network_id.",
     "piazza_email": "Optional fallback: set ARGUS_GMAIL_TOKEN_PATH.",
     "umdio": "Add your courses with section numbers to config.yaml.",
+    "runna_ical": "Set ARGUS_RUNNA_ICAL_URL and add a runna: block (Runna > Profile > Connected "
+    "Apps & Devices > Calendars > Other Calendar).",
 }
 STALE_AFTER = {
     "canvas_ical": timedelta(minutes=90),
@@ -433,6 +436,7 @@ STALE_AFTER = {
     "piazza": timedelta(minutes=90),
     "piazza_email": timedelta(minutes=90),
     "umdio": timedelta(days=8),
+    "runna_ical": timedelta(minutes=90),
 }
 
 
