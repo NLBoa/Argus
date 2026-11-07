@@ -2,7 +2,7 @@
 and the HTTP edge (path secret, Host check)."""
 
 import sqlite3
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +12,10 @@ from pydantic import SecretStr
 from starlette.testclient import TestClient
 
 from argus.clock import FakeClock
-from argus.config import AppConfig, MCPConfig, Secrets
+from argus.collectors.runna_ical import run_due
+from argus.config import AppConfig, MCPConfig, RunnaConfig, Secrets
 from argus.domain.models import ItemKind, MeetingRecord, Source, SourceItem, Weekday
+from argus.runs import sync_run_estimates
 from argus.store import repo
 from argus.store.db import transaction
 from argus.web.mcp_server import build_server, create_mcp_app, path_secret
@@ -175,6 +177,8 @@ async def test_get_upcoming_work(
         "updated_at": "2026-10-19T09:00:00-04:00",
         "done": False,
         "overdue": False,
+        "estimate_minutes": None,
+        "preferred_start": None,
     }
     assert got["Project 2"]["type"] == "project"
     assert got["Project 2"]["source"] == "gradescope"
@@ -325,3 +329,76 @@ def test_secret_never_reaches_the_logs(
     configure_logging("DEBUG", secrets=secrets().secret_values(), stream=stream)
     get_logger("test").warning("request for /mcp/%s failed", SECRET)
     assert SECRET not in stream.getvalue()
+
+
+# ---------------------------------------------------------------- Runna runs (D078)
+
+RUNNA_URL = "https://cal.runna.com/FAKEFEED.ics"
+
+
+def _runs(db: sqlite3.Connection, app_config: AppConfig, now: datetime, *, running: bool) -> None:
+    """Today's run (open), yesterday's run (ended, not done), in the Running course."""
+    config = app_config.model_copy(update={"runna": RunnaConfig()})
+    with transaction(db):
+        ids = repo.sync_courses(db, config, now, running=True)
+        runs = [
+            SourceItem(
+                Source.RUNNA_ICAL,
+                ext,
+                "RUN",
+                title,
+                ItemKind.ASSIGNMENT,
+                run_due(day),
+                ext,
+                all_day=True,
+                description="Easy Run • 4mi • 35m - 45m",
+                duration_minutes=45,
+                preferred_start=datetime(day.year, day.month, day.day, 20, 0, tzinfo=UTC),
+            )
+            for ext, title, day in (
+                ("uid-today", "4mi Easy Run", now.date()),
+                ("uid-yesterday", "Long Run", now.date() - timedelta(days=1)),
+            )
+        ]
+        repo.upsert_source_items(db, runs, ids, now)
+        repo.apply_merge(db, ids, now)
+        repo.refresh_statuses(db, now, tracking_sources=frozenset())
+        sync_run_estimates(db, config, now)
+        if not running:  # Runna no longer set up: the course goes inactive
+            repo.sync_courses(db, app_config, now, running=False)
+
+
+async def test_upcoming_work_includes_todays_run(
+    app_config: AppConfig,
+    clock: FakeClock,
+    tmp_path: Path,
+    ids: dict[str, int],
+    db: sqlite3.Connection,
+) -> None:
+    _runs(db, app_config, clock.now(), running=True)
+    result = await call(app_config, clock, tmp_path / "argus.db", "get_upcoming_work", {"days": 7})
+    out = result.structuredContent
+    runs = [i for i in out["items"] if i["type"] == "run"]
+    assert [r["title"] for r in runs] == ["4mi Easy Run"]  # yesterday's run has left
+    run = runs[0]
+    assert run["course"] == "RUN" and run["source"] == "runna"
+    assert run["estimate_minutes"] == 45
+    assert run["preferred_start"] == "2026-10-19T16:00:00-04:00"
+    assert run["due"] == "2026-10-19T23:59:00-04:00"
+    assert RUNNA_URL not in str(out) and "35m - 45m" not in str(out)
+
+
+async def test_runs_hidden_when_runna_not_set_up(  # Review Focus 4
+    app_config: AppConfig,
+    clock: FakeClock,
+    tmp_path: Path,
+    ids: dict[str, int],
+    db: sqlite3.Connection,
+) -> None:
+    _runs(db, app_config, clock.now(), running=False)
+    result = await call(app_config, clock, tmp_path / "argus.db", "get_upcoming_work", {"days": 7})
+    assert not [i for i in result.structuredContent["items"] if i["type"] == "run"]
+    changes = await call(
+        app_config, clock, tmp_path / "argus.db", "get_changes", {"since": "2026-10-01T00:00:00Z"}
+    )
+    assert not [c for c in changes.structuredContent["changes"] if c["course"] == "RUN"]

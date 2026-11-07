@@ -14,13 +14,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from argus.clock import ensure_utc, to_local
+from argus.config import RUN_CODE
 from argus.domain.changes import summarize_changes
 from argus.domain.models import Item, ItemKind, ItemStatus, MeetingRecord, Source
 from argus.domain.titles import is_project
+from argus.estimates import effective_estimates
 from argus.store import repo
 
-ItemType = Literal["assignment", "quiz", "exam", "project", "event", "slides", "file"]
-SourceName = Literal["canvas", "gradescope", "piazza", "manual"]
+ItemType = Literal["assignment", "quiz", "exam", "project", "event", "run", "slides", "file"]
+SourceName = Literal["canvas", "gradescope", "piazza", "runna", "manual"]
 
 MAX_DAYS = 60
 OVERDUE_LOOKBACK = timedelta(days=7)
@@ -31,6 +33,7 @@ _LINK_ORDER = (
     Source.CANVAS_ICAL,
     Source.GRADESCOPE,
     Source.FINDING,
+    Source.RUNNA_ICAL,
     Source.MANUAL,
 )
 
@@ -44,7 +47,8 @@ class WorkItem(_Out):
     course: str = Field(description="Course code, e.g. CMSC351.")
     title: str
     type: ItemType = Field(
-        description="assignment, quiz, exam, project, or event (an event's due is its start)."
+        description="assignment, quiz, exam, project, event (an event's due is its start), or "
+        "run (a Runna workout, due by the end of its day)."
     )
     due: str | None = Field(description="ISO 8601 with the America/New_York offset, or null.")
     link: str | None = Field(description="Where the work lives (Canvas, Gradescope, or the post).")
@@ -52,6 +56,16 @@ class WorkItem(_Out):
     updated_at: str = Field(description="When Argus last saw this item created or its date change.")
     done: bool = Field(description="Submitted, or marked done in Argus.")
     overdue: bool = Field(description="Past due and not done.")
+    estimate_minutes: int | None = Field(
+        default=None,
+        description="How long it should take, in minutes (the student's own time, Runna's, "
+        "or Argus's estimate).",
+    )
+    preferred_start: str | None = Field(
+        default=None,
+        description="Runs only: a good time to start (local). Flexible: any free time that day "
+        "works.",
+    )
 
 
 class ChangedItem(WorkItem):
@@ -98,7 +112,9 @@ def local_iso(dt: datetime | None) -> str | None:
     return to_local(dt).isoformat(timespec="seconds") if dt is not None else None
 
 
-def item_type(kind: ItemKind, title: str) -> ItemType:
+def item_type(kind: ItemKind, title: str, course: str) -> ItemType:
+    if course == RUN_CODE:
+        return "run"
     if kind == ItemKind.ASSIGNMENT:
         return "project" if is_project(title) else "assignment"
     return kind.value  # type: ignore[return-value]  # quiz, exam, event
@@ -116,6 +132,8 @@ def _source_name(source: Source, finding_platform: str | None) -> SourceName:
         return "canvas"
     if source == Source.GRADESCOPE:
         return "gradescope"
+    if source == Source.RUNNA_ICAL:
+        return "runna"
     if source == Source.FINDING:
         return "canvas" if finding_platform == "canvas" else "piazza"
     if source.family == "piazza":
@@ -152,6 +170,8 @@ def to_work_item(
     *,
     updated_at: datetime | None,
     finding_platform: str | None = None,
+    estimate_minutes: int | None = None,
+    preferred_start: datetime | None = None,
 ) -> WorkItem:
     origin, link = origin_and_link(item)
     done = is_done(item, now)
@@ -160,13 +180,15 @@ def to_work_item(
         id=str(item.id),
         course=item.course_code,
         title=item.title,
-        type=item_type(item.kind, item.title),
+        type=item_type(item.kind, item.title, item.course_code),
         due=local_iso(item.due_at),
         link=link,
         source=_source_name(origin, finding_platform),
         updated_at=local_iso(stamp) or "",
         done=done,
         overdue=not done and item.due_at is not None and item.due_at < now,
+        estimate_minutes=estimate_minutes,
+        preferred_start=local_iso(preferred_start) if item.course_code == RUN_CODE else None,
     )
 
 
@@ -211,12 +233,35 @@ def courses(conn: sqlite3.Connection) -> CourseList:
 
 
 def _items_out(conn: sqlite3.Connection, items: list[Item], now: datetime) -> list[WorkItem]:
-    stamps = repo.latest_change_at(conn, [i.id for i in items])
+    ids = [i.id for i in items]
+    stamps = repo.latest_change_at(conn, ids)
     platforms = repo.finding_platforms(conn)
-    return [
-        to_work_item(i, now, updated_at=stamps.get(i.id), finding_platform=platforms.get(i.id))
-        for i in items
-    ]
+    estimates = effective_estimates(conn, now)
+    runs = repo.run_details(conn, [i.id for i in items if i.course_code == RUN_CODE])
+    out = []
+    for i in items:
+        eff, run = estimates.get(i.id), runs.get(i.id)
+        out.append(
+            to_work_item(
+                i,
+                now,
+                updated_at=stamps.get(i.id),
+                finding_platform=platforms.get(i.id),
+                estimate_minutes=round(eff.p50 * 60) if eff is not None else None,
+                preferred_start=run.preferred_start if run is not None else None,
+            )
+        )
+    return out
+
+
+def listed(item: Item, now: datetime) -> bool:
+    """In `get_upcoming_work`: due from now on, or late coursework that isn't done. A run whose
+    day has ended leaves, done or not: a skipped run isn't late work to reschedule (D078)."""
+    if item.due_at is None:
+        return False
+    if item.due_at >= now:
+        return True
+    return item.course_code != RUN_CODE and not is_done(item, now)
 
 
 def upcoming(conn: sqlite3.Connection, now: datetime, days: int) -> UpcomingWork:
@@ -230,7 +275,7 @@ def upcoming(conn: sqlite3.Connection, now: datetime, days: int) -> UpcomingWork
         due_before=now + timedelta(days=days),
         include_undated=False,
     )
-    keep = [i for i in window if i.due_at is not None and (i.due_at >= now or not is_done(i, now))]
+    keep = [i for i in window if listed(i, now)]
     return UpcomingWork(as_of=local_iso(now) or "", days=days, items=_items_out(conn, keep, now))
 
 

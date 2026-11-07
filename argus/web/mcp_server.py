@@ -40,10 +40,13 @@ _READ_ONLY = ToolAnnotations(
 )
 INSTRUCTIONS = """\
 Argus is one UMD student's course hub. These tools read the deadlines it has already collected \
-from Canvas (ELMS) and Gradescope. They are read-only. Times are ISO 8601 with the \
+from Canvas (ELMS), Gradescope, and the student's Runna running plan. They are read-only. Times are ISO 8601 with the \
 America/New_York offset. Item ids are stable, so use them to match items across calls \
 (for example, to the tasks you keep in a planner). get_changes returns `as_of`; pass it as \
-`since` next time. Deadlines and links only: Argus never shares grades or submissions."""
+`since` next time. Deadlines and links only: Argus never shares grades or submissions. \
+Runs (type run) are due by the end of their day and are flexible: schedule one near \
+preferred_start if that time is free, otherwise any free time that day, for estimate_minutes. \
+A run drops out once its day ends; don't reschedule it."""
 
 T = TypeVar("T")
 
@@ -100,7 +103,7 @@ def build_server(cfg: AppConfig, secrets: Secrets, clock: Clock, db_path: Path) 
         """Assignments, quizzes, exams, projects, and course events due in the next `days`
         days, soonest first. Also includes work up to 7 days past due that isn't done
         (`overdue: true`), so late work isn't dropped. `done` is true once it was submitted
-        or marked done in Argus."""
+        or marked done in Argus. Runs are listed only until their day ends."""
         return read(lambda conn: feed_upcoming(conn, clock.now(), days))
 
     @server.tool(title="Get changes", annotations=_READ_ONLY)
