@@ -7,6 +7,7 @@ import pytest
 from argus.domain.models import Item, ItemKind, ItemLink, ItemStatus, MeetingRecord, Source, Weekday
 from argus.feed import (
     item_type,
+    listed,
     local_iso,
     meeting_out,
     origin_and_link,
@@ -47,7 +48,11 @@ def make(**kw: object) -> Item:
     ],
 )
 def test_item_type(kind: ItemKind, title: str, expected: str) -> None:
-    assert item_type(kind, title) == expected
+    assert item_type(kind, title, "CMSC351") == expected
+
+
+def test_a_run_is_type_run() -> None:
+    assert item_type(ItemKind.ASSIGNMENT, "4mi Easy Run", "RUN") == "run"
 
 
 def test_work_item_shape_and_new_york_offset() -> None:
@@ -63,6 +68,8 @@ def test_work_item_shape_and_new_york_offset() -> None:
         "updated_at": "2026-11-06T09:00:00-05:00",
         "done": False,
         "overdue": False,
+        "estimate_minutes": None,
+        "preferred_start": None,
     }
 
 
@@ -184,3 +191,49 @@ def test_parse_since() -> None:
         parse_since("2026-11-06T07:00:00")
     with pytest.raises(ValueError, match="ISO 8601"):
         parse_since("yesterday")
+
+
+# ---------------------------------------------------------------- Runna runs (D078)
+
+
+def run(**kw: object) -> Item:
+    base: dict[str, object] = {
+        "course_code": "RUN",
+        "title": "4mi Easy Run",
+        "due_source": Source.RUNNA_ICAL,
+        "links": (ItemLink(Source.RUNNA_ICAL, None),),
+    }
+    base.update(kw)
+    return make(**base)
+
+
+def test_run_work_item() -> None:
+    w = to_work_item(
+        run(),
+        NOW,
+        updated_at=NOW,
+        estimate_minutes=45,
+        preferred_start=datetime(2026, 11, 10, 21, 0, tzinfo=UTC),
+    )
+    assert (w.type, w.source, w.course) == ("run", "runna", "RUN")
+    assert w.estimate_minutes == 45
+    assert w.preferred_start == "2026-11-10T16:00:00-05:00"
+    assert "description" not in w.model_dump()
+
+
+def test_coursework_gets_estimate_minutes_and_no_preferred_start() -> None:
+    w = to_work_item(make(), NOW, updated_at=NOW, estimate_minutes=90)
+    assert w.estimate_minutes == 90 and w.preferred_start is None
+    assert to_work_item(make(), NOW, updated_at=NOW).estimate_minutes is None
+
+
+def test_ended_run_is_not_listed() -> None:
+    assert not listed(run(due_at=NOW - timedelta(minutes=1)), NOW)
+    assert listed(run(due_at=NOW + timedelta(hours=3)), NOW)
+    assert listed(run(due_at=NOW), NOW)  # due this instant: its day hasn't ended
+
+
+def test_overdue_coursework_is_still_listed() -> None:
+    assert listed(make(due_at=NOW - timedelta(days=2)), NOW)
+    assert not listed(make(due_at=NOW - timedelta(days=2), status=ItemStatus.SUBMITTED), NOW)
+    assert not listed(make(due_at=None), NOW)
