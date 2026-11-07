@@ -131,6 +131,7 @@ class SourceItem:
     # Runna runs only (D078): Runna's length for the workout, and a good time to start (UTC).
     duration_minutes: int | None = None
     preferred_start: datetime | None = None
+    completion_id: str | None = None  # the completed activity that marked this run done
 
     @property
     def key(self) -> SourceKey:
@@ -159,7 +160,7 @@ class StoredRun:
     duration_minutes: int | None
     preferred_start: datetime | None
     open: bool  # its item isn't done yet
-    raw_hash: str  # the completion's hash once one matched it
+    completion_id: str | None  # the completed activity matched to it, once one was
 
 
 @dataclass(frozen=True, slots=True)

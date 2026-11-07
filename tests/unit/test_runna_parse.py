@@ -41,22 +41,25 @@ def stored(
     title: str = "Tempo Run",
     *,
     open_: bool = True,
-    raw_hash: str = "stored-hash",
+    completion_id: str | None = None,
+    due: datetime = TEMPO_DUE,
 ) -> StoredRun:
     return StoredRun(
         external_id=external_id,
         title=title,
-        due_at=TEMPO_DUE,
+        due_at=due,
         description=None,
         duration_minutes=45,
         preferred_start=TEMPO_START,
         open=open_,
-        raw_hash=raw_hash,
+        completion_id=completion_id,
     )
 
 
-def done(external_id: str, title_key: str, raw_hash: str = "done-hash") -> CompletedRun:
-    return CompletedRun(external_id, date(2026, 11, 10), title_key, raw_hash)
+def done(
+    external_id: str, title_key: str, raw_hash: str = "done-hash", day: date = date(2026, 11, 10)
+) -> CompletedRun:
+    return CompletedRun(external_id, day, title_key, raw_hash)
 
 
 # ---------------------------------------------------------------- duration text
@@ -90,6 +93,9 @@ def done(external_id: str, title_key: str, raw_hash: str = "done-hash") -> Compl
         ("Estimated duration 1h 5m · easy 6:30/km", 65),
         ("Duration: 45m", 45),  # bare m inside a labeled total means minutes
         ("Easy 45m · strides", None),  # bare m elsewhere is not a duration
+        ("1.5 hours", 90),  # not "5 hours"
+        ("Tempo 3 x 10mins", None),  # a repeat is not the total
+        ("Long run 2.5 min strides", None),
     ],
 )
 def test_parse_duration_text(text: str, minutes: int | None) -> None:
@@ -159,6 +165,25 @@ def test_items_from_fixture() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("summary", "run"),
+    [
+        ("Rest day", False),
+        ("Strength & mobility", False),
+        ("Cross-training", False),
+        ("🏃 Forest Loop", True),  # "rest" inside a word
+        ("🏃 Recovery run after rest day", True),  # says it's a run
+        ("🏃 Long Run", True),
+    ],
+)
+def test_is_run(summary: str, run: bool) -> None:
+    feed = (
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:UPCOMING_PLAN_WORKOUT-x\r\n"
+        f"SUMMARY:{summary}\r\nDTSTART;VALUE=DATE:20261111\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    ).encode()
+    assert bool(parse(feed).runs) is run
+
+
 def test_rest_days_and_strength_sessions_are_skipped() -> None:
     titles = {i.title for i in parse().runs}
     assert "Rest day" not in titles and "Strength & mobility" not in titles
@@ -190,6 +215,27 @@ def test_custom_preferred_time() -> None:
     assert b.preferred_start == datetime(2026, 11, 11, 12, 30, tzinfo=UTC)
 
 
+def test_preferred_time_is_part_of_an_all_day_runs_hash() -> None:
+    # A changed preferred_time must reach runs already stored (the record must look changed).
+    early = {
+        i.title: i.raw_hash for i in parse(FIXTURE, RunnaConfig(preferred_time=time(7, 0))).runs
+    }
+    usual = {i.title: i.raw_hash for i in parse().runs}
+    assert early["4mi Easy Run"] != usual["4mi Easy Run"]  # all-day
+    assert early["Night Run"] == usual["Night Run"]  # timed: its own start
+
+
+def test_a_twin_changes_the_planned_runs_hash() -> None:
+    alone = parse(
+        FIXTURE.replace(b"COMPLETED_PLAN_WORKOUT-AAAAAAAA-0000-4000-8000-00000000000A", b"X")
+    )
+    tempo_alone = next(i for i in alone.runs if i.title == "Tempo Run")
+    tempo = by_title("Tempo Run")
+    assert tempo.submitted is True and tempo_alone.submitted is None
+    assert tempo.raw_hash != tempo_alone.raw_hash  # so a stored run picks up "done"
+    assert tempo.completion_id is not None
+
+
 def test_raw_hash_ignores_dtstamp() -> None:
     restamped = FIXTURE.replace(b"DTSTAMP:20261109T120000Z", b"DTSTAMP:20261110T080000Z")
     assert restamped != FIXTURE
@@ -210,9 +256,12 @@ def test_replaced_run_is_a_completed_orphan() -> None:
 # ---------------------------------------------------------------- matching completions
 
 
-def test_match_completed_by_same_id() -> None:
-    [hit] = match_completed([done(TEMPO_ID, "renamed")], [stored()])
+def test_match_completed_by_its_stored_completion_id() -> None:
+    # Matched before (now done), renamed, and since edited: the completion's own id still finds it.
+    run = stored(open_=False, completion_id="uid-done")
+    [hit] = match_completed([done("uid-done", "morning run", "edited-hash")], [run])
     assert hit.external_id == TEMPO_ID and hit.submitted is True
+    assert hit.completion_id == "uid-done"
 
 
 def test_match_completed_by_day_and_title() -> None:
@@ -238,11 +287,42 @@ def test_match_completed_ignores_done_runs_for_the_day_fallback() -> None:
     assert match_completed([done("uid-new", "morning run")], [stored(open_=False)]) == []
 
 
-def test_match_completed_finds_its_earlier_match_by_hash() -> None:
-    # A renamed completion matched last fetch (the run is now done): it must keep matching.
-    run = stored(open_=False, raw_hash="done-hash")
-    [hit] = match_completed([done("uid-new", "morning run", "done-hash")], [run])
+def test_match_completed_done_the_next_day_by_title() -> None:
+    [hit] = match_completed([done("uid-new", "tempo run", day=date(2026, 11, 12))], [stored()])
+    assert hit.external_id == TEMPO_ID and hit.due_at == TEMPO_DUE  # keeps its planned day
+
+
+def test_match_completed_after_midnight_renamed() -> None:
+    # Started 00:20 the next day and renamed: the only open vanished run within a day.
+    [hit] = match_completed([done("uid-new", "night owl", day=date(2026, 11, 11))], [stored()])
     assert hit.external_id == TEMPO_ID
+
+
+def test_match_completed_two_days_off_renamed_is_no_match() -> None:
+    assert match_completed([done("uid-new", "night owl", day=date(2026, 11, 12))], [stored()]) == []
+
+
+def test_match_completed_exact_matches_claim_first() -> None:
+    # Monday's run was matched before; a new completion on Tue must not take it.
+    mon = stored(
+        "uid-mon",
+        "Easy Run",
+        open_=False,
+        completion_id="uid-c1",
+        due=datetime(2026, 11, 10, 4, 59, tzinfo=UTC),
+    )
+    tue = stored("uid-tue", "Easy Run", due=TEMPO_DUE)
+    hits = match_completed(
+        [
+            done("uid-c2", "easy run", day=date(2026, 11, 10)),
+            done("uid-c1", "easy run", day=date(2026, 11, 9)),
+        ],
+        [mon, tue],
+    )
+    assert {(h.external_id, h.completion_id) for h in hits} == {
+        ("uid-mon", "uid-c1"),
+        ("uid-tue", "uid-c2"),
+    }
 
 
 def test_unmatched_completed_is_dropped() -> None:  # fixture (g)

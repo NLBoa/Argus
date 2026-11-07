@@ -42,14 +42,20 @@ DUE_TIME = time(23, 59)
 # Labels Runna could put before a whole-workout total. The feed seen so far writes none (its
 # text is a "35m - 40m" range), so the estimate field above is what normally gives the length.
 TOTAL_LABELS: tuple[str, ...] = ("estimated duration", "total time", "duration")
-_NOT_RUNS = re.compile(r"rest|strength|mobility|cross[- ]?train|yoga|stretch|note", re.IGNORECASE)
+_NOT_RUNS = re.compile(
+    r"\b(?:rest|strength|mobility|cross[- ]?train\w*|yoga|stretch\w*|notes?)\b", re.IGNORECASE
+)
+_RUN_WORD = re.compile(r"\brun\b", re.IGNORECASE)
 
 _H = r"(?:hours?|hrs?|h)"
 _MIN = r"(?:minutes?|mins?)"
-_HM = re.compile(rf"(\d+)\s*{_H}\s*(\d+)\s*(?:{_MIN}|m)\b", re.IGNORECASE)
-_HOURS = re.compile(rf"(\d+)\s*{_H}\b", re.IGNORECASE)
-_MINUTES = re.compile(rf"(\d+)\s*{_MIN}\b", re.IGNORECASE)
-_HMS = re.compile(r"\b(\d+):([0-5]\d):([0-5]\d)\b")
+_NUM = r"(?<![\d.])(\d+)"
+_HM = re.compile(rf"{_NUM}\s*{_H}\s*(\d+)\s*(?:{_MIN}|m)\b", re.IGNORECASE)
+_HOURS = re.compile(rf"(?<![\d.])(\d+(?:\.\d+)?)\s*{_H}\b", re.IGNORECASE)
+_MINUTES = re.compile(rf"{_NUM}\s*{_MIN}\b", re.IGNORECASE)
+_HMS = re.compile(r"(?<![\d.:])(\d+):([0-5]\d):([0-5]\d)\b")
+# "3 x 10 min": a repeat, not the workout's length.
+_REPS = re.compile(r"\d+\s*[x\u00d7]\s*\d", re.IGNORECASE)  # x or the multiplication sign
 _PACE = re.compile(
     r"\d+:\d{2}(?:\s*-\s*\d+:\d{2})?\s*(?:min\s*)?/\s*(?:km|mi)\b"
     r"|\d+(?:\.\d+)?\s*(?:min\s*)?/\s*(?:km|mi)\b",
@@ -58,7 +64,7 @@ _PACE = re.compile(
 # Inside a labeled total a bare "m" is minutes ("Duration: 45m").
 _LABELED = re.compile(
     rf"\s*:?\s*(?:(\d+)\s*{_H}\s*(\d+)\s*(?:{_MIN}|m)\b|(\d+):([0-5]\d):([0-5]\d)\b"
-    rf"|(\d+)\s*{_H}\b|(\d+)\s*(?:{_MIN}|m)\b)",
+    rf"|(\d+(?:\.\d+)?)\s*{_H}\b|(\d+)\s*(?:{_MIN}|m)\b)",
     re.IGNORECASE,
 )
 _LEAD = re.compile(r"^[^\w]+")
@@ -90,7 +96,7 @@ def _labeled_total(text: str) -> int | None:
         if hh is not None:
             return int(hh) * 60 + int(m2) + round(int(s) / 60)
         if hours is not None:
-            return int(hours) * 60
+            return round(float(hours) * 60)
         return int(mins)
     return None
 
@@ -105,6 +111,8 @@ def parse_duration_text(text: str) -> int | None:
     if total is not None:
         return total
     rest = _PACE.sub(" ", text)
+    if _REPS.search(rest):  # a workout with repeats has no single stated length
+        return None
     found: set[int] = set()
     # Longest forms first, each blanked out once counted, so "1h 5m" is not also "1h".
     for pattern in (_HM, _HMS, _HOURS, _MINUTES):
@@ -120,7 +128,7 @@ def _value(pattern: re.Pattern[str], m: re.Match[str]) -> int:
     if pattern is _HMS:
         return int(m[1]) * 60 + int(m[2]) + round(int(m[3]) / 60)
     if pattern is _HOURS:
-        return int(m[1]) * 60
+        return round(float(m[1]) * 60)
     return int(m[1])
 
 
@@ -197,7 +205,8 @@ def is_run(ev: Component) -> bool:
     """Runs only: rest days, strength and mobility, and notes never become items."""
     if str(ev.get("UID", "")).startswith(NON_PLAN_PREFIX):
         return False
-    return _NOT_RUNS.search(str(ev.get("SUMMARY", ""))) is None
+    summary = str(ev.get("SUMMARY", ""))
+    return _NOT_RUNS.search(summary) is None or _RUN_WORD.search(summary) is not None
 
 
 def _external_id(uid: str) -> str:
@@ -228,10 +237,13 @@ def parse_runna_feed(body: bytes, runna: RunnaConfig) -> RunnaFeed:
                 CompletedRun(_external_id(uid), day, normalize_title(summary), _raw_hash(ev))
             )
             continue
+        raw = _raw_hash(ev)
         if isinstance(start, datetime):
             preferred = _instant(start)
         else:
             preferred = datetime.combine(day, runna.preferred_time, tzinfo=LOCAL_TZ).astimezone(UTC)
+            # A new preferred_time must reach runs already stored: make the record look changed.
+            raw = sha256(f"{raw}|{runna.preferred_time:%H:%M}")
         runs.append(
             SourceItem(
                 source=Source.RUNNA_ICAL,
@@ -242,7 +254,7 @@ def parse_runna_feed(body: bytes, runna: RunnaConfig) -> RunnaFeed:
                 due_at=run_due(day),
                 all_day=True,
                 description=str(ev.get("DESCRIPTION", "")).strip() or None,
-                raw_hash=_raw_hash(ev),
+                raw_hash=raw,
                 duration_minutes=_duration(ev, start),
                 preferred_start=preferred,
             )
@@ -261,7 +273,13 @@ def parse_runna_feed(body: bytes, runna: RunnaConfig) -> RunnaFeed:
         if twin is None:
             orphans.append(c)
         else:
-            runs[twin] = replace(runs[twin], submitted=True)
+            twin_run = runs[twin]
+            runs[twin] = replace(
+                twin_run,
+                submitted=True,
+                completion_id=c.external_id,
+                raw_hash=sha256(f"{twin_run.raw_hash}|{c.raw_hash}"),  # so a stored run updates
+            )
     return RunnaFeed(runs=runs, completed=orphans)
 
 
@@ -272,21 +290,22 @@ def _local_due_day(run: StoredRun) -> date | None:
     return run.due_at.astimezone(LOCAL_TZ).date() if run.due_at is not None else None
 
 
-def _one(found: list[StoredRun]) -> StoredRun | None:
-    return found[0] if len(found) == 1 else None
-
-
-def _match(c: CompletedRun, stored: Sequence[StoredRun]) -> StoredRun | None:
-    same_day = [s for s in stored if _local_due_day(s) == c.local_day]
-    for found in (
-        [s for s in stored if s.external_id == c.external_id],  # Runna kept the id
-        [s for s in stored if s.raw_hash == c.raw_hash],  # this completion matched it before
-        [s for s in same_day if normalize_title(s.title) == c.title_key],
-        [s for s in same_day if s.open],  # renamed: the only run still open that day
-    ):
-        if (hit := _one(found)) is not None:
-            return hit
-    return None
+def _steps(c: CompletedRun, free: Sequence[StoredRun]) -> tuple[list[StoredRun], ...]:
+    """Candidate runs for a completion, strongest evidence first. `free` holds the stored runs
+    missing from this fetch that no other completion has claimed."""
+    day = [s for s in free if _local_due_day(s) == c.local_day]
+    near = [
+        s
+        for s in free
+        if s.open and (d := _local_due_day(s)) is not None and abs((d - c.local_day).days) <= 1
+    ]
+    return (
+        [s for s in free if s.completion_id == c.external_id],  # matched before
+        [s for s in day if normalize_title(s.title) == c.title_key],
+        [s for s in day if s.open],  # renamed: the only open run that day
+        [s for s in free if s.open and normalize_title(s.title) == c.title_key],  # another day
+        near,  # renamed and a day off (e.g. after midnight)
+    )
 
 
 def match_completed(
@@ -294,29 +313,41 @@ def match_completed(
 ) -> list[SourceItem]:
     """Stored runs whose completion replaced them in the feed, as present, submitted records.
 
-    Each step must find exactly one run; a completion that matches nothing is dropped."""
-    out: list[SourceItem] = []
-    for c in completed:
-        run = _match(c, stored)
-        if run is None:
-            continue
-        out.append(
-            SourceItem(
-                source=Source.RUNNA_ICAL,
-                external_id=run.external_id,
-                course_code=RUN_CODE,
-                title=run.title,
-                kind=ItemKind.ASSIGNMENT,
-                due_at=run.due_at,
-                all_day=True,
-                description=run.description,
-                raw_hash=c.raw_hash,
-                submitted=True,
-                duration_minutes=run.duration_minutes,
-                preferred_start=run.preferred_start,
-            )
+    A step matches only when it finds exactly one run. Stronger steps run first for every
+    completion, and a matched run is claimed, so a weak guess never takes a run that another
+    completion matches exactly. A completion that matches nothing is dropped."""
+    claimed: dict[str, StoredRun] = {}
+    pairs: list[tuple[CompletedRun, StoredRun]] = []
+    pending = list(completed)
+    for step in range(5):
+        left = []
+        for c in pending:
+            free = [s for s in stored if s.external_id not in claimed]
+            found = _steps(c, free)[step]
+            if len(found) == 1:
+                claimed[found[0].external_id] = found[0]
+                pairs.append((c, found[0]))
+            else:
+                left.append(c)
+        pending = left
+    return [
+        SourceItem(
+            source=Source.RUNNA_ICAL,
+            external_id=run.external_id,
+            course_code=RUN_CODE,
+            title=run.title,
+            kind=ItemKind.ASSIGNMENT,
+            due_at=run.due_at,
+            all_day=True,
+            description=run.description,
+            raw_hash=c.raw_hash,
+            submitted=True,
+            duration_minutes=run.duration_minutes,
+            preferred_start=run.preferred_start,
+            completion_id=c.external_id,
         )
-    return out
+        for c, run in pairs
+    ]
 
 
 # ---------------------------------------------------------------- collector

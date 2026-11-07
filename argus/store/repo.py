@@ -239,14 +239,16 @@ def upsert_source_items(
             it.raw_hash,
             it.duration_minutes,
             iso_or_none(it.preferred_start),
+            it.completion_id,
         )
         if row is None:
             conn.execute(
                 """INSERT INTO item_sources (course_id, title, kind, due_at, release_at,
                      late_due_at, all_day, points, submitted, graded, description,
-                     question_count, url, raw_hash, duration_minutes, preferred_start, source,
-                     external_id, present, first_seen_at, last_seen_at, changed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                     question_count, url, raw_hash, duration_minutes, preferred_start,
+                     completion_id, source, external_id, present, first_seen_at, last_seen_at,
+                     changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
                 (*values, it.source.value, it.external_id, ts, ts, ts),
             )
             changed += 1
@@ -255,7 +257,7 @@ def upsert_source_items(
                 """UPDATE item_sources SET course_id = ?, title = ?, kind = ?, due_at = ?,
                      release_at = ?, late_due_at = ?, all_day = ?, points = ?, submitted = ?,
                      graded = ?, description = ?, question_count = ?, url = ?, raw_hash = ?,
-                     duration_minutes = ?, preferred_start = ?,
+                     duration_minutes = ?, preferred_start = ?, completion_id = ?,
                      present = 1, last_seen_at = ?, changed_at = ?
                    WHERE source = ? AND external_id = ?""",
                 (*values, ts, ts, it.source.value, it.external_id),
@@ -300,7 +302,7 @@ def stored_runs(
     skip = set(exclude)
     rows = conn.execute(
         """SELECT s.external_id, s.title, s.due_at, s.description, s.duration_minutes,
-                  s.preferred_start, s.raw_hash, i.status
+                  s.preferred_start, s.completion_id, i.status
            FROM item_sources s LEFT JOIN items i ON i.id = s.item_id
            WHERE s.source = ? AND s.due_at >= ?""",
         (Source.RUNNA_ICAL.value, iso(since)),
@@ -314,7 +316,7 @@ def stored_runs(
             duration_minutes=r["duration_minutes"],
             preferred_start=parse_iso_or_none(r["preferred_start"]),
             open=r["status"] is None or ItemStatus(r["status"]).is_open,
-            raw_hash=r["raw_hash"],
+            completion_id=r["completion_id"],
         )
         for r in rows
         if r["external_id"] not in skip

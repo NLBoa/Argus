@@ -10,7 +10,7 @@ regex = '''instructure\.com/feeds/calendars/user_[A-Za-z0-9]{20,}'''
 [[rules]]
 id = "runna-ical-feed"
 description = "Runna calendar feed URL (the URL itself is a credential, D078)"
-regex = '''cal\.runna\.com/[0-9a-z]{20,}\.ics'''
+regex = '''cal\.runna\.com/[A-Za-z0-9_-]{20,}(\.ics)?'''
 
 [[rules]]
 id = "twilio-auth-token-assignment"
