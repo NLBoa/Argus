@@ -76,6 +76,7 @@ sudo argus-admin check-config                                # every secret show
 | `healthchecks_url` | healthchecks.io → your check's ping URL (see [Dead-man's switch](#dead-mans-switch)) |
 | `drive_client_id`, `drive_client_secret`, `drive_refresh_token` | `argus drive-auth` writes all three (see [File adder](#file-adder-google-drive)) |
 | `runna_ical_url` | Runna → Profile → Connected Apps & Devices → Calendars → Other Calendar (the URL is the secret; see [Runna](#runna-runs)) |
+| `flowsavvy_api_key` | FlowSavvy → Settings → Integrations → API (Pro plan; see [Goals](#goals)) |
 
 ## Runna runs
 
@@ -95,6 +96,122 @@ back. A run is never "missed". If you skip one, it leaves the connector at the e
 
 **Don't double-book.** Don't also subscribe the Google or Apple calendar that FlowSavvy reads to the Runna feed. If
 you do, a timed run shows up both as a busy event and as a task Claude schedules.
+
+## Goals
+
+The **Goals** page (More → Goals) shows your "get good at X" goals: each goal's track and next steps, this week's
+sessions from FlowSavvy (done, scheduled, dropped, moved), 4-week trends, test scores, and the week's one change
+(D079). It is read-only. The goals live in your vault, in `Goals/`; Argus reads them every vault cycle (15 min) and
+never writes there.
+
+### Turning it on
+
+1. Add a `goals:` block to `config.yaml` (`goals: {}` takes the defaults). The page and nav link appear once a goal
+   file with an `argus-goal` block is in the vault.
+2. For sessions: in FlowSavvy (Pro), Settings → Integrations → API, copy the key and save it as the
+   `flowsavvy_api_key` credential (see [Credentials](#credentials)). Run `sudo /opt/argus/deploy/install.sh`, then
+   check Health: **FlowSavvy** should say it synced. Sessions are tasks titled `[Tag] what`, where `Tag` is a goal's
+   `tag`; the "Done when:" line of a task's notes shows under it.
+
+**The key can change your whole calendar.** FlowSavvy's published API docs show one kind of key and no read-only
+scope, so the key on the Pi could
+create, change, or delete every task and event in your FlowSavvy account. Argus only ever sends GET requests (a test
+enforces it), but anyone who gets the key could do anything. If the Pi or a backup is exposed, regenerate the key in
+FlowSavvy (Settings → Integrations → API), which revokes the old one, and save the new one as above.
+
+### The files
+
+- `Goals/<Tag>.md`: one per goal, with one ```` ```argus-goal ```` YAML block (aim, why, status, track, next steps,
+  topics). Text outside the block is yours and is never read.
+- `Goals/Weeks/YYYY-Www.md`: one per ISO week (Monday to Sunday), with one ```` ```argus-week ```` block: the week's
+  `change`, each goal's `focus`, `target_minutes`, and `sessions`, and the weekend `tests`.
+
+A file with a mistake doesn't blank the page: Argus keeps showing the last good version and puts "Projects.md has an
+error on line 14" in the status line. Check files before you push them:
+
+```sh
+uv run --project ~/Argus argus check-goals ~/path/to/vault
+```
+
+It prints each goal's current milestone and each week's targets, then every problem as `path:line: field: message`,
+and exits 1 if there is any.
+
+### Tuning the rules
+
+The rule numbers are in `config.yaml` under `goals.rules` (defaults shown):
+
+```yaml
+goals:
+  rules:
+    reteach_below: 60          # latest test score below this: re-teach with a different method
+    practice_below: 80         # below this: more practice; at or above: the review ladder
+    review_ladder_days: [7, 14, 28]
+    on_plan_share: 0.8         # a week is on plan when done >= share x target
+    on_plan_weeks: 2           # finished on-plan weeks in a row before time may grow
+```
+
+After a change, run `sudo argus-admin check-config` and restart `argus-web`, `argus-worker`, and `argus-mcp`. The
+page and the connector's `get_goals` use the new numbers right away.
+
+### Saturday review in Claude Code (on the Mac)
+
+The weekly review runs in Claude Code opened on your vault folder, so it can give you the weekend test, edit
+`Goals/`, check the files, and push them through git.
+
+1. Use the vault's git clone on the Mac (the folder Obsidian opens, if it's that clone).
+2. Add the Argus connector to Claude Code **at user scope only**:
+   `claude mcp add --scope user --transport http argus "https://<your funnel host>/mcp/<path secret>"`.
+   Never use `--scope project`: it writes `.mcp.json` into the vault repo, and the secret would be committed.
+3. Keep the Argus repo at `~/Argus`, so `uv run --project ~/Argus argus check-goals .` works.
+4. Optionally save the prompt below as `~/.claude/commands/goals-review.md` (outside the vault), then start `claude`
+   in the vault folder and run `/goals-review`. Otherwise paste it.
+5. Argus picks up the pushed files on its next vault cycle (15 minutes at most).
+
+```text
+You're running my weekly "get good at X" review. I'm here; this is interactive.
+Work in this folder (my Obsidian vault, a git repo). Only touch Goals/.
+
+0. Run `git status`. If anything outside Goals/ is modified, leave it alone and don't commit it.
+   Run `git pull --rebase`. If that fails, stop and tell me.
+1. Call the Argus tool get_goals (the "argus" MCP server). If it isn't available, read
+   Goals/*.md and Goals/Weeks/*.md directly, tell me FlowSavvy progress is unavailable, and ask me
+   what I finished this week. Note get_goals.rules: use those numbers below, not your own.
+2. Show me a short recap per active goal: done vs target minutes, sessions done, dropped and
+   moved sessions, and any problems listed.
+3. Weekend test. Test topics in this order: review_due (overdue first), then the topics this
+   week's sessions covered (week.focus and the done sessions), then practice topics. For each
+   topic, ask 4-6 questions one at a time and wait for my answer before the next one. Mix recall,
+   explain-why, and one small applied task. Never use questions from my graded coursework, and
+   never draft solutions to graded work. Score each topic as a whole percent and tell me why.
+4. Record the scores in Goals/Weeks/<this ISO week>.md under tests:, one entry per topic:
+   {goal: <Tag>, topic: <topic id>, date: YYYY-MM-DD, score: <0-100>, method: <how I learned it
+   this week>}. If a topic isn't in that goal's topics:, add it there first (with after:
+   prerequisites). Quote any value that contains a comma, a colon, or a parenthesis.
+5. Update each goal file's ```argus-goal block. Keep everything outside the block exactly as it is.
+   - track: mark finished milestones done and make the next one current. Keep exactly one current
+     while the goal is active, in the order done -> current -> next. Give the new current milestone
+     a done_when.
+   - next: 1-3 concrete things for next week, each with a checkable done_when.
+   - status: paused or done only if I say so.
+6. Pick next week's topics by get_goals.rules:
+   - score < reteach_below: re-teach with a different method than last time;
+   - score < practice_below: more practice;
+   - otherwise follow review_due / review_later.
+   New topics fill the remaining time, prerequisites first.
+7. Ask me before writing the plan. Then write Goals/Weeks/<next ISO week>.md with one
+   ```argus-week block:
+     version: 1, week: <YYYY-Www>, written: <today>,
+     goals: {<Tag>: {focus, target_minutes, sessions}} for each active goal,
+     change: {kind: none|pace|method|length, what, why}
+   Change at most ONE thing (pace, method, or session length) and write why. Raise target_minutes
+   only for a goal whose on_plan.may_grow is true. Otherwise keep it or lower it.
+8. Run `uv run --project ~/Argus argus check-goals .` and fix every problem until it exits 0.
+9. Show me the diff of Goals/. When I say OK, commit only Goals/ with
+   "goals: weekly review <this ISO week>", then `git push`. Never force-push. If the push is
+   rejected, pull --rebase, re-run check-goals, and ask me again.
+```
+
+The morning planner only reads `get_goals`; it never writes `Goals/`.
 
 ## File adder (Google Drive)
 
