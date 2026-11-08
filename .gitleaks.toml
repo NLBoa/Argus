@@ -13,6 +13,12 @@ description = "Runna calendar feed URL (the URL itself is a credential, D078)"
 regex = '''cal\.runna\.com/[A-Za-z0-9_-]{20,}(\.ics)?'''
 
 [[rules]]
+id = "flowsavvy-api-key"
+description = "FlowSavvy API key next to its name (43 URL-safe characters, no prefix; full calendar access, D079)"
+regex = '''(?i)flowsavvy[a-z_]*["']?\s*[:=]\s*(?:SecretStr\()?["']?[A-Za-z0-9_-]{40,}'''
+keywords = ["flowsavvy"]
+
+[[rules]]
 id = "twilio-auth-token-assignment"
 description = "Twilio auth token in an env-style assignment"
 regex = '''ARGUS_TWILIO_AUTH_TOKEN=[0-9a-f]{32}'''
