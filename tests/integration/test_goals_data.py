@@ -14,9 +14,10 @@ from argus.clock import local_datetime
 from argus.config import AppConfig, GoalRulesConfig, GoalsConfig, PathsConfig, Secrets
 from argus.domain.goals import DocError, GoalDoc, WeekDoc, parse_doc
 from argus.domain.models import GoalSessionGone, GoalSessionRecord
+from argus.goals import today_goal_line, weekly_goal_lines
 from argus.store import repo
 from argus.store.db import transaction
-from argus.web.goals_data import load_goals, today_goal_line, weekly_goal_lines
+from argus.web.goals_data import load_goals
 from tests.conftest import REPO_ROOT
 
 VALID = REPO_ROOT / "tests" / "fixtures" / "goals" / "valid"
@@ -350,13 +351,13 @@ def test_today_goal_line_skips_done_sessions(seeded: sqlite3.Connection, tmp_pat
 
 def test_weekly_goal_lines(seeded: sqlite3.Connection, tmp_path: object) -> None:
     cfg = config(tmp_path)
-    lines = weekly_goal_lines(seeded, cfg, caps(cfg), date(2026, 11, 12), NOW)
+    lines = weekly_goal_lines(seeded, caps(cfg), date(2026, 11, 12), NOW)
     assert lines == [
         "Woodwork: Dovetails. 120 of 240 min, 2 of 3 sessions. Dropped: Session tue.",
         "Spanish: Ser and estar. 0 of 120 min, 0 of 2 sessions.",
         "Change this week: none (Baseline week).",
     ]
-    assert weekly_goal_lines(seeded, cfg, caps(cfg, sessions=False), date(2026, 11, 12), NOW) == [
+    assert weekly_goal_lines(seeded, caps(cfg, sessions=False), date(2026, 11, 12), NOW) == [
         "Woodwork: Dovetails. Target 240 min.",
         "Spanish: Ser and estar. Target 120 min.",
         "Change this week: none (Baseline week).",

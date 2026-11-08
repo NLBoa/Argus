@@ -26,6 +26,7 @@ from argus.domain.status import awaiting_confirmation
 from argus.domain.titles import normalize_title
 from argus.estimates import effective_estimates
 from argus.exams import PracticeRow, concept_readiness, practice_items
+from argus.goals import weekly_goal_lines
 from argus.logging import get_logger
 from argus.planning import Planning, busy_windows, compute
 from argus.reminders.text import hours_short
@@ -466,7 +467,8 @@ class Builder:
                 (iso(start), iso(end)),
             )
         ]
-        self.writer.write(layout.weekly(day), render.weekly_note(day, due, changes))
+        goals = weekly_goal_lines(self.conn, self.caps, day, now)
+        self.writer.write(layout.weekly(day), render.weekly_note(day, due, changes, goals))
 
     def _proposals(self) -> None:
         rows = [(p.id, p.path, p.reason, p.diff) for p in self.writer.proposals()]

@@ -195,3 +195,19 @@ def test_no_ai_calls(tmp_path: Path, clock: FakeClock) -> None:
     with build(tmp_path, clock, transport=transport) as c:
         assert c.get("/goals").status_code == 200
     assert transport.calls == []
+
+
+def test_today_shows_the_goal_session_line(tmp_path: Path, clock: FakeClock) -> None:
+    with build(tmp_path, clock) as c:
+        clock.set(local_datetime(date(2026, 11, 13), 9))
+        html = c.get("/today").text
+        assert "Goal session at 7 pm: Woodwork, Glue up the carcass (60 min)." in html
+        assert 'data-requires="goal_sessions"' in html
+        clock.set(local_datetime(date(2026, 11, 13), 21))  # it's over
+        assert "Goal session" not in c.get("/today").text
+
+
+def test_today_has_no_goal_line_without_flowsavvy(tmp_path: Path, clock: FakeClock) -> None:
+    with build(tmp_path, clock, secrets=Secrets()) as c:
+        clock.set(local_datetime(date(2026, 11, 13), 9))
+        assert "Goal session" not in c.get("/today").text

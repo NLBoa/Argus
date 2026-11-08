@@ -24,6 +24,7 @@ from argus.domain.goals import (
     week_monday,
     week_problems,
 )
+from argus.goals import CHANGE_LABELS, minutes_label, order_goals
 from argus.planner.goals import (
     GoalRules,
     Session,
@@ -47,7 +48,6 @@ from argus.web.viewmodels import ACCENTS, StatusNote
 
 TREND_WEEKS = 4
 DASH = "\N{EN DASH}"
-CHANGE_LABELS = {"none": "None", "pace": "Pace", "method": "Method", "length": "Session length"}
 STATE_LABELS = {
     "done": "Done",
     "scheduled": "Scheduled",
@@ -204,10 +204,6 @@ class GoalsPage:
 # --- formatting ---------------------------------------------------------------------------------
 
 
-def minutes_label(m: int) -> str:
-    return f"{m // 60} h" if m >= 120 and m % 60 == 0 else f"{m} min"
-
-
 def _day(d: date) -> str:
     return f"{d:%b} {d.day}"
 
@@ -272,14 +268,6 @@ def _docs(conn: sqlite3.Connection, config: AppConfig) -> _Docs:
 
 def _accent(goal: GoalDoc, n: int) -> str:
     return goal.accent if goal.accent in ACCENTS else ACCENTS[n % len(ACCENTS)]
-
-
-def _order(goals: Mapping[str, tuple[StoredGoalDoc, GoalDoc]], week: WeekDoc | None) -> list[str]:
-    """The week file's order first (the review lists goals the way the student thinks of
-    them), then the rest by path."""
-    planned = [t for t in (week.goals if week else {}) if t in goals]
-    rest = sorted((t for t in goals if t not in planned), key=lambda t: goals[t][0].path)
-    return planned + rest
 
 
 def _session_view(s: Session, state: str, is_next: bool) -> SessionView:
@@ -508,7 +496,7 @@ def load_goals(
     new_topics: list[tuple[str, str]] = []
     trend_rows: list[tuple[str, str, Sequence[TrendPoint]]] = []
     totals = [0, 0, 0, 0]  # sessions done, planned, minutes done, target
-    for n, tag in enumerate(_order(docs.goals, plan)):
+    for n, tag in enumerate(order_goals(docs.goals, plan)):
         stored, goal = docs.goals[tag]
         accent = _accent(goal, n)
         if goal.status != "active":
@@ -566,80 +554,3 @@ def goal_problem_notes(conn: sqlite3.Connection) -> list[StatusNote]:
                 StatusNote(f"{PurePosixPath(d.path).name} has an error{where}", "failing", "/goals")
             )
     return out
-
-
-def _active_tags(conn: sqlite3.Connection) -> list[str]:
-    docs: dict[str, GoalDoc] = {
-        d.path: d.good for d in repo.goal_docs(conn) if isinstance(d.good, GoalDoc)
-    }
-    dupes = check_goal_set(docs)
-    return [g.tag for p, g in docs.items() if g.status == "active" and p not in dupes]
-
-
-def today_goal_line(conn: sqlite3.Connection, caps: Capabilities, now: datetime) -> str | None:
-    """One line for Today: goal sessions starting today that haven't happened yet."""
-    if not caps.has(Feature.GOAL_SESSIONS) or not repo.has_goal_docs(conn):
-        return None
-    tags = set(_active_tags(conn))
-    day = to_local(now).date()
-    start = week_bounds(week_key(day))[0]
-    todays = [
-        s
-        for s in repo.goal_sessions_between(conn, start, start + timedelta(days=8))
-        if s.tag in tags
-        and to_local(s.start_at).date() == day
-        and not s.completed
-        and s.gone_at is None
-        and s.moved_at is None
-        and s.end_at > now
-    ]
-    if not todays:
-        return None
-    if len(todays) == 1:
-        s = todays[0]
-        return f"Goal session at {clock_time(s.start_at)}: {s.tag}, {s.what} ({minutes_label(s.minutes)})."
-    parts = "; ".join(f"{s.tag}, {s.what} ({minutes_label(s.minutes)})" for s in todays)
-    return f"Goal sessions today: {parts}."
-
-
-def weekly_goal_lines(
-    conn: sqlite3.Connection, config: AppConfig, caps: Capabilities, day: date, now: datetime
-) -> list[str]:
-    """Lines for Argus's weekly vault note: each active goal's week, and the week's change."""
-    if not caps.has(Feature.GOALS) or not repo.has_goal_docs(conn):
-        return []
-    docs = _docs(conn, config)
-    key = week_key(day)
-    plan = docs.weeks.get(key)
-    sessions_on = caps.has(Feature.GOAL_SESSIONS)
-    start, end = week_bounds(key)
-    sessions = repo.goal_sessions_between(conn, start, end) if sessions_on else []
-    lines: list[str] = []
-    for tag in _order(docs.goals, plan):
-        _, goal = docs.goals[tag]
-        if goal.status != "active":
-            continue
-        planned = plan.goals.get(tag) if plan else None
-        focus = f" {planned.focus}." if planned and planned.focus else ""
-        if sessions_on:
-            p = week_progress(tag, key, plan, sessions, now)
-            line = (
-                f"{tag}:{focus} {p.done_minutes} of {p.target_minutes} min, "
-                f"{p.sessions_done} of {p.sessions_planned} sessions."
-            )
-            if p.dropped:
-                line += " Dropped: " + ", ".join(s.what for s in p.dropped) + "."
-        elif planned is not None:
-            line = f"{tag}:{focus} Target {planned.target_minutes} min."
-        else:
-            continue
-        lines.append(line)
-    if plan is not None and plan.change is not None:
-        c = plan.change
-        if c.kind == "none":
-            lines.append(f"Change this week: none ({c.what}).")
-        else:
-            lines.append(
-                f"Change this week: {CHANGE_LABELS[c.kind].lower()}, {c.what}. Why: {c.why}"
-            )
-    return lines

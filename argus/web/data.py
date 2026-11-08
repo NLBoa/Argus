@@ -18,6 +18,7 @@ from argus.estimates import (
     estimate_state,
     finished_rows,
 )
+from argus.goals import today_goal_line
 from argus.planner.calibration import Effective, Finished, factor
 from argus.planner.freetime import busy_on
 from argus.planner.risk import RiskLevel
@@ -114,6 +115,7 @@ class TodayData:
     summary: str
     last_text: str  # "Monday, October 26": the week's last work day, for the empty state
     groups: list[WorkDayGroup]  # working on, past due, then each work day of the week (D072)
+    goal_line: str | None = None  # goal sessions still to come today (D079)
 
 
 def _past_due(views: Sequence[ItemView], now: datetime) -> tuple[list[ItemView], list[ItemView]]:
@@ -191,6 +193,7 @@ def load_today(
         summary=summary,
         last_text=long_date(today + timedelta(days=WEEK_DAYS)),
         groups=lead + [g for g in week if g.items],
+        goal_line=today_goal_line(conn, caps, now),
     )
 
 

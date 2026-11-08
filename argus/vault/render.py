@@ -367,11 +367,16 @@ def review_today(
     return DesiredNote({"date": day.isoformat()}, (("today", body),), "")
 
 
-def weekly_note(day: date, due: Sequence[ItemLine], changes: Sequence[str]) -> DesiredNote:
+def weekly_note(
+    day: date, due: Sequence[ItemLine], changes: Sequence[str], goals: Sequence[str] = ()
+) -> DesiredNote:
+    """`goals` (D079): one line per active goal's week and the week's change, when set up."""
     year, week, _ = day.isocalendar()
     summary = "## This week\n\n" + (
         "\n".join(_item_line(i) for i in due) or "Nothing due this week."
     )
+    if goals:
+        summary += "\n\n## Goals\n\n" + "\n".join(f"- {g}" for g in goals)
     log = "## Changes Argus made in notes you opened to it\n\n" + (
         "\n".join(f"- {c}" for c in changes) or "None."
     )
