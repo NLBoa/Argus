@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, ClassVar, Final, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -91,6 +91,8 @@ class WeekGoal(_Doc):
 
 
 class TestResult(_Doc):
+    __test__: ClassVar[bool] = False  # not a pytest class
+
     goal: Tag
     topic: Id
     date: date
