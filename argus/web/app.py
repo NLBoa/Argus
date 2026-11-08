@@ -27,7 +27,7 @@ from argus.drive import DriveClient, Uploader
 from argus.logging import get_logger
 from argus.store.db import connect, migrate
 from argus.web.deps import STATIC_DIR, AppState, Runner, make_templates
-from argus.web.routes import actions, common, files, kiosk, pages, pwa
+from argus.web.routes import actions, common, files, goals, kiosk, pages, pwa
 
 log = get_logger(__name__)
 # D017/D042: everything is same-origin. Alpine's standard build evaluates x-* expressions with
@@ -159,6 +159,7 @@ def create_app(
     app.include_router(pages.router)
     app.include_router(actions.router)
     app.include_router(files.router)
+    app.include_router(goals.router)
     app.include_router(kiosk.router)
     app.include_router(pwa.router)
     return app

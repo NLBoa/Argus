@@ -15,9 +15,11 @@ from argus.ai.budget import spent_this_month
 from argus.ai.client import AIClient, build_transport
 from argus.capabilities import Capabilities, Feature
 from argus.logging import get_logger
+from argus.store import repo
 from argus.vault.service import health as vault_health
 from argus.web.data import source_statuses
 from argus.web.deps import THEME_COOKIE, AppState
+from argus.web.goals_data import goal_problem_notes
 from argus.web.viewmodels import StatusLine, status_line
 
 log = get_logger(__name__)
@@ -58,35 +60,58 @@ def render(
             )
         except sqlite3.Error:
             log.exception("could not load source health for the status line")
+    caps = page_caps(state, conn, now)
+    if conn is not None and caps.has(Feature.GOALS):
+        try:
+            status = StatusLine([*status.notes, *goal_problem_notes(conn)], status.alerts)
+        except sqlite3.Error:
+            log.exception("could not load goal file problems for the status line")
     ctx = {
-        "caps": page_caps(state, conn, now),
+        "caps": caps,
         "page_title": title,
         "active": active,
         "theme": request.cookies.get(THEME_COOKIE, "system"),
         "status": status,
         "open_proposals": proposals,
-        "boot": {"now": now.isoformat(), "page": active, "pages": hidden_pages(state.caps)},
+        "boot": {"now": now.isoformat(), "page": active, "pages": hidden_pages(caps)},
         **context,
     }
     return templates(request).TemplateResponse(request, template, ctx, status_code=status_code)
 
 
 def page_caps(state: AppState, conn: sqlite3.Connection | None, now: datetime) -> Capabilities:
-    """The app's capabilities plus this month's AI budget (it hides only new-call buttons)."""
+    """The app's capabilities plus this month's AI budget (it hides only new-call buttons), less
+    the goals page while the vault has no goal file (D055, D079)."""
+    caps = _with_goal_files(state.caps, conn)
     if conn is None:
-        return state.caps.with_budget(spent=0.0, cap=0.0)
+        return caps.with_budget(spent=0.0, cap=0.0)
     try:
         spent = spent_this_month(conn, now)
     except sqlite3.Error:
         log.exception("could not read AI spend")
         spent = state.config.ai.monthly_budget_usd
-    return state.caps.with_budget(spent=spent, cap=state.config.ai.monthly_budget_usd)
+    return caps.with_budget(spent=spent, cap=state.config.ai.monthly_budget_usd)
+
+
+def _with_goal_files(caps: Capabilities, conn: sqlite3.Connection | None) -> Capabilities:
+    if not caps.has(Feature.GOALS):
+        return caps
+    try:
+        present = conn is not None and repo.has_goal_docs(conn)
+    except sqlite3.Error:
+        log.exception("could not check for goal files")
+        present = False
+    return caps if present else caps.without(Feature.GOALS, Feature.GOAL_SESSIONS)
 
 
 def hidden_pages(caps: Capabilities) -> list[str]:
     """Pages the setup cannot support, so the palette and shortcuts skip them (D055)."""
     hidden = [] if caps.has(Feature.STAFF_POSTS) else ["/announcements"]
-    return hidden if caps.has(Feature.FILE_ADDER) else [*hidden, "/files/new"]
+    if not caps.has(Feature.FILE_ADDER):
+        hidden.append("/files/new")
+    if not caps.has(Feature.GOALS):
+        hidden.append("/goals")
+    return hidden
 
 
 def is_htmx(request: Request) -> bool:

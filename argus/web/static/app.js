@@ -26,6 +26,7 @@
     { id: "go-upcoming", label: "Go to Upcoming", hint: "g u", href: "/upcoming" },
     { id: "go-announcements", label: "Go to Announcements", hint: "g a", href: "/announcements" },
     { id: "go-workload", label: "Go to Workload", hint: "g w", href: "/workload" },
+    { id: "go-goals", label: "Go to Goals", hint: "g o", href: "/goals" },
     { id: "go-health", label: "Go to Health", hint: "g h", href: "/health" },
     { id: "go-exams", label: "Go to Exam prep", hint: "g e", href: "/exams" },
     { id: "go-proposals", label: "Review vault proposals", hint: "g p", href: "/proposals" },
@@ -39,7 +40,7 @@
     { id: "theme-dark", label: "Use dark theme", hint: "", action: "theme:dark" },
     { id: "theme-system", label: "Match system theme", hint: "", action: "theme:system" },
   ];
-  const GO = { t: "/today", u: "/upcoming", h: "/health", s: "/search", a: "/announcements", w: "/workload", e: "/exams", p: "/proposals" };
+  const GO = { t: "/today", u: "/upcoming", h: "/health", s: "/search", a: "/announcements", w: "/workload", o: "/goals", e: "/exams", p: "/proposals" };
 
   const navigate = (href) => {
     if (window.htmx && href.startsWith("/") && !href.startsWith("/kiosk")) {

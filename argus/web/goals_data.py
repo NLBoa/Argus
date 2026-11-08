@@ -134,6 +134,10 @@ class ProblemView:
         where = f" on line {self.line}" if self.line else ""
         return f"{self.name} has an error{where}"
 
+    @property
+    def is_week(self) -> bool:
+        return "/Weeks/" in f"/{self.path}"
+
 
 @dataclass(frozen=True, slots=True)
 class ChangeView:
