@@ -4,7 +4,9 @@ Sessions are FlowSavvy tasks titled "[Tag] what", where Tag is a goal's tag. Arg
 FlowSavvy's public API (Pro plan, `Authorization: Bearer <key>`) and only ever sends GET requests:
 the key can change the whole calendar, so nothing here can.
 
-Quirks (from the published OpenAPI spec; Task 0 of the plan checks them against the real API):
+Quirks (the published OpenAPI spec, checked against the real API on 2026-11-08, D079):
+- The key is 43 URL-safe characters with no prefix (gitleaks `flowsavvy-api-key`). Item ids are numeric: a missing
+  id is 404, a malformed one 400. Tasks are "Floating" time (the account's time zone).
 - `GET /api/schedule` (at most 31 days) lists rendered blocks with local, offset-less times in the
   account's time zone. A split task has several blocks with the same `itemId`. A repeating task's
   blocks carry `occurrenceDate`; completing one occurrence makes it a separate item that points

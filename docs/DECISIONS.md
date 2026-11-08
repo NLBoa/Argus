@@ -914,6 +914,15 @@ startup, and an empty list reads as "not set up yet" where a missing tool reads 
 **Week 1.** With no history the page still shows each goal, its track and next steps, this week's sessions, and the
 first new topics; trends say "Trends start when week N ends", and on-plan says it starts after Sunday.
 
-**Not verified yet** (the plan's Task 0): the real key shape (so no gitleaks rule yet; the redactor masks the value),
-whether completed blocks stay in `/api/schedule`, how a completed or skipped repeating occurrence appears, and
-`modifiedAfter` semantics. The fixtures follow the published OpenAPI spec.
+**Checked against the real API (2026-11-08).**
+- **The key:** 43 URL-safe characters with no prefix. The gitleaks rule `flowsavvy-api-key` matches it next to the
+  word "flowsavvy", so the 32-character MCP path secret isn't caught by it.
+- **Blocks:** completed tasks keep their blocks (`completed` and `thisPartCompleted` both true). A split recurring
+  session shares one `itemId` and `occurrenceDate`.
+- **Tasks:** the time zone is "Floating" (the account's time zone). Notes are HTML that ends with
+  `<p>Done when: …</p>`, and the parser reads all the real ones. `modifiedAfter` filters as documented. Item ids are
+  numeric.
+- **Lookups:** a missing id returns 404 (read as deleted). An id that isn't a number returns 400, which decides
+  nothing. A bad key returns 401.
+- **Still unseen:** how a completed or skipped weekend occurrence appears, because none has happened yet. The
+  collector's rule stands: no drop without a lookup.

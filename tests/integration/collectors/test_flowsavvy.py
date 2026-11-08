@@ -412,3 +412,15 @@ async def test_backfill_runs_once_even_with_no_sessions(
     clock.advance(timedelta(minutes=30))
     await runner.run_cycle(only={Source.FLOWSAVVY})
     assert len([c for c in fake.calls if c.url.path == "/api/schedule"]) == 1
+
+
+@respx.mock
+async def test_lookup_400_for_a_malformed_id_decides_nothing(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock, api: Callable[..., FakeFlowSavvy]
+) -> None:  # the real API answers 400 for an id that isn't a number, 404 for a missing one
+    fake = await _sync_then_vanish(runner, clock, api, "t-gone")
+    fake.by_id["t-gone"] = (400, None)
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    s = sessions(db)["t-gone"]
+    assert s.gone_at is None and s.moved_at is None
+    assert last_run(db)["status"] == "ok"
