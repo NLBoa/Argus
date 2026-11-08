@@ -23,11 +23,13 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.applications import Starlette
 
+from argus.capabilities import Feature, derive
 from argus.clock import Clock
 from argus.config import AppConfig, Secrets
-from argus.feed import MAX_DAYS, Changes, CourseList, UpcomingWork, parse_since
+from argus.feed import MAX_DAYS, Changes, CourseList, GoalsFeed, UpcomingWork, parse_since
 from argus.feed import changes as feed_changes
 from argus.feed import courses as feed_courses
+from argus.feed import goals as feed_goals
 from argus.feed import upcoming as feed_upcoming
 from argus.store.db import connect_readonly
 
@@ -120,6 +122,22 @@ def build_server(cfg: AppConfig, secrets: Secrets, clock: Clock, db_path: Path) 
         Each has `status` (new, changed, removed), and `old_due` when changed."""
         start = parse_since(since)
         return read(lambda conn: feed_changes(conn, clock.now(), start))
+
+    if cfg.goals is not None:  # D055: no goals block, no tool
+        sessions_on = derive(cfg, secrets).has(Feature.GOAL_SESSIONS)
+
+        @server.tool(title="Get goals", annotations=_READ_ONLY)
+        def get_goals() -> GoalsFeed:
+            """The student's "get good at X" goals (D079): each goal's aim, track (done,
+            current, next milestones), next steps, this week's focus and target, sessions
+            from FlowSavvy (done, scheduled, dropped, moved), whether time may grow
+            (`on_plan.may_grow`), and topics by the student's rules in `rules`: re-teach
+            (use a method other than `last_method`), practice, review_due (overdue first),
+            and next_new (prerequisites met). `goals` is empty until goal files exist.
+            Read-only: goals are edited in the student's vault, never here."""
+            return read(
+                lambda conn: feed_goals(conn, cfg, sessions_on=sessions_on, now=clock.now())
+            )
 
     return server
 
