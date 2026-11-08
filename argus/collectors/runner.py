@@ -22,6 +22,7 @@ from argus.collectors.base import CollectContext, Collector, CollectResult, RunS
 from argus.collectors.canvas_api import CanvasApiCollector
 from argus.collectors.canvas_ical import CanvasIcalCollector
 from argus.collectors.canvas_modules import CanvasModulesCollector
+from argus.collectors.flowsavvy import FlowSavvyCollector
 from argus.collectors.gradescope import GradescopeCollector
 from argus.collectors.http import AuthError, Fetcher
 from argus.collectors.piazza import PiazzaCollector
@@ -51,6 +52,7 @@ def default_collectors() -> list[Collector]:
         PiazzaEmailCollector(),
         UmdioCollector(),
         RunnaIcalCollector(),
+        FlowSavvyCollector(),
     ]
 
 

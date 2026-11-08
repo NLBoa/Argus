@@ -67,6 +67,18 @@ canvas:
 #   preferred_time: "16:00"  # when to aim for a run Runna gave no time to
 #   default_minutes: 45      # a run's length when Runna gives none
 
+# The goals page (D079): "get good at X" goals from Goals/<Tag>.md and Goals/Weeks/YYYY-Www.md
+# in the vault (Argus only reads them). Set the flowsavvy_api_key credential (FlowSavvy >
+# Settings > Integrations > API, Pro) to show sessions titled "[Tag] what" from FlowSavvy.
+# goals:
+#   folder: Goals              # relative to the vault; not under Argus/, Courses/, Review/, Weekly/
+#   rules:                     # all optional; these are the defaults
+#     reteach_below: 60        # latest test score below this: re-teach with a different method
+#     practice_below: 80       # below this: more practice; at or above: the review ladder
+#     review_ladder_days: [7, 14, 28]
+#     on_plan_share: 0.8       # a week is on plan when done >= share x target
+#     on_plan_weeks: 2         # finished on-plan weeks in a row before time may grow
+
 paths:
   data_dir: var              # SQLite DB, caches
   vault_dir: var/vault       # git clone of the Obsidian vault

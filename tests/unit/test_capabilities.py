@@ -8,8 +8,15 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from argus.capabilities import AI, DRIVE, FEATURES, Capabilities, Feature, derive
-from argus.config import AppConfig, CourseConfig, PlannerInboxConfig, RunnaConfig, Secrets
+from argus.capabilities import AI, DRIVE, FEATURES, GOALS, Capabilities, Feature, derive
+from argus.config import (
+    AppConfig,
+    CourseConfig,
+    GoalsConfig,
+    PlannerInboxConfig,
+    RunnaConfig,
+    Secrets,
+)
 
 COURSES = [
     CourseConfig(
@@ -65,6 +72,8 @@ EXPECTED = {
     Feature.STUDY_GENERATION: (frozenset({"canvas_modules", AI}),),
     Feature.FILE_ADDER: (frozenset({DRIVE}),),
     Feature.RUNS: (frozenset({"runna_ical"}),),
+    Feature.GOALS: (frozenset({GOALS}),),
+    Feature.GOAL_SESSIONS: (frozenset({GOALS, "flowsavvy"}),),
 }
 
 
@@ -137,6 +146,8 @@ def test_every_combination_matches_the_matrix(flags: tuple[bool, ...]) -> None:
         AI: ai,
         DRIVE: False,
         "runna_ical": False,
+        GOALS: False,
+        "flowsavvy": False,
     }
     for feature, options in EXPECTED.items():
         expected = any(all(on[s] for s in option) for option in options)
@@ -241,3 +252,29 @@ def test_runs_feature_needs_block_and_secret() -> None:
     assert not derive(AppConfig(courses=COURSES), Secrets(runna_ical_url=RUNNA_URL)).has(
         Feature.RUNS
     )
+
+
+# --- goals (D079) ---------------------------------------------------------------------------
+
+GOALS_ON = AppConfig(courses=COURSES, goals=GoalsConfig())
+FLOWSAVVY = Secrets(flowsavvy_api_key=SecretStr("fs_FAKEKEY"))
+
+
+def test_goals_feature_needs_only_the_block() -> None:
+    assert not derive(CONFIG, Secrets()).has(Feature.GOALS)
+    caps = derive(GOALS_ON, Secrets())
+    assert caps.has(Feature.GOALS)
+    assert not caps.has(Feature.GOAL_SESSIONS)
+
+
+def test_goal_sessions_need_both_halves() -> None:  # Review Focus 4
+    assert not derive(CONFIG, FLOWSAVVY).has(Feature.GOAL_SESSIONS)
+    assert not derive(CONFIG, FLOWSAVVY).sources["flowsavvy"]
+    assert derive(GOALS_ON, FLOWSAVVY).has(Feature.GOAL_SESSIONS)
+
+
+def test_without_drops_features() -> None:
+    caps = derive(GOALS_ON, FLOWSAVVY)
+    off = caps.without(Feature.GOALS, Feature.GOAL_SESSIONS)
+    assert not off.has(Feature.GOALS) and not off.has(Feature.GOAL_SESSIONS)
+    assert caps.has(Feature.GOALS)  # the original is unchanged

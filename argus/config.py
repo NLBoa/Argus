@@ -11,11 +11,14 @@ from __future__ import annotations
 import os
 import re
 from datetime import time
+from itertools import pairwise
 from pathlib import Path
 from typing import Annotated, Any, Final, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+from argus.planner.goals import GoalRules
 
 _COURSE_CODE = re.compile(r"^[A-Z]{4}\d{3}[A-Z]?$")
 _SECTION = re.compile(r"^\d{4}[A-Z]?$")
@@ -185,6 +188,60 @@ class RunnaConfig(_Strict):
     default_minutes: Annotated[int, Field(ge=5, le=600)] = 45
 
 
+# Folders Argus writes (or reads as the student's own inbox); goal files may not live there.
+_OWNED_VAULT_ROOTS: Final = ("Argus", "Courses", "Review", "Weekly")
+
+
+class GoalRulesConfig(_Strict):
+    """The goal rules' numbers (D079), tunable while the student tries them out."""
+
+    reteach_below: Annotated[int, Field(ge=1, le=100)] = 60
+    practice_below: Annotated[int, Field(ge=1, le=100)] = 80
+    review_ladder_days: Annotated[
+        tuple[Annotated[int, Field(ge=1, le=180)], ...], Field(min_length=1, max_length=6)
+    ] = (7, 14, 28)
+    on_plan_share: Annotated[float, Field(ge=0.1, le=1.0)] = 0.8
+    on_plan_weeks: Annotated[int, Field(ge=1, le=8)] = 2
+
+    @model_validator(mode="after")
+    def _coherent(self) -> Self:
+        if self.reteach_below > self.practice_below:
+            raise ValueError("reteach_below must not be above practice_below")
+        ladder = self.review_ladder_days
+        if any(b <= a for a, b in pairwise(ladder)):
+            raise ValueError("review_ladder_days must strictly increase")
+        return self
+
+    def as_rules(self) -> GoalRules:
+        return GoalRules(
+            reteach_below=self.reteach_below,
+            practice_below=self.practice_below,
+            review_ladder_days=tuple(self.review_ladder_days),
+            on_plan_share=self.on_plan_share,
+            on_plan_weeks=self.on_plan_weeks,
+        )
+
+
+class GoalsConfig(_Strict):
+    """The goals page (D079): goal and week files under `folder` in the vault (read-only for
+    Argus), and goal sessions from FlowSavvy when `flowsavvy_api_key` is set."""
+
+    folder: str = "Goals"
+    rules: GoalRulesConfig = GoalRulesConfig()
+
+    @field_validator("folder")
+    @classmethod
+    def _inside_the_vault_and_not_owned(cls, v: str) -> str:
+        parts = [p for p in v.strip().strip("/").split("/") if p]
+        if not v.strip() or v.strip().startswith("/") or not parts:
+            raise ValueError("folder must be a relative path inside the vault")
+        if any(p in (".", "..") for p in parts):
+            raise ValueError("folder must not contain '.' or '..'")
+        if parts[0] in _OWNED_VAULT_ROOTS:
+            raise ValueError(f"folder must not be under {parts[0]}/ (Argus writes there)")
+        return "/".join(parts)
+
+
 class PathsConfig(_Strict):
     data_dir: Path = Path("var")
     vault_dir: Path = Path("var/vault")
@@ -215,6 +272,7 @@ class AppConfig(_Strict):
     mcp: MCPConfig = MCPConfig()
     planner_inbox: PlannerInboxConfig = PlannerInboxConfig()
     runna: RunnaConfig | None = None
+    goals: GoalsConfig | None = None
 
     @model_validator(mode="after")
     def _unique_courses(self) -> Self:
@@ -268,6 +326,8 @@ class Secrets(BaseModel):
     drive_client_id: SecretStr | None = None
     drive_client_secret: SecretStr | None = None
     drive_refresh_token: SecretStr | None = None
+    # FlowSavvy's API key (D079), for goal sessions: Settings > Integrations > API (Pro).
+    flowsavvy_api_key: SecretStr | None = None
 
     def secret_values(self) -> list[str]:
         """Plain values of every secret field, for the log redactor."""

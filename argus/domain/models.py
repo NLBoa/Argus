@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from enum import IntEnum, StrEnum
+from typing import Literal
 
 
 class Source(StrEnum):
@@ -21,6 +22,7 @@ class Source(StrEnum):
     PIAZZA_EMAIL = "piazza_email"
     UMDIO = "umdio"
     RUNNA_ICAL = "runna_ical"  # Runna workouts as assignments in the Running course (D078)
+    FLOWSAVVY = "flowsavvy"  # goal sessions ("[Projects] ..." tasks) for the goals page (D079)
     MANUAL = "manual"
     FINDING = "finding"
 
@@ -147,6 +149,31 @@ class CompletedRun:
     local_day: date  # the day it was run (America/New_York)
     title_key: str  # its normalized title
     raw_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class GoalSessionRecord:
+    """One FlowSavvy goal session (D079): a task titled "[Tag] what", summed over its scheduled
+    parts in one fetch. Recurring occurrences are keyed `itemId@occurrenceDate`."""
+
+    external_id: str
+    tag: str
+    what: str
+    start_at: datetime  # UTC: the first scheduled part
+    end_at: datetime  # UTC: the end of the last part
+    minutes: int  # the parts' total length
+    completed: bool
+    done_when: str | None
+    raw_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class GoalSessionGone:
+    """What FlowSavvy says about a session missing from the schedule window (D079). Absence alone
+    never drops a session: only a lookup does."""
+
+    external_id: str
+    reason: Literal["deleted", "cancelled", "completed", "moved"]
 
 
 @dataclass(frozen=True, slots=True)
