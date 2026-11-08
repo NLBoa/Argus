@@ -359,3 +359,56 @@ def test_disabled_without_goals_block(app_config: AppConfig, clock: FakeClock) -
 
 def test_base_is_flowsavvy() -> None:
     assert BASE == "https://my.flowsavvy.app"
+
+
+# --- review fixes ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_404_on_schedule_is_an_error_not_an_empty_week(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock, api: Callable[..., FakeFlowSavvy]
+) -> None:
+    fake = await _sync_then_vanish(runner, clock, api, "t-gone")
+    fake.schedule_status = 404
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    assert last_run(db)["status"] == "error"
+    s = sessions(db)["t-gone"]
+    assert s.gone_at is None and s.moved_at is None
+    assert not [c for c in fake.calls if c.url.path.startswith("/api/items/")]
+
+
+@respx.mock
+async def test_a_malformed_block_is_skipped_not_fatal(
+    runner: SyncRunner, db: sqlite3.Connection, api: Callable[..., FakeFlowSavvy]
+) -> None:
+    bad = {"itemId": "t-bad", "itemType": "task", "title": "[Woodwork] Broken", "startTime": "soon"}
+    api(schedule={"scheduleItems": [*SCHEDULE["scheduleItems"], bad]})
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    assert last_run(db)["status"] == "ok"
+    assert "t-split" in sessions(db) and "t-bad" not in sessions(db)
+
+
+@respx.mock
+async def test_sessions_of_a_removed_goal_are_not_looked_up(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock, api: Callable[..., FakeFlowSavvy]
+) -> None:
+    fake = await _sync_then_vanish(runner, clock, api, "t-gone")
+    with transaction(db):
+        repo.mark_goal_docs_missing(
+            db, {"Goals/Spanish.md"}, clock.now()
+        )  # Woodwork's file is gone
+    fake.calls.clear()
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    assert not [c for c in fake.calls if c.url.path.startswith("/api/items/")]
+
+
+@respx.mock
+async def test_backfill_runs_once_even_with_no_sessions(
+    runner: SyncRunner, db: sqlite3.Connection, clock: FakeClock, api: Callable[..., FakeFlowSavvy]
+) -> None:
+    fake = api(schedule={"scheduleItems": []})
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    fake.calls.clear()
+    clock.advance(timedelta(minutes=30))
+    await runner.run_cycle(only={Source.FLOWSAVVY})
+    assert len([c for c in fake.calls if c.url.path == "/api/schedule"]) == 1

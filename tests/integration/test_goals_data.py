@@ -392,3 +392,61 @@ def test_weeks_before_a_goal_had_data_are_empty_not_zero(
         ("W48", False),
         ("W49", False),
     ]
+
+
+def test_duplicate_tag_with_an_old_good_version_is_shown_as_a_problem(
+    seeded: sqlite3.Connection, tmp_path: object
+) -> None:
+    wood = doc("Woodwork.md")
+    put(seeded, "Goals/Zwood.md", wood)  # valid earlier, now a duplicate of Woodwork.md
+    put(
+        seeded,
+        "Goals/Zwood.md",
+        None,
+        DocError(None, "tag", "Goals/Woodwork.md already uses the tag Woodwork"),
+    )
+    cfg = config(tmp_path)
+    page = load_goals(seeded, cfg, caps(cfg), NOW)
+    z = next(p for p in page.problems if p.path == "Goals/Zwood.md")
+    assert not z.showing_good  # its goal isn't on the page, so the problem panel must show it
+
+
+def test_page_and_feed_agree_on_plan_across_a_gap_week(
+    db: sqlite3.Connection, tmp_path: object
+) -> None:
+    from argus.feed import goals as feed_goals
+
+    put(db, "Goals/Woodwork.md", doc("Woodwork.md"))
+    for week in ("2026-W46", "2026-W48"):  # on plan; W47 has nothing at all
+        monday = date.fromisocalendar(2026, int(week[-2:]), 1)
+        start = local_datetime(monday + timedelta(days=1), 19)
+        sessions(
+            db,
+            [
+                GoalSessionRecord(
+                    f"s{week}",
+                    "Woodwork",
+                    "x",
+                    start,
+                    start + timedelta(hours=4),
+                    240,
+                    True,
+                    None,
+                    "h",
+                )
+            ],
+        )
+        put(
+            db,
+            f"Goals/Weeks/{week}.md",
+            WeekDoc.model_validate(
+                {"version": 1, "week": week, "goals": {"Woodwork": {"target_minutes": 240}}}
+            ),
+        )
+    cfg = config(tmp_path)
+    now = local_datetime(date(2026, 12, 3), 12)
+    page = load_goals(db, cfg, caps(cfg), now)
+    out = feed_goals(db, cfg, sessions_on=True, now=now)
+    assert page.goals[0].on_plan_text == "On plan 1 of the last 2 weeks, so hold time steady."
+    assert out.goals[0].on_plan is not None
+    assert (out.goals[0].on_plan.streak_weeks, out.goals[0].on_plan.may_grow) == (1, False)

@@ -20,7 +20,7 @@ from argus.domain.goals import WeekDoc, week_monday, week_problems
 from argus.domain.models import Item, ItemKind, ItemStatus, MeetingRecord, Source
 from argus.domain.titles import is_project
 from argus.estimates import effective_estimates
-from argus.goals import goal_set, order_goals
+from argus.goals import goal_set, on_plan_history, order_goals
 from argus.planner.goals import (
     GoalRules,
     Session,
@@ -498,15 +498,21 @@ def goals(
     The facts the morning planner schedules from (D079)."""
     rules = config.goals.rules.as_rules() if config.goals else GoalRules()
     folder = config.goals.folder if config.goals else "Goals"
-    goal_map, week_docs = goal_set(conn)
+    gs = goal_set(conn)
+    goal_map, week_docs = gs.goals, gs.weeks
     this_week = week_of(now)
     monday = week_monday(this_week)
     keys = [week_key(monday - timedelta(weeks=i)) for i in reversed(range(weeks))]
     plan = week_docs.get(this_week)
     problems = [
         ProblemOut(path=d.path, line=d.error.line, field=d.error.path, message=d.error.message)
-        for d in repo.goal_docs(conn)
+        for d in gs.stored
         if d.error is not None
+    ]
+    problems += [
+        ProblemOut(path=path, line=e.line, field=e.path, message=e.message)
+        for path, e in gs.dupes.items()
+        if all(d.error is None for d in gs.stored if d.path == path)
     ]
     if plan is not None:
         valid = {tag: g for tag, (_, g) in goal_map.items()}
@@ -538,11 +544,7 @@ def goals(
         }
         op = None
         if sessions_on:
-            history = [
-                p
-                for p in progress
-                if p.rows or (week_docs.get(p.week) and tag in week_docs[p.week].goals)
-            ]
+            history = on_plan_history(progress, week_docs)
             o = on_plan(history, rules)
             op = OnPlanOut(streak_weeks=o.streak, may_grow=o.may_grow, last_share=o.last_share)
         out.append(

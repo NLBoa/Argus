@@ -2365,18 +2365,14 @@ def upsert_goal_doc(
     )
 
 
-def touch_goal_doc(conn: sqlite3.Connection, path: str, now: datetime) -> None:
-    """The file is unchanged since the last read."""
-    conn.execute(
-        "UPDATE goal_docs SET read_at = ?, missing_since = NULL WHERE path = ?", (iso(now), path)
+def goal_doc_errors(conn: sqlite3.Connection) -> list[tuple[str, DocError]]:
+    """Current problems in goal and week files, without parsing their stored versions (the
+    status line asks on every page)."""
+    rows = conn.execute(
+        """SELECT path, error, error_line, error_path FROM goal_docs
+           WHERE error IS NOT NULL AND missing_since IS NULL ORDER BY path"""
     )
-
-
-def goal_doc_hashes(conn: sqlite3.Connection) -> dict[str, str]:
-    return {
-        r["path"]: r["text_hash"]
-        for r in conn.execute("SELECT path, text_hash FROM goal_docs WHERE missing_since IS NULL")
-    }
+    return [(r["path"], DocError(r["error_line"], r["error_path"] or "", r["error"])) for r in rows]
 
 
 def mark_goal_docs_missing(conn: sqlite3.Connection, present: set[str], now: datetime) -> None:
@@ -2493,22 +2489,20 @@ def apply_goal_sessions(
     return len(kept)
 
 
-def has_goal_sessions(conn: sqlite3.Connection) -> bool:
-    return conn.execute("SELECT 1 FROM goal_sessions LIMIT 1").fetchone() is not None
-
-
 def open_goal_session_ids(
-    conn: sqlite3.Connection, start: datetime, end: datetime
+    conn: sqlite3.Connection, start: datetime, end: datetime, *, tags: set[str] | None = None
 ) -> dict[str, datetime]:
-    """Open sessions starting in [start, end): the ones to look up if a fetch no longer lists
-    them."""
+    """Open sessions starting in [start, end) for `tags` (all when None): the ones to look up
+    if a fetch no longer lists them. A removed goal's sessions are never looked up."""
     rows = conn.execute(
-        """SELECT external_id, start_at FROM goal_sessions
+        """SELECT external_id, start_at, tag FROM goal_sessions
            WHERE completed = 0 AND gone_at IS NULL AND moved_at IS NULL
              AND start_at >= ? AND start_at < ? ORDER BY start_at""",
         (iso(start), iso(end)),
     )
-    return {r["external_id"]: parse_iso(r["start_at"]) for r in rows}
+    return {
+        r["external_id"]: parse_iso(r["start_at"]) for r in rows if tags is None or r["tag"] in tags
+    }
 
 
 def goal_sessions_between(

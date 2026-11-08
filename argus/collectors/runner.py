@@ -213,10 +213,9 @@ class SyncRunner:
         now = self.clock.now()
         _, _, start, end = fetch_window(now)
         with transaction(self.conn):
+            tags = repo.goal_tags(self.conn)
             state = goals_state(
-                tags=repo.goal_tags(self.conn),
-                open_ids=repo.open_goal_session_ids(self.conn, start, end),
-                backfill=not repo.has_goal_sessions(self.conn),
+                tags=tags, open_ids=repo.open_goal_session_ids(self.conn, start, end, tags=tags)
             )
             repo.set_source_state(self.conn, Source.FLOWSAVVY.value, STATE_GOALS, state, now)
 

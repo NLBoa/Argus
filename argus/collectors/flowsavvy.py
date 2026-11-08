@@ -113,6 +113,11 @@ def group_blocks(
         parsed = parse_title(b.get("title"))
         if parsed is None or (tags is not None and parsed[0] not in tags):
             continue
+        try:
+            _local(str(b["startTime"])), _local(str(b["endTime"]))
+        except (KeyError, ValueError, TypeError):
+            log.warning("FlowSavvy block without readable times; skipped")
+            continue
         item_id = str(b["itemId"])
         key = alias.get(item_id) or session_key(item_id, b.get("occurrenceDate"))
         groups.setdefault(key, []).append(b)
@@ -169,12 +174,11 @@ def fetch_window(now: datetime) -> tuple[date, date, datetime, datetime]:
     return first, last, start, end
 
 
-def goals_state(*, tags: set[str], open_ids: Mapping[str, datetime], backfill: bool) -> SourceState:
+def goals_state(*, tags: set[str], open_ids: Mapping[str, datetime]) -> SourceState:
     """What the runner tells the collector before a run (it does no database I/O itself)."""
     data = {
         "tags": sorted(tags),
         "open": {k: v.astimezone(UTC).isoformat() for k, v in open_ids.items()},
-        "backfill": backfill,
     }
     return SourceState(data=json.dumps(data, sort_keys=True))
 
@@ -198,7 +202,12 @@ class _Api:
         self._client = client
         self._headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
 
-    async def get(self, path: str, params: Mapping[str, str] | None = None) -> tuple[int, Any]:
+    async def get(
+        self, path: str, params: Mapping[str, str] | None = None, *, missing_ok: bool = False
+    ) -> tuple[int, Any]:
+        """`missing_ok` only for one item's lookup: there a 404 means "deleted". Anywhere else a
+        404 is an error, never an empty result (an empty schedule would look like every
+        session vanished)."""
         try:
             r = await self._client.get(BASE + path, params=params, headers=self._headers)
         except httpx.TransportError as e:
@@ -207,7 +216,7 @@ class _Api:
             raise AuthError(f"FlowSavvy refused the API key (HTTP {r.status_code})")
         if r.status_code == 429:
             raise RateLimitedError
-        if r.status_code == 404:
+        if r.status_code == 404 and missing_ok:
             return 404, None
         if r.status_code >= 400:
             raise FetchError(f"FlowSavvy {path.split('/', 3)[2]} -> HTTP {r.status_code}")
@@ -246,7 +255,7 @@ class _Api:
         return out, False
 
     async def item(self, item_id: str) -> tuple[int, Any]:
-        return await self.get(f"/api/items/{quote(item_id, safe='')}")
+        return await self.get(f"/api/items/{quote(item_id, safe='')}", missing_ok=True)
 
 
 # --- the collector ----------------------------------------------------------------------------
@@ -268,10 +277,11 @@ class FlowSavvyCollector:
         first, last, start, end = fetch_window(now)
         try:
             blocks = await api.schedule(first, last)
-            if goals.get("backfill"):
+            backfilled = bool(own.get("backfilled"))
+            if not backfilled:
                 older = first - timedelta(weeks=BACKFILL_WEEKS)
                 blocks = [*await api.schedule(older, first - timedelta(days=1)), *blocks]
-            own = await self._read_items(api, own, now, start)
+            own = {**await self._read_items(api, own, now, start), "backfilled": True}
         except RateLimitedError:
             return CollectResult(self.source, RunStatus.ERROR, error="FlowSavvy rate limit")
         except FetchError as e:

@@ -7,7 +7,7 @@ numbers from `goals.rules`. No AI. FlowSavvy parts appear only with `Feature.GOA
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import PurePosixPath
@@ -20,11 +20,10 @@ from argus.domain.goals import (
     GoalDoc,
     NextStep,
     WeekDoc,
-    check_goal_set,
     week_monday,
     week_problems,
 )
-from argus.goals import CHANGE_LABELS, minutes_label, order_goals
+from argus.goals import CHANGE_LABELS, goal_set, minutes_label, on_plan_history, order_goals
 from argus.planner.goals import (
     GoalRules,
     Session,
@@ -246,24 +245,15 @@ def _problem(config: AppConfig, path: str, err: DocError, showing_good: bool) ->
 
 
 def _docs(conn: sqlite3.Connection, config: AppConfig) -> _Docs:
-    stored = repo.goal_docs(conn)
-    problems: list[ProblemView] = []
-    goal_docs: dict[str, GoalDoc] = {d.path: d.good for d in stored if isinstance(d.good, GoalDoc)}
-    dupes = check_goal_set(goal_docs)
-    goals: dict[str, tuple[StoredGoalDoc, GoalDoc]] = {}
-    weeks: dict[str, WeekDoc] = {}
-    for d in stored:
-        if d.error is not None:
-            problems.append(_problem(config, d.path, d.error, d.good is not None))
-        if isinstance(d.good, GoalDoc):
-            if d.path in dupes:
-                if d.error is None:
-                    problems.append(_problem(config, d.path, dupes[d.path], False))
-                continue
-            goals[d.good.tag] = (d, d.good)
-        elif isinstance(d.good, WeekDoc):
-            weeks[d.good.week] = d.good
-    return _Docs(goals, weeks, problems)
+    gs = goal_set(conn)
+    problems = [
+        _problem(config, d.path, d.error, gs.shown(d)) for d in gs.stored if d.error is not None
+    ]
+    errored = {d.path for d in gs.stored if d.error is not None}
+    problems += [
+        _problem(config, path, err, False) for path, err in gs.dupes.items() if path not in errored
+    ]
+    return _Docs(gs.goals, gs.weeks, sorted(problems, key=lambda p: p.path))
 
 
 def _accent(goal: GoalDoc, n: int) -> str:
@@ -333,17 +323,6 @@ def _on_plan_text(history: Sequence[WeekProgress], rules: GoalRules) -> str:
         return f"Below plan last week ({round(p.last_share * 100)}%), so hold time steady."
     need = rules.on_plan_weeks
     return f"On plan {p.streak} of the last {need} weeks, so hold time steady."
-
-
-def _since_first_data(
-    progress: Sequence[WeekProgress], plans: Mapping[str, WeekDoc]
-) -> list[WeekProgress]:
-    """Weeks before the goal had a session or a target don't count as off plan."""
-    for i, p in enumerate(progress):
-        plan = plans.get(p.week)
-        if p.rows or (plan is not None and p.tag in plan.goals):
-            return list(progress[i:])
-    return []
 
 
 def _topic_label(s: TopicState) -> str:
@@ -507,7 +486,7 @@ def load_goals(
             progress = [week_progress(tag, w, docs.weeks.get(w), sessions, now) for w in weeks]
             current = progress[-1]
             week = _week_view(current, next_id)
-            on_plan_text = _on_plan_text(_since_first_data(progress, docs.weeks), rules)
+            on_plan_text = _on_plan_text(on_plan_history(progress, docs.weeks), rules)
             totals = [
                 totals[0] + current.sessions_done,
                 totals[1] + current.sessions_planned,
@@ -545,12 +524,11 @@ def load_goals(
 
 
 def goal_problem_notes(conn: sqlite3.Connection) -> list[StatusNote]:
-    """'Projects.md has an error on line 14' for the status line (D067)."""
+    """'Projects.md has an error on line 14' for the status line (D067), on every page."""
     out = []
-    for d in repo.goal_docs(conn):
-        if d.error is not None:
-            where = f" on line {d.error.line}" if d.error.line else ""
-            out.append(
-                StatusNote(f"{PurePosixPath(d.path).name} has an error{where}", "failing", "/goals")
-            )
+    for path, err in repo.goal_doc_errors(conn):
+        where = f" on line {err.line}" if err.line else ""
+        out.append(
+            StatusNote(f"{PurePosixPath(path).name} has an error{where}", "failing", "/goals")
+        )
     return out

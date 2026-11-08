@@ -145,3 +145,24 @@ def test_fetch_window_is_last_this_and_next_week() -> None:
     assert (first, last) == (date(2026, 11, 2), date(2026, 11, 22))
     assert start == datetime(2026, 11, 2, 5, 0, tzinfo=UTC)
     assert end == datetime(2026, 11, 23, 5, 0, tzinfo=UTC)
+
+
+def test_group_blocks_skips_malformed_blocks() -> None:
+    bad = [
+        {
+            "itemId": "a",
+            "itemType": "task",
+            "title": "[W] x",
+            "startTime": "soon",
+            "endTime": "later",
+        },
+        {"itemId": "b", "itemType": "task", "title": "[W] y"},
+        {
+            "itemId": "c",
+            "itemType": "task",
+            "title": "[W] z",
+            "startTime": "2026-11-10T19:00:00",
+            "endTime": "2026-11-10T20:00:00",
+        },
+    ]
+    assert [r.external_id for r in group_blocks(bad, notes={}, alias={}, tags=None)] == ["c"]

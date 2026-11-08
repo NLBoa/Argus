@@ -51,7 +51,6 @@ def test_valid_doc_round_trips(db: sqlite3.Connection) -> None:
     assert docs["Goals/Woodwork.md"].good == goal() and docs["Goals/Woodwork.md"].error is None
     assert docs["Goals/Woodwork.md"].good_at == T0 and docs["Goals/Woodwork.md"].kind == "goal"
     assert docs["Goals/Weeks/2026-W46.md"].good == WEEK
-    assert repo.goal_doc_hashes(db) == {"Goals/Woodwork.md": "h1", "Goals/Weeks/2026-W46.md": "h1"}
     assert repo.has_goal_docs(db)
     assert repo.goal_tags(db) == {"Woodwork"}
 
@@ -92,14 +91,6 @@ def test_missing_file_hides_goal_and_returns(db: sqlite3.Connection) -> None:
 def test_week_docs_alone_do_not_make_a_page(db: sqlite3.Connection) -> None:
     put(db, "Goals/Weeks/2026-W46.md", WEEK, None)
     assert not repo.has_goal_docs(db)
-
-
-def test_touch_updates_read_at_only(db: sqlite3.Connection) -> None:
-    put(db, "Goals/Woodwork.md", goal(), None)
-    repo.mark_goal_docs_missing(db, set(), T0 + timedelta(hours=1))
-    repo.touch_goal_doc(db, "Goals/Woodwork.md", T0 + timedelta(hours=2))
-    (doc,) = repo.goal_docs(db)
-    assert doc.read_at == T0 + timedelta(hours=2) and doc.good_at == T0
 
 
 # --- sessions ---------------------------------------------------------------------------------
@@ -208,3 +199,17 @@ def test_between_is_half_open_and_sorted(db: sqlite3.Connection, clock: FakeCloc
     start = datetime(2026, 11, 12, 23, 30, tzinfo=UTC)
     got = repo.goal_sessions_between(db, start, start + timedelta(days=1))
     assert [s.external_id for s in got] == ["a"]
+
+
+def test_open_session_ids_only_for_known_tags(db: sqlite3.Connection) -> None:
+    repo.apply_goal_sessions(
+        db, [rec("w"), rec("c", tag="Chess")], [], known_tags={"Woodwork", "Chess"}, now=T0
+    )
+    start, end = datetime(2026, 11, 9, 5, tzinfo=UTC), datetime(2026, 11, 30, 5, tzinfo=UTC)
+    assert list(repo.open_goal_session_ids(db, start, end, tags={"Woodwork"})) == ["w"]
+
+
+def test_goal_doc_errors_without_parsing(db: sqlite3.Connection) -> None:
+    put(db, "Goals/Woodwork.md", goal(), None)
+    put(db, "Goals/Chess.md", None, DocError(3, "tag", "bad"))
+    assert repo.goal_doc_errors(db) == [("Goals/Chess.md", DocError(3, "tag", "bad"))]

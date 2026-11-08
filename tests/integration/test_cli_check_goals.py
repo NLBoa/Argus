@@ -62,3 +62,11 @@ def test_check_goals_cross_file_problems(tmp_path: Path) -> None:
 def test_check_goals_with_nothing_to_check(tmp_path: Path) -> None:
     result = runner.invoke(app, ["check-goals", str(tmp_path)])
     assert result.exit_code == 1 and "No goal files" in result.output
+
+
+def test_check_goals_from_inside_the_goals_folder(tmp_path: Path, monkeypatch: object) -> None:
+    root = vault(tmp_path)
+    shutil.copy(BAD / "bad_status.md", root / "Goals" / "Chess.md")
+    monkeypatch.chdir(root / "Goals")  # type: ignore[attr-defined]
+    result = runner.invoke(app, ["check-goals"])
+    assert "Goals/Chess.md:12: track[1].status" in result.output

@@ -14,7 +14,7 @@ from argus.logging import get_logger
 from argus.store import repo
 from argus.web.deps import AppState, get_conn, get_state
 from argus.web.goals_data import load_goals
-from argus.web.routes.common import LOAD_ERROR, page_caps, render
+from argus.web.routes.common import LOAD_ERROR, render
 
 log = get_logger(__name__)
 
@@ -41,7 +41,8 @@ router = APIRouter(dependencies=[Depends(goals_on)])
 def goals_view(request: Request, state: State, conn: Conn) -> HTMLResponse:
     now = state.clock.now()
     try:
-        data = load_goals(conn, state.config, page_caps(state, conn, now), now)
+        # goals_on already found a goal file, so the app's caps are this page's caps.
+        data = load_goals(conn, state.config, state.caps, now)
     except sqlite3.Error:
         log.exception("could not load goals")
         return render(

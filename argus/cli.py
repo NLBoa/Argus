@@ -99,7 +99,10 @@ def check_goals(
     from argus.domain.goals import GoalDoc, WeekDoc
     from argus.vault.goals_scan import check_dir
 
-    base, prefix = (path / folder, folder) if (path / folder).is_dir() else (path, path.name)
+    if (path / folder).is_dir():
+        base, prefix = path / folder, folder
+    else:
+        base, prefix = path, path.resolve().name
     report = check_dir(base, prefix)
     if not report.docs:
         typer.echo(f"No goal files with an argus-goal or argus-week block in {base}")

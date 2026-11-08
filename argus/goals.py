@@ -4,13 +4,14 @@ weekly vault note. Both read stored goal files and FlowSavvy sessions; no AI."""
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from argus.capabilities import Capabilities, Feature
 from argus.clock import to_local
-from argus.domain.goals import GoalDoc, WeekDoc, check_goal_set
-from argus.planner.goals import week_bounds, week_key, week_progress
+from argus.domain.goals import DocError, GoalDoc, WeekDoc, check_goal_set
+from argus.planner.goals import WeekProgress, week_bounds, week_key, week_progress
 from argus.store import repo
 from argus.store.repo import StoredGoalDoc
 from argus.web.format import clock_time
@@ -32,10 +33,25 @@ def order_goals(
     return planned + rest
 
 
-def goal_set(
-    conn: sqlite3.Connection,
-) -> tuple[dict[str, tuple[StoredGoalDoc, GoalDoc]], dict[str, WeekDoc]]:
-    """Valid goal files by tag (a duplicated tag keeps its first file) and week files by week."""
+@dataclass(frozen=True, slots=True)
+class GoalSet:
+    """What the stored goal and week files add up to: the one place the page, the connector,
+    Today, and the weekly note read them from."""
+
+    stored: list[StoredGoalDoc]
+    goals: dict[str, tuple[StoredGoalDoc, GoalDoc]]  # by tag; a duplicated tag keeps its first file
+    weeks: dict[str, WeekDoc]
+    dupes: dict[str, DocError]  # files whose valid version repeats an earlier file's tag
+
+    def shown(self, d: StoredGoalDoc) -> bool:
+        """Whether this file's last valid version is on the page (so its problem is a note,
+        not a replacement for the goal)."""
+        if isinstance(d.good, GoalDoc):
+            return d.path not in self.dupes
+        return d.good is not None
+
+
+def goal_set(conn: sqlite3.Connection) -> GoalSet:
     stored = repo.goal_docs(conn)
     goal_docs: dict[str, GoalDoc] = {d.path: d.good for d in stored if isinstance(d.good, GoalDoc)}
     dupes = check_goal_set(goal_docs)
@@ -45,12 +61,23 @@ def goal_set(
         if isinstance(d.good, GoalDoc) and d.path not in dupes
     }
     weeks = {d.good.week: d.good for d in stored if isinstance(d.good, WeekDoc)}
-    return goals, weeks
+    return GoalSet(stored, goals, weeks, dupes)
+
+
+def on_plan_history(
+    progress: Sequence[WeekProgress], plans: Mapping[str, WeekDoc]
+) -> list[WeekProgress]:
+    """The weeks that count for on plan: from the first with a session or a target on. Weeks
+    before the goal existed aren't off plan; an empty week after that is."""
+    for i, p in enumerate(progress):
+        plan = plans.get(p.week)
+        if p.rows or (plan is not None and p.tag in plan.goals):
+            return list(progress[i:])
+    return []
 
 
 def _active_tags(conn: sqlite3.Connection) -> list[str]:
-    goals, _ = goal_set(conn)
-    return [tag for tag, (_, g) in goals.items() if g.status == "active"]
+    return [tag for tag, (_, g) in goal_set(conn).goals.items() if g.status == "active"]
 
 
 def today_goal_line(conn: sqlite3.Connection, caps: Capabilities, now: datetime) -> str | None:
@@ -85,7 +112,8 @@ def weekly_goal_lines(
     """Lines for Argus's weekly vault note: each active goal's week, and the week's change."""
     if not caps.has(Feature.GOALS) or not repo.has_goal_docs(conn):
         return []
-    goals, weeks = goal_set(conn)
+    gs = goal_set(conn)
+    goals, weeks = gs.goals, gs.weeks
     key = week_key(day)
     plan = weeks.get(key)
     sessions_on = caps.has(Feature.GOAL_SESSIONS)
