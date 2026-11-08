@@ -13,6 +13,7 @@ from argus.config import (
     load_config,
     load_secrets,
 )
+from argus.planner.goals import GoalRules
 from tests.conftest import REPO_ROOT
 
 
@@ -174,3 +175,75 @@ def test_runna_secret_loads_and_is_redacted() -> None:
     s = load_secrets({"ARGUS_RUNNA_ICAL_URL": SYNTHETIC_RUNNA_URL})
     assert s.runna_ical_url is not None
     assert SYNTHETIC_RUNNA_URL in s.secret_values()
+
+
+# --- goals (D079) ---------------------------------------------------------------------------
+
+
+def test_goals_block_defaults() -> None:
+    goals = AppConfig.model_validate({"goals": {}}).goals
+    assert goals is not None
+    assert goals.folder == "Goals"
+    assert goals.rules.as_rules() == GoalRules(
+        reteach_below=60,
+        practice_below=80,
+        review_ladder_days=(7, 14, 28),
+        on_plan_share=0.8,
+        on_plan_weeks=2,
+    )
+
+
+def test_goals_off_by_default() -> None:
+    assert AppConfig().goals is None
+
+
+@pytest.mark.parametrize(
+    "folder", ["../x", "Goals/../..", "Argus/Goals", "Weekly", "Courses/X", "Review", "/abs", ""]
+)
+def test_goals_folder_rejects_owned_or_escaping_paths(folder: str) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"goals": {"folder": folder}})
+
+
+def test_goals_folder_may_be_nested() -> None:
+    goals = AppConfig.model_validate({"goals": {"folder": "Life/Goals"}}).goals
+    assert goals is not None and goals.folder == "Life/Goals"
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        {"reteach_below": 85, "practice_below": 80},
+        {"reteach_below": 0},
+        {"practice_below": 101},
+        {"review_ladder_days": [7, 7, 28]},
+        {"review_ladder_days": [14, 7]},
+        {"review_ladder_days": []},
+        {"review_ladder_days": [0]},
+        {"review_ladder_days": [7, 14, 28, 56, 90, 120, 150]},
+        {"on_plan_share": 1.5},
+        {"on_plan_share": 0.05},
+        {"on_plan_weeks": 0},
+        {"on_plan_weeks": 9},
+    ],
+)
+def test_incoherent_goal_rules_rejected(rules: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"goals": {"rules": rules}})
+
+
+def test_custom_goal_rules_load() -> None:
+    goals = AppConfig.model_validate(
+        {"goals": {"rules": {"review_ladder_days": [3, 10], "on_plan_share": 0.9}}}
+    ).goals
+    assert goals is not None
+    rules = goals.rules.as_rules()
+    assert rules.review_ladder_days == (3, 10)
+    assert rules.on_plan_share == 0.9
+    assert rules.reteach_below == 60
+
+
+def test_flowsavvy_secret_loads_and_is_redacted() -> None:
+    s = load_secrets({"ARGUS_FLOWSAVVY_API_KEY": "fs_FAKEKEY"})
+    assert s.flowsavvy_api_key is not None
+    assert "fs_FAKEKEY" in s.secret_values()

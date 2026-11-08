@@ -8,6 +8,7 @@
 {% macro more_menu(caps, active, proposals, cls, mid) -%}
 {%- set items = [("/files/new", "Add a file", "file_adder")] if caps.has("file_adder") else [] -%}
 {%- set _ = items.append(("/workload", "Workload", None)) -%}
+{%- if caps.has("goals") %}{% set _ = items.append(("/goals", "Goals", "goals")) %}{% endif -%}
 {%- if caps.has("staff_posts") %}{% set _ = items.append(("/announcements", "Announcements", "staff_posts")) %}{% endif -%}
 {%- set _ = items.extend([("/health", "Health", None), ("/settings", "Settings", None), ("/proposals", "Proposals", None)]) -%}
 <details class="more more--{{ cls }}" data-more>

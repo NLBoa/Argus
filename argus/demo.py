@@ -24,6 +24,7 @@ from argus.config import (
     AppConfig,
     Commitment,
     CourseConfig,
+    GoalsConfig,
     PathsConfig,
     ScheduleConfig,
     Secrets,
@@ -31,6 +32,8 @@ from argus.config import (
 )
 from argus.domain.models import (
     AuthorRole,
+    GoalSessionGone,
+    GoalSessionRecord,
     GradeRecord,
     ItemKind,
     MeetingRecord,
@@ -67,6 +70,7 @@ DEMO_CONFIG = AppConfig(
     ],
     # The demo never touches a real vault: notes it writes go to a throwaway folder.
     paths=PathsConfig(data_dir=Path("var/demo"), vault_dir=Path("var/demo/vault")),
+    goals=GoalsConfig(),
     schedule=ScheduleConfig(
         commitments=[
             Commitment(title="Dining hall shift", days=["Tue", "Thu"], start=time(17), end=time(20))
@@ -85,6 +89,7 @@ DEMO_SECRETS = Secrets(
     gradescope_password=SecretStr("demo-password"),
     piazza_email="demo@example.test",
     piazza_password=SecretStr("demo-password"),
+    flowsavvy_api_key=SecretStr("demo-flowsavvy-key"),
 )
 
 
@@ -322,6 +327,7 @@ def seed_demo(
             run("canvas_api", 12, "ok")
             run("canvas_modules", 60 * 6, "ok")
         run("piazza", 25, "ok")
+        run("flowsavvy", 14, "ok")
         run("gradescope", 186, "ok")
         for m in (126, 96, 66, 36):
             run(
@@ -381,6 +387,7 @@ def seed_demo(
         )
         _seed_estimates(conn, now)
         _seed_study(conn, ids, now, concepts=token)
+        _seed_goals(conn, now)
         repo.rebuild_search_index(conn)
     from argus.clock import FakeClock
     from argus.planning import replan
@@ -869,4 +876,220 @@ def _seed_findings(conn: sqlite3.Connection, ids: dict[str, int], now: datetime)
         url="https://piazza.com/class/demo/post/51",
         item_id=None,
         now=now - timedelta(days=1),
+    )
+
+
+# --- goals (D079): three neutral goals, two with history and one that started this week -------
+
+_DEMO_GOALS: list[dict[str, Any]] = [
+    {
+        "version": 1,
+        "tag": "Projects",
+        "aim": "Ship a full-stack side project before club applications open",
+        "why": "Show real work, not just coursework",
+        "accent": "ochre",
+        "track": [
+            {"id": "js-git", "title": "JavaScript and Git", "status": "done"},
+            {
+                "id": "ts-react",
+                "title": "TypeScript + React",
+                "status": "current",
+                "done_when": "A typed to-do app on GitHub",
+            },
+            {"id": "nextjs", "title": "Next.js", "status": "next"},
+            {"id": "firebase", "title": "Firebase", "status": "next"},
+            {"id": "ship", "title": "Deploy + write-up", "status": "next"},
+        ],
+        "next": [
+            {"what": "React fundamentals", "done_when": "Tic-tac-toe works in TypeScript"},
+            {"what": "Volunteer sign-up mini-app", "done_when": "Merged through two pull requests"},
+        ],
+        "topics": [
+            {"id": "js-basics", "title": "Modern JavaScript"},
+            {"id": "ts-fundamentals", "title": "TypeScript fundamentals", "after": ["js-basics"]},
+            {
+                "id": "react-fundamentals",
+                "title": "React fundamentals",
+                "after": ["ts-fundamentals"],
+            },
+        ],
+    },
+    {
+        "version": 1,
+        "tag": "Interviews",
+        "aim": "A steady weekly block for internship prep and applications",
+        "accent": "olive",
+        "track": [
+            {"id": "resume", "title": "Resume and tracker", "status": "done"},
+            {"id": "graphs", "title": "Graph problems in Java", "status": "current"},
+            {"id": "mocks", "title": "Mock interviews", "status": "next"},
+        ],
+        "next": [{"what": "Two graph problems in Java", "done_when": "Both accepted"}],
+        "topics": [
+            {"id": "arrays", "title": "Arrays and hashing"},
+            {"id": "graphs", "title": "Graphs (BFS and DFS)", "after": ["arrays"]},
+        ],
+    },
+    {
+        "version": 1,
+        "tag": "Spanish",
+        "aim": "Hold a ten-minute conversation by spring",
+        "accent": "sky",
+        "track": [
+            {"id": "present", "title": "Present tense", "status": "current"},
+            {"id": "past", "title": "Past tenses", "status": "next"},
+        ],
+        "topics": [{"id": "ser-estar", "title": "Ser and estar"}],
+    },
+]
+
+
+def _seed_goals(conn: sqlite3.Connection, now: datetime) -> None:
+    """Goal files (as the vault cycle stores them) and FlowSavvy sessions, relative to `now`."""
+    from argus.domain.goals import GoalDoc, WeekDoc, week_key
+
+    monday = to_local(now).date() - timedelta(days=to_local(now).weekday())
+
+    def week(offset: int) -> str:
+        return week_key(monday + timedelta(weeks=offset))
+
+    def day(offset_weeks: int, weekday: int) -> str:
+        return (monday + timedelta(weeks=offset_weeks, days=weekday)).isoformat()
+
+    plans: list[dict[str, Any]] = [
+        {
+            "week": week(-2),
+            "goals": {"Projects": {"target_minutes": 240}, "Interviews": {"target_minutes": 150}},
+            "tests": [
+                {
+                    "goal": "Projects",
+                    "topic": "js-basics",
+                    "date": day(-2, 5),
+                    "score": 84,
+                    "method": "docs",
+                }
+            ],
+        },
+        {
+            "week": week(-1),
+            "goals": {"Projects": {"target_minutes": 300}, "Interviews": {"target_minutes": 210}},
+            "change": {
+                "kind": "none",
+                "what": "Baseline week",
+                "why": "Measure a normal week before changing anything",
+            },
+            "tests": [
+                {
+                    "goal": "Projects",
+                    "topic": "ts-fundamentals",
+                    "date": day(-1, 5),
+                    "score": 72,
+                    "method": "docs + exercises",
+                },
+                {
+                    "goal": "Interviews",
+                    "topic": "arrays",
+                    "date": day(-1, 6),
+                    "score": 55,
+                    "method": "video",
+                },
+            ],
+        },
+        {
+            "week": week(0),
+            "goals": {
+                "Projects": {
+                    "focus": "TypeScript + React fundamentals",
+                    "target_minutes": 300,
+                    "sessions": 4,
+                },
+                "Interviews": {
+                    "focus": "Graph problems + 3 applications",
+                    "target_minutes": 210,
+                    "sessions": 3,
+                },
+                "Spanish": {"focus": "Ser and estar", "target_minutes": 90, "sessions": 2},
+            },
+            "change": {
+                "kind": "length",
+                "what": "Weekday Interviews sessions 45 to 60 min",
+                "why": "Two 45-minute sessions ended mid-problem last week",
+            },
+        },
+    ]
+    for g in _DEMO_GOALS:
+        doc = GoalDoc.model_validate(g)
+        repo.upsert_goal_doc(
+            conn,
+            path=f"Goals/{doc.tag}.md",
+            kind="goal",
+            text_hash="demo",
+            parsed=doc,
+            error=None,
+            now=now - timedelta(hours=2),
+        )
+    for plan in plans:
+        week_doc = WeekDoc.model_validate({"version": 1, **plan})
+        repo.upsert_goal_doc(
+            conn,
+            path=f"Goals/Weeks/{week_doc.week}.md",
+            kind="week",
+            text_hash="demo",
+            parsed=week_doc,
+            error=None,
+            now=now - timedelta(hours=2),
+        )
+
+    # (weeks from now, weekday, hour, minutes, tag, what, outcome); outcome done only if it's past
+    rows = [
+        (-2, 1, 19, 120, "Projects", "JavaScript refresher", "done"),
+        (-2, 5, 10, 120, "Projects", "Git team workflow", "done"),
+        (-2, 6, 13, 150, "Interviews", "Resume update and tracker", "done"),
+        (-1, 0, 19, 60, "Projects", "Typed props", "done"),
+        (-1, 2, 19, 60, "Projects", "Next.js routing tutorial", "drop"),
+        (-1, 5, 10, 120, "Projects", "Weekend build", "done"),
+        (-1, 1, 19, 60, "Interviews", "Arrays and hashing in Java", "done"),
+        (-1, 6, 13, 150, "Interviews", "GitHub and LinkedIn refresh", "done"),
+        (0, 0, 7, 60, "Projects", "TypeScript fundamentals", "done"),
+        (0, 0, 19, 60, "Interviews", "Two graph problems in Java", "open"),
+        (0, 1, 19, 45, "Spanish", "Ser vs. estar drills", "miss"),
+        (0, 2, 19, 60, "Projects", "React fundamentals", "open"),
+        (0, 3, 19, 60, "Interviews", "LinkedIn headline", "drop"),
+        (0, 4, 19, 60, "Projects", "Volunteer sign-up mini-app", "open"),
+        (0, 4, 20, 60, "Interviews", "3 applications + 1 referral ask", "open"),
+        (0, 5, 10, 120, "Projects", "Weekend build", "open"),
+        (0, 5, 15, 45, "Spanish", "Weekend conversation practice", "open"),
+        (0, 6, 13, 90, "Interviews", "Weekend applications", "open"),
+    ]
+    done_when = {
+        "React fundamentals": "Tic-tac-toe works in TypeScript",
+        "Volunteer sign-up mini-app": "Merged through two pull requests",
+        "Two graph problems in Java": "Both accepted",
+    }
+    records, gone = [], []
+    for n, (w, wd, hour, minutes, tag, what, outcome) in enumerate(rows):
+        start = local_datetime(monday + timedelta(weeks=w, days=wd), hour)
+        end = start + timedelta(minutes=minutes)
+        sid = f"demo-{n}"
+        records.append(
+            GoalSessionRecord(
+                sid,
+                tag,
+                what,
+                start,
+                end,
+                minutes,
+                outcome in ("done", "open") and end <= now,
+                done_when.get(what),
+                sid,
+            )
+        )
+        if outcome == "drop":
+            gone.append(GoalSessionGone(sid, "deleted"))
+    repo.apply_goal_sessions(
+        conn,
+        records,
+        gone,
+        known_tags={str(g["tag"]) for g in _DEMO_GOALS},
+        now=now - timedelta(minutes=14),
     )

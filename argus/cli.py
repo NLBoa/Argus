@@ -88,6 +88,44 @@ def check_config(config: ConfigOpt = DEFAULT_CONFIG) -> None:
             )
 
 
+@app.command("check-goals")
+def check_goals(
+    path: Annotated[
+        Path, typer.Argument(help="The vault folder, or its goals folder itself.")
+    ] = Path("."),
+    folder: Annotated[str, typer.Option(help="The goals folder inside the vault.")] = "Goals",
+) -> None:
+    """Check goal and week files the way Argus reads them (D079). Needs no config or secrets."""
+    from argus.domain.goals import GoalDoc, WeekDoc
+    from argus.vault.goals_scan import check_dir
+
+    if (path / folder).is_dir():
+        base, prefix = path / folder, folder
+    else:
+        base, prefix = path, path.resolve().name
+    report = check_dir(base, prefix)
+    if not report.docs:
+        typer.echo(f"No goal files with an argus-goal or argus-week block in {base}")
+        raise typer.Exit(1)
+    for d in report.docs:
+        if isinstance(d.result, GoalDoc):
+            g = d.result
+            now = g.current.title if g.current else "every milestone done"
+            typer.echo(f"{g.tag}: now {now} ({g.status}, {len(g.topics)} topics)")
+        elif isinstance(d.result, WeekDoc):
+            targets = ", ".join(f"{t} {w.target_minutes} min" for t, w in d.result.goals.items())
+            typer.echo(f"{d.result.week}: {targets or 'no targets'}")
+    for rel, err in report.problems:
+        where = f"{rel}:{err.line}" if err.line else rel
+        field = f" {err.path}:" if err.path else ""
+        typer.echo(f"{where}:{field} {err.message}")
+    if report.problems:
+        n = len(report.problems)
+        typer.echo(f"{n} problem{'s' if n != 1 else ''}")
+        raise typer.Exit(1)
+    typer.echo("no problems")
+
+
 @db_app.command("migrate")
 def db_migrate(config: ConfigOpt = DEFAULT_CONFIG) -> None:
     """Create the database or apply pending migrations."""

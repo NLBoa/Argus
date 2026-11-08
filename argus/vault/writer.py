@@ -61,11 +61,24 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 class VaultWriter:
-    def __init__(self, root: Path, conn: sqlite3.Connection, clock: Clock) -> None:
+    def __init__(
+        self,
+        root: Path,
+        conn: sqlite3.Connection,
+        clock: Clock,
+        *,
+        read_only: tuple[str, ...] = (),
+    ) -> None:
         self.root = root
         self.conn = conn
         self.clock = clock
         self.log = WriteLog()
+        # Folders Argus only reads (the goals folder, D079): writing there is a bug.
+        self.read_only = tuple(f.strip("/") for f in read_only)
+
+    def _check_writable(self, rel: str) -> None:
+        if any(rel == f or rel.startswith(f + "/") for f in self.read_only):
+            raise ValueError(f"{rel} is in a read-only folder; Argus never writes there")
 
     # ---------------------------------------------------------------- reading
 
@@ -96,6 +109,7 @@ class VaultWriter:
     # ---------------------------------------------------------------- writing
 
     def write(self, rel: str, desired: DesiredNote) -> Plan:
+        self._check_writable(rel)
         current = self.read(rel)
         plan = plan_note(
             current, desired, self.stored_hashes(rel), allow=self.allowed(rel, current)
@@ -185,6 +199,7 @@ class VaultWriter:
         p = self.proposal(proposal_id)
         if p is None or p.status != "open":
             raise LookupError("This proposal is no longer open")
+        self._check_writable(p.path)
         current = self.read(p.path) or ""
         result = apply_proposal(current, p.base_hash, p.after)
         now = iso(self.clock.now())

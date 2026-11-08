@@ -22,6 +22,7 @@ from argus.collectors.base import CollectContext, Collector, CollectResult, RunS
 from argus.collectors.canvas_api import CanvasApiCollector
 from argus.collectors.canvas_ical import CanvasIcalCollector
 from argus.collectors.canvas_modules import CanvasModulesCollector
+from argus.collectors.flowsavvy import STATE_GOALS, FlowSavvyCollector, fetch_window, goals_state
 from argus.collectors.gradescope import GradescopeCollector
 from argus.collectors.http import AuthError, Fetcher
 from argus.collectors.piazza import PiazzaCollector
@@ -51,6 +52,7 @@ def default_collectors() -> list[Collector]:
         PiazzaEmailCollector(),
         UmdioCollector(),
         RunnaIcalCollector(),
+        FlowSavvyCollector(),
     ]
 
 
@@ -158,6 +160,9 @@ class SyncRunner:
             for c in self.collectors
             if c.source != Source.PIAZZA_EMAIL and self._wanted(c, ctx, only, force)
         ]
+        if any(c.source == Source.FLOWSAVVY for c in primary):
+            self._prime_flowsavvy()
+            ctx = self._context()
         started = self.clock.now()
         results = list(
             await asyncio.gather(*(run_collector(c, ctx, self.timeout) for c in primary))
@@ -201,6 +206,28 @@ class SyncRunner:
                 },
             )
         return report
+
+    def _prime_flowsavvy(self) -> None:
+        """Tell the FlowSavvy collector the known goal tags and which open sessions to look up if
+        the schedule stops listing them (D079). Collectors do no database I/O themselves."""
+        now = self.clock.now()
+        _, _, start, end = fetch_window(now)
+        with transaction(self.conn):
+            tags = repo.goal_tags(self.conn)
+            state = goals_state(
+                tags=tags, open_ids=repo.open_goal_session_ids(self.conn, start, end, tags=tags)
+            )
+            repo.set_source_state(self.conn, Source.FLOWSAVVY.value, STATE_GOALS, state, now)
+
+    def _persist_goal_sessions(self, result: CollectResult, now: datetime) -> None:
+        if result.goal_sessions or result.goal_gone:
+            repo.apply_goal_sessions(
+                self.conn,
+                result.goal_sessions,
+                result.goal_gone,
+                known_tags=repo.goal_tags(self.conn),
+                now=now,
+            )
 
     def _mark_absent(
         self,
@@ -284,6 +311,7 @@ class SyncRunner:
                     repo.set_grade(self.conn, grade, now)
                 repo.upsert_materials(self.conn, result.materials, ids, now)
                 touched = repo.upsert_posts(self.conn, result.posts, ids, now)
+                self._persist_goal_sessions(result, now)
                 if (
                     result.status is not RunStatus.ERROR
                 ):  # a suspicious listing is fetched again in full

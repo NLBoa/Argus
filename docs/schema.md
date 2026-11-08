@@ -56,6 +56,9 @@ Booleans are `0`/`1`, and `NULL` means unknown where noted. JSON columns are not
 | `item_overrides.basis` | 0008 | The official due date an override was made against; when an official source changes it, the override is dropped (review R1) |
 | `notifications.last_attempt_at` | 0008 | When delivery was last tried; failed sends retry with backoff until they expire (review R4) |
 
+| `goal_docs` | 0015 | Goal and week files from the vault's `Goals/` folder (D079), read each vault cycle and never written. Per path: `kind` `goal`/`week`, `doc_key` (tag or ISO week), `text_hash`, `good_json` (the last valid parse) and `good_at`, the current `error` with `error_line` and `error_path` (NULL when valid), `read_at`, and `missing_since` (the file left the vault) |
+| `goal_sessions` | 0015 | FlowSavvy tasks titled `[Tag] what` for a known goal tag (D079), keyed `external_id` (`itemId`, or `itemId@occurrenceDate`): `start_at`/`end_at` and `minutes` summed over the scheduled parts, `completed`, `done_when` (only that line of the notes), `gone_at` (FlowSavvy confirmed it was deleted or cancelled before it was done) and `moved_at` (it still exists but left the fetch window). Absence alone never sets either |
+
 ## items
 | Column | Notes |
 |---|---|

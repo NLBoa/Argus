@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import icon, empty_state, error_banner %}
+{% from "components/goals.html" import goal_track, week_meter, session_row, trend_bars, topic_table %}
+{#- The goals page (D079): read-only. Goals come from the vault's goal files; sessions and trends
+    from FlowSavvy (data-requires="goal_sessions"). -#}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">Goals</h1>
+  {% if data %}<p class="page-sub">{{ data.week_label }}.{% if data.summary %} <span data-requires="goal_sessions">{{ data.summary }}</span>{% endif %}</p>{% endif %}
+</div>
+{% if error %}
+  {{ error_banner(error, "/goals") }}
+{% else %}
+<div class="goals-layout">
+  <div class="goals-change">
+    <section class="panel panel-pad" aria-labelledby="change-heading">
+      <h2 class="goals-rail__title" id="change-heading">This week's change</h2>
+      {% if data.change %}
+        <p class="goals-change__what"><strong>{{ data.change.kind_label }}{% if data.change.kind != "none" %}:{% else %}.{% endif %}</strong> {{ data.change.what }}</p>
+        <p class="goals-change__why">Why: {{ data.change.why }}</p>
+      {% else %}
+        <p class="goals-change__why">No change set for this week.</p>
+      {% endif %}
+      {% if data.week_note %}<p class="goals-change__why">{{ data.week_note }}</p>{% endif %}
+      {% for p in data.problems if p.is_week %}
+      <p class="goal__stale">{{ icon("triangle-alert", "icon-sm") }}<span>{{ p.text }}{% if p.field %} ({{ p.field }}){% endif %}: {{ p.message }}.{% if p.href %} <a href="{{ p.href }}">Open {{ p.name }}</a>{% endif %}</span></p>
+      {% endfor %}
+    </section>
+  </div>
+
+  <div class="goals-main">
+    {% for p in data.problems if not p.showing_good and not p.is_week %}
+    <div class="panel panel-pad goal-problem" role="note">
+      <p class="goal-problem__title">{{ icon("triangle-alert", "icon-sm") }}{{ p.text }}</p>
+      <p class="text-sm text-muted">{% if p.field %}{{ p.field }}: {% endif %}{{ p.message }}. Fix it in Obsidian; Argus reads it again within 15 minutes.{% if p.href %} <a href="{{ p.href }}">Open {{ p.name }}</a>{% endif %}</p>
+    </div>
+    {% endfor %}
+    {% for g in data.goals %}
+    {% set problem = data.problems|selectattr("path", "equalto", g.path)|first %}
+    <section class="panel goal" aria-labelledby="{{ g.section_id }}">
+      <header class="goal__head">
+        <h2 class="section-title" id="{{ g.section_id }}">{{ g.tag }}</h2>
+        <p class="goal__aim">{{ g.aim }}</p>
+        {% if g.why %}<p class="goal__why">Why: {{ g.why }}</p>{% endif %}
+        {% if g.stale_text %}<p class="goal__stale">{{ icon("triangle-alert", "icon-sm") }}<span>{{ g.stale_text }}. {% if problem %}{{ problem.text }}{% if problem.field %} ({{ problem.field }}){% endif %}: {{ problem.message }}.{% if problem.href %} <a href="{{ problem.href }}">Open {{ problem.name }}</a>{% endif %}{% endif %}</span></p>{% endif %}
+      </header>
+
+      <div class="goal__block">
+        <h3 class="goal__label">Track</h3>
+        {{ goal_track(g.track, g.current) }}
+      </div>
+
+      {% if g.next %}
+      <div class="goal__block">
+        <h3 class="goal__label">Next up</h3>
+        <ul class="goal-next" role="list">
+          {% for n in g.next %}<li><p class="goal-next__what">{{ n.what }}</p>{% if n.done_when %}<p class="goal-next__done">Done when: {{ n.done_when }}</p>{% endif %}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if g.week %}
+      <div class="goal__block">
+        <h3 class="goal__label">This week{% if g.week.focus %} <span class="goal__focus">Focus: {{ g.week.focus }}</span>{% endif %}</h3>
+        {% if g.week.meter %}
+        <div data-requires="goal_sessions" class="goal-week">
+          {{ week_meter(g.week.meter) }}
+          <p class="goal-week__summary tnum">{{ g.week.summary }}{% if g.week.target_source == "scheduled" %} No target for this week, so the target is what's scheduled.{% endif %}</p>
+          {% if g.week.rows or g.week.dropped %}
+          <ul class="item-list m-0 p-0 list-none">
+            {% for s in g.week.rows %}{{ session_row(s, g.accent) }}{% endfor %}
+            {% for s in g.week.dropped %}{{ session_row(s, g.accent) }}{% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-sm text-muted">Nothing scheduled in FlowSavvy for {{ g.tag }} this week. Sessions titled "[{{ g.tag }}] what" show up here.</p>
+          {% endif %}
+          {% if g.on_plan_text %}<p class="goal__plan">{{ g.on_plan_text }}</p>{% endif %}
+        </div>
+        {% else %}
+        <p class="goal-week__summary tnum">{{ g.week.summary }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+    {% else %}
+    <div class="panel">{{ empty_state("list-checks", "No active goals", "Goals marked paused or done stay listed below. Set a goal's status to active in its file to bring it back.", level=2) }}</div>
+    {% endfor %}
+
+    {% if data.inactive %}
+    <details class="panel panel-pad goals-inactive">
+      <summary>Paused and finished <span class="section-count">{{ data.inactive|length }}</span></summary>
+      <ul class="goals-inactive__list" role="list">
+        {% for g in data.inactive %}<li><strong>{{ g.tag }}</strong> <span class="text-muted">{{ g.status|capitalize }}. {{ g.aim }}</span></li>{% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+
+  <div class="goals-topics">
+    <section aria-labelledby="topics-heading">
+      <h2 class="section-title" id="topics-heading">Topics</h2>
+      {% if data.topics %}
+        {{ topic_table(data.topics, data.topic_weeks) }}
+      {% else %}
+        <p class="text-sm text-muted">No weekend tests yet. After Saturday's tests, scores and reviews show here.</p>
+      {% endif %}
+      {% if data.next_new %}
+      <h3 class="goal__label goals-topics__new">Next new topics</h3>
+      <ul class="goals-topics__list" role="list">{% for tag, title in data.next_new %}<li><span class="goal-topics__goal">{{ tag }}</span> {{ title }}</li>{% endfor %}</ul>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+{% if data.sessions and data.goals %}
+<section class="goals-trends" aria-labelledby="trend-heading" data-requires="goal_sessions">
+  <h2 class="section-title" id="trend-heading">Trends <span class="section-sub">last 4 weeks</span></h2>
+  {% if data.trend %}
+  <div class="panel panel-pad">{{ trend_bars(data.trend) }}</div>
+  {% else %}
+  <p class="text-sm text-muted">{{ data.trend_note }}</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

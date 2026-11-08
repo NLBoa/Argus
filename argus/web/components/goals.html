@@ -1,0 +1,92 @@
+{% from "components/ui.html" import icon %}
+{#- Goals page pieces (D079). Each appears, in every state, on /styleguide. Status is an icon plus a
+    label (D065); teal marks only the current milestone and the next session; the goal's color is
+    the 3px stripe on its session rows. -#}
+
+{% set SESSION_ICONS = {"done": "circle-check", "scheduled": "clock", "not_done": "circle-alert", "dropped": "x", "moved": "calendar-clock"} %}
+{% set TOPIC_ICONS = {"reteach": "refresh-cw", "practice": "notebook-pen", "review_due": "calendar-clock", "review_later": "calendar-days", "kept": "circle-check"} %}
+
+{% macro goal_track(track, current) -%}
+<ol class="goal-track" aria-label="Track">
+  {% for m in track %}
+  <li class="goal-track__step" data-state="{{ m.state }}">
+    {%- if not loop.first %}{{ icon("chevron-right", "icon-sm goal-track__sep") }}{% endif -%}
+    {%- if m.state == "done" %}{{ icon("circle-check", "icon-sm") }}{% elif m.state == "current" %}{{ icon("circle-dot", "icon-sm") }}{% else %}<span class="goal-track__ring" aria-hidden="true"></span>{% endif -%}
+    <span>{{ m.title }}</span>
+    {%- if m.state == "done" %}<span class="visually-hidden">, done</span>{% elif m.state == "current" %}<span class="visually-hidden">, now</span>{% endif -%}
+  </li>
+  {% endfor %}
+</ol>
+{% if current %}<p class="goal-track__now"><strong>Now:</strong> {{ current.title }}.{% if current.done_when %} Done when: {{ current.done_when }}{% endif %}</p>
+{% elif track and track|selectattr("state", "equalto", "done")|list|length == track|length %}<p class="goal-track__now">Every milestone is done.</p>{% endif %}
+{%- endmacro %}
+
+{% macro week_meter(m) -%}
+<div class="goal-meter" role="img" aria-label="{{ m.label }}">
+  <span class="goal-meter__done" style="width: {{ m.done_pct }}%"></span>
+  <span class="goal-meter__scheduled" style="width: {{ m.scheduled_pct }}%"></span>
+  {% if m.target_pct %}<span class="goal-meter__target" style="left: {{ m.target_pct }}%"></span>{% endif %}
+</div>
+<p class="goal-meter__legend" aria-hidden="true"><span><i class="goal-key goal-key--done"></i>Done</span><span><i class="goal-key goal-key--scheduled"></i>Scheduled</span><span><i class="goal-key goal-key--target"></i>Target</span></p>
+{%- endmacro %}
+
+{% macro session_row(s, accent) -%}
+<li class="item-row goal-session" data-accent="{{ accent }}" data-state="{{ s.state }}"{% if s.is_next %} data-next="true"{% endif %}>
+  <div class="min-w-0">
+    <p class="item-row__title">{{ s.what }}</p>
+    {% if s.done_when %}<p class="item-row__meta">Done when: {{ s.done_when }}</p>{% endif %}
+  </div>
+  <div class="item-row__side">
+    <span class="goal-status" data-state="{{ 'next' if s.is_next else s.state }}">{{ icon(SESSION_ICONS[s.state], "icon-sm") }}{{ s.state_label }}</span>
+    <span class="item-row__rel">{{ s.day_label }}{% if s.state in ("scheduled", "not_done") %}, {{ s.time_label }}{% endif %}, {{ s.minutes_label }}</span>
+  </div>
+</li>
+{%- endmacro %}
+
+{% macro trend_bars(t) -%}
+<div class="goal-trend">
+  {% for row in t.rows %}
+  <div class="goal-trend__row">
+    <p class="goal-trend__tag">{{ row.tag }}</p>
+    <div class="goal-trend__bars" role="img" aria-label="{{ row.tag }}, minutes done by week: {% for b in row.bars %}{{ b.week_label }} {% if b.empty %}no data{% else %}{{ b.done }} of {{ b.target }}{{ ' so far' if b.partial }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}">
+      {% for b in row.bars %}
+      <div class="goal-trend__col" data-partial="{{ 'true' if b.partial else 'false' }}" data-empty="{{ 'true' if b.empty else 'false' }}">
+        <div class="goal-trend__plot">
+          <span class="goal-trend__bar" style="height: {{ b.done_pct }}%"></span>
+          {% if b.target %}<span class="goal-trend__target" style="bottom: {{ b.target_pct }}%"></span>{% endif %}
+        </div>
+        <span class="goal-trend__num tnum">{{ "–" if b.empty else b.done }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <div class="goal-trend__axis" aria-hidden="true"><span></span>{% for w in t.week_labels %}<span>{{ w }}{% if loop.last %} (so far){% endif %}</span>{% endfor %}</div>
+  <p class="goal-meter__legend" aria-hidden="true"><span><i class="goal-key goal-key--bar"></i>Minutes done</span><span><i class="goal-key goal-key--target"></i>That week's target</span></p>
+  <details class="wl__table">
+    <summary>Show as a table</summary>
+    <table class="data-table">
+      <caption class="visually-hidden">Minutes done and target by week</caption>
+      <thead><tr><th scope="col">Goal</th>{% for w in t.week_labels %}<th scope="col">{{ w }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in t.rows %}<tr><th scope="row">{{ row.tag }}</th>{% for b in row.bars %}<td class="tnum">{% if b.empty %}–{% else %}{{ b.done }} of {{ b.target }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+  </details>
+</div>
+{%- endmacro %}
+
+{% macro topic_table(rows, weeks) -%}
+<div class="goal-topics" role="region" aria-label="Test scores by topic" tabindex="0">
+  <table class="data-table">
+    <thead><tr><th scope="col">Topic</th>{% for w in weeks %}<th scope="col" class="goal-topics__week">{{ w }}</th>{% endfor %}<th scope="col">Next</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <th scope="row"><span class="goal-topics__goal">{{ r.goal }}</span> {{ r.title }}</th>
+        {% for c in r.cells %}<td class="tnum goal-topics__week">{{ c }}</td>{% endfor %}
+        <td><span class="goal-status" data-state="{{ 'overdue' if r.overdue else r.status }}">{{ icon("triangle-alert" if r.overdue else TOPIC_ICONS[r.status], "icon-sm") }}{{ r.status_label }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}

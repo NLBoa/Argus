@@ -32,7 +32,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 | Everything / what CI runs (no visual until the overhaul ends) | `make check` / `make check-ci` |
 | Deploy to the Pi / tail logs | `make deploy PI_HOST=argus-pi` / `make logs` · on the Pi: `sudo argus-admin <cmd>` |
 | Webhook / Claude connector (MCP) / file adder sign-in / backup / restore | `argus serve-webhook` · `argus serve-mcp` ([README](README.md#claude-connector-mcp)) · `argus drive-auth` ([runbook](docs/runbook.md#file-adder-google-drive)) · `argus backup` · `argus restore FILE` ([runbook](docs/runbook.md)) |
-| CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, …) |
+| CLI | `uv run argus --help` (`sync`, `list`, `serve`, `check-config`, `discover`, `check-goals <vault>` before pushing goal files, …) |
 
 ## Architecture map
 - `argus/clock.py`: the only wall-clock reader. `Clock`, `SystemClock`, `FakeClock`, local-time helpers.
@@ -53,7 +53,7 @@ Product behavior: `docs/SPEC.md` if present, otherwise the build prompt. Choices
 - `argus/sms.py`: replies (parse → AI fallback → ask once → act). `argus/web/webhook.py`: the separate public
   webhook app (D043). `argus/web/mcp_server.py`, `argus/feed.py`: the read-only Claude connector (D073), with
   `domain/changes.py` netting the `item_changes` log. `argus/backup.py`: snapshots, prune, off-device copy, restore.
-- File adder (D074): `domain/inbox_name.py` (the name format), `planner/suggestions.py`, `web/routes/files.py`, `argus/drive.py`, `drive_auth.py`.
+- File adder (D074): `domain/inbox_name.py` (the name format), `planner/suggestions.py`, `web/routes/files.py`, `argus/drive.py`, `drive_auth.py`. Goals (D079): `domain/goals.py` (files), `planner/goals.py` (rules), `vault/goals_scan.py`, `collectors/flowsavvy.py`, `argus/goals.py` (Today, weekly note), `web/goals_data.py`, `feed.goals`.
 - `argus/worker.py`: the every-minute loop: sync → announcements → estimates → study → plan → reminders → vault, each isolated.
 - `argus/announcements.py` (posts → findings → apply / hold, plus confirm and dismiss), `argus/estimates.py` (AI or fallback,
   overrides), `argus/planning.py` (`compute`: remaining, load, risk, queue, study time, window forecast; `replan`:
@@ -76,7 +76,7 @@ questions/flashcards · `practice_attempts` results + confidence · `exams` scop
 `queue_prefs` pins and skips · `remaining_marks` time left · `window_plans` each window's split ·
 `notifications` every send, unique idempotency key · `inbound_messages` replies · `vault_regions`
 path/region/hash/commit · `proposals` pending edits to user text · `sync_runs` collector health ·
-`settings` choices made in Settings (the notice lead time) · `item_changes` new/moved/removed items, for `get_changes`.
+`settings` choices made in Settings (the notice lead time) · `item_changes` new/moved/removed items, for `get_changes` · `goal_docs` goal/week files (last valid parse + error) · `goal_sessions` FlowSavvy sessions.
 
 ## Conventions
 - **Time.** Store UTC only (ISO 8601 with `Z`/offset). Convert to `America/New_York` only at
@@ -116,7 +116,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - Funnel allows ports 443/8443/10000 and opens a whole port: MCP on 443, dashboard on tailnet-only 8443, webhook on
   10000 (D073). Never commit the real `*.ts.net` name (gitleaks blocks it). Unknown Host → 421 (`mcp.allowed_hosts`).
 - Drive: `drive.file` can't see a folder Argus didn't create (404); Testing-status OAuth tokens die in 7 days; error bodies echo the folder ID (never log them). Funnel traffic carries `Tailscale-Funnel-Request: ?1` (the file adder 404s on it).
-- Runna (D078): the feed URL (`cal.runna.com/<token>.ics`) is the token (gitleaks `runna-ical-feed`). Runs carry `X-WORKOUT-ESTIMATED-DURATION` (s); a finished workout *replaces* its planned event under a new UID (`COMPLETED_PLAN_WORKOUT-`, the runner matches it back); `COMPLETED_NON_PLAN_WORKOUT-` is ignored; DTSTAMP is the fetch time; real events carry LOCATION/GEO (never in fixtures).
+- Runna (D078): the feed URL (`cal.runna.com/<token>.ics`) is the token (gitleaks `runna-ical-feed`). Runs carry `X-WORKOUT-ESTIMATED-DURATION` (s); a finished workout *replaces* its planned event under a new UID (`COMPLETED_PLAN_WORKOUT-`, the runner matches it back); `COMPLETED_NON_PLAN_WORKOUT-` is ignored; DTSTAMP is the fetch time; real events carry LOCATION/GEO (never in fixtures). FlowSavvy (D079): the key has no read-only scope, so GET only; offset-less local times; no completion time; limits shared with the app, so a 429 is never retried; a session missing from the schedule is looked up, never dropped on absence.
 - Twilio signs the exact public URL it posts to: `notifications.webhook_url` must match it character for character.
   STOP/START/HELP are Twilio's (Argus stays silent). `[` and `]` are GSM-7 extension characters (2 septets each).
 
@@ -139,7 +139,7 @@ path/region/hash/commit · `proposals` pending edits to user text · `sync_runs`
 - Canvas files are linked, never copied, into the vault. Layout and the course folder note: D035.
 - Nothing is published unverified: concepts and practice exist only after the verifier's verdict is applied
   (`domain/study.py`). Without AI the vault still gets course, module, assignment, exam, Today, and weekly notes.
-- `Argus/Inbox/` is read-only for Argus (D038). Flashcards keep Obsidian_to_Anki ids ([docs/anki.md](docs/anki.md)).
+- `Argus/Inbox/` and `Goals/` are read-only for Argus (D038, D079). Flashcards keep Obsidian_to_Anki ids ([docs/anki.md](docs/anki.md)).
 - Vault cycles are serialized by a file lock (D039). Tests must point `paths` at a temp dir, never `var/`.
 
 ## UI rules

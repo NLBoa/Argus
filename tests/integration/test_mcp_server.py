@@ -13,8 +13,17 @@ from starlette.testclient import TestClient
 
 from argus.clock import FakeClock
 from argus.collectors.runna_ical import run_due
-from argus.config import AppConfig, MCPConfig, RunnaConfig, Secrets
-from argus.domain.models import ItemKind, MeetingRecord, Source, SourceItem, Weekday
+from argus.config import AppConfig, GoalsConfig, MCPConfig, RunnaConfig, Secrets
+from argus.domain.goals import GoalDoc, WeekDoc
+from argus.domain.models import (
+    GoalSessionGone,
+    GoalSessionRecord,
+    ItemKind,
+    MeetingRecord,
+    Source,
+    SourceItem,
+    Weekday,
+)
 from argus.runs import sync_run_estimates
 from argus.store import repo
 from argus.store.db import transaction
@@ -402,3 +411,194 @@ async def test_runs_hidden_when_runna_not_set_up(  # Review Focus 4
         app_config, clock, tmp_path / "argus.db", "get_changes", {"since": "2026-10-01T00:00:00Z"}
     )
     assert not [c for c in changes.structuredContent["changes"] if c["course"] == "RUN"]
+
+
+# --- get_goals (D079) ---------------------------------------------------------------------------
+
+
+GOAL = {
+    "version": 1,
+    "tag": "Woodwork",
+    "aim": "Build a bookshelf",
+    "why": "Make something that lasts",
+    "track": [
+        {"id": "tools", "title": "Hand tools", "status": "done"},
+        {"id": "joints", "title": "Joints", "status": "current", "done_when": "Three dovetails"},
+        {"id": "finish", "title": "Finishing", "status": "next"},
+    ],
+    "next": [{"what": "Practice dovetails", "done_when": "No gaps"}],
+    "topics": [
+        {"id": "safety", "title": "Shop safety"},
+        {"id": "dovetails", "title": "Dovetails", "after": ["safety"]},
+    ],
+}
+
+
+def goals_config(app_config: AppConfig) -> AppConfig:
+    return config(app_config).model_copy(update={"goals": GoalsConfig()})
+
+
+def seed_goals(db: sqlite3.Connection, now: datetime, *, files: bool = True) -> None:
+    from argus.planner.goals import week_of
+
+    if not files:
+        return
+    week = week_of(now)
+    with transaction(db):
+        repo.upsert_goal_doc(
+            db,
+            path="Goals/Woodwork.md",
+            kind="goal",
+            text_hash="h",
+            parsed=GoalDoc.model_validate(GOAL),
+            error=None,
+            now=now,
+        )
+        repo.upsert_goal_doc(
+            db,
+            path=f"Goals/Weeks/{week}.md",
+            kind="week",
+            text_hash="h",
+            parsed=WeekDoc.model_validate(
+                {
+                    "version": 1,
+                    "week": week,
+                    "change": {"kind": "none", "what": "Baseline week", "why": "Measure first"},
+                    "goals": {
+                        "Woodwork": {"focus": "Joints", "target_minutes": 180, "sessions": 3}
+                    },
+                }
+            ),
+            error=None,
+            now=now,
+        )
+        start = now + timedelta(hours=2)
+        repo.apply_goal_sessions(
+            db,
+            [
+                GoalSessionRecord(
+                    "s1",
+                    "Woodwork",
+                    "Glue up",
+                    start,
+                    start + timedelta(hours=1),
+                    60,
+                    False,
+                    "Square to 1 mm",
+                    "h",
+                ),
+                GoalSessionRecord(
+                    "s2",
+                    "Woodwork",
+                    "Sharpen",
+                    start,
+                    start + timedelta(minutes=30),
+                    30,
+                    False,
+                    None,
+                    "h2",
+                ),
+            ],
+            [GoalSessionGone("s2", "deleted")],
+            known_tags={"Woodwork"},
+            now=now,
+        )
+
+
+async def goals_session(app_config: AppConfig, clock: FakeClock, db_path: Path, *, key: bool):
+    sec = secrets().model_copy(
+        update={"flowsavvy_api_key": SecretStr("fs_FAKEKEY") if key else None}
+    )
+    server = build_server(goals_config(app_config), sec, clock, db_path)
+    async with create_connected_server_and_client_session(server) as session:
+        tools = {t.name: t for t in (await session.list_tools()).tools}
+        result = await session.call_tool("get_goals", {}) if "get_goals" in tools else None
+    return tools, result
+
+
+async def test_get_goals_listed_read_only_with_schema(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    seed_goals(db, clock.now())
+    tools, _ = await goals_session(app_config, clock, tmp_path / "argus.db", key=True)
+    t = tools["get_goals"]
+    assert t.annotations is not None and t.annotations.readOnlyHint is True
+    assert t.outputSchema is not None
+
+
+async def test_get_goals_absent_without_goals_block(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:  # Review Focus 4
+    server = build_server(config(app_config), secrets(), clock, tmp_path / "argus.db")
+    async with create_connected_server_and_client_session(server) as session:
+        names = [t.name for t in (await session.list_tools()).tools]
+    assert "get_goals" not in names
+
+
+async def test_get_goals_empty_list_without_files(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    _, result = await goals_session(app_config, clock, tmp_path / "argus.db", key=True)
+    out = result.structuredContent
+    assert out["goals"] == [] and out["problems"] == []
+
+
+async def test_get_goals_shape_week_one(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    seed_goals(db, clock.now())
+    _, result = await goals_session(app_config, clock, tmp_path / "argus.db", key=True)
+    out = result.structuredContent
+    assert out["change"] == {"kind": "none", "what": "Baseline week", "why": "Measure first"}
+    assert out["week_plan_missing"] is False
+    assert out["rules"] == {
+        "reteach_below": 60,
+        "practice_below": 80,
+        "review_ladder_days": [7, 14, 28],
+        "on_plan_share": 0.8,
+        "on_plan_weeks": 2,
+    }
+    (g,) = out["goals"]
+    assert (g["tag"], g["status"], g["current"], g["next_milestone"]) == (
+        "Woodwork",
+        "active",
+        "joints",
+        "finish",
+    )
+    assert g["next"] == [{"what": "Practice dovetails", "done_when": "No gaps"}]
+    w = g["week"]
+    assert (w["focus"], w["target_minutes"], w["target_source"]) == ("Joints", 180, "plan")
+    assert (
+        w["done_minutes"],
+        w["scheduled_minutes"],
+        w["sessions_planned"],
+        w["sessions_done"],
+    ) == (0, 60, 3, 0)
+    assert [s["what"] for s in w["sessions"]] == ["Glue up"]
+    assert (
+        w["sessions"][0]["state"] == "scheduled"
+        and w["sessions"][0]["done_when"] == "Square to 1 mm"
+    )
+    assert [s["what"] for s in w["dropped"]] == ["Sharpen"]
+    assert g["on_plan"] == {"streak_weeks": 0, "may_grow": False, "last_share": None}
+    assert [t["id"] for t in g["topics"]["next_new"]] == ["safety"]
+    assert g["topics"]["review_due"] == [] and g["topics"]["reteach"] == []
+
+
+async def test_get_goals_without_flowsavvy_has_targets_only(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    seed_goals(db, clock.now())
+    _, result = await goals_session(app_config, clock, tmp_path / "argus.db", key=False)
+    w = result.structuredContent["goals"][0]["week"]
+    assert w["sessions_tracked"] is False and w["sessions"] == [] and w["done_minutes"] is None
+    assert w["target_minutes"] == 180
+
+
+async def test_get_goals_never_has_notes_or_key(
+    app_config: AppConfig, clock: FakeClock, tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    seed_goals(db, clock.now())
+    _, result = await goals_session(app_config, clock, tmp_path / "argus.db", key=True)
+    text = str(result.structuredContent)
+    assert "fs_FAKEKEY" not in text and "Goal:" not in text

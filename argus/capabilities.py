@@ -28,6 +28,7 @@ AI = "ai"  # pseudo-source: an Anthropic key (or an injected transport in tests 
 # pseudo-source: the planner inbox folder and its Google OAuth credentials (or an injected
 # uploader in tests and the demo), D074
 DRIVE = "drive"
+GOALS = "goals"  # pseudo-source: a `goals:` block in config.yaml (D079)
 
 
 class Feature(StrEnum):
@@ -44,6 +45,8 @@ class Feature(StrEnum):
     STUDY_GENERATION = "study_generation"  # concept notes and practice from course files
     FILE_ADDER = "file_adder"  # send files to the morning planner's Drive inbox (D074)
     RUNS = "runs"  # Runna workouts as assignments in the Running course (D078)
+    GOALS = "goals"  # the goals page: goal and week files in the vault (D079)
+    GOAL_SESSIONS = "goal_sessions"  # FlowSavvy sessions on the goals page (D079)
 
 
 def _any(*options: set[str]) -> tuple[frozenset[str], ...]:
@@ -66,6 +69,8 @@ FEATURES: Mapping[Feature, tuple[frozenset[str], ...]] = {
     Feature.STUDY_GENERATION: _any({"canvas_modules", AI}),
     Feature.FILE_ADDER: _any({DRIVE}),
     Feature.RUNS: _any({"runna_ical"}),
+    Feature.GOALS: _any({GOALS}),
+    Feature.GOAL_SESSIONS: _any({GOALS, "flowsavvy"}),
 }
 
 
@@ -133,6 +138,11 @@ class Capabilities:
         Content the AI already produced stays visible."""
         return replace(self, ai_calls_left=self.has(Feature.AI) and spent < cap)
 
+    def without(self, *features: Feature) -> Capabilities:
+        """These capabilities minus some features: a feature set up in config whose data isn't
+        there yet (no goal files, D079) is hidden like one that isn't set up."""
+        return replace(self, features=self.features - frozenset(features))
+
 
 def drive_configured(config: AppConfig, secrets: Secrets) -> bool:
     """The file adder has a folder and all three Google OAuth credentials (D074)."""
@@ -159,6 +169,8 @@ def derive(
         on.add(AI)
     if drive or drive_configured(config, secrets):
         on.add(DRIVE)
+    if config.goals is not None:
+        on.add(GOALS)
     features = frozenset(f for f, options in FEATURES.items() if any(o <= on for o in options))
     piazza = sources.get("piazza", False) or sources.get("piazza_email", False)
     courses = {

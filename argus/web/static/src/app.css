@@ -498,6 +498,106 @@
   .practice-card[data-result="correct"] { border-color: var(--ok); }
   .practice-card[data-result="incorrect"] { border-color: var(--overdue); }
 
+  /* ------------------------------------------------------------ goals (D079) */
+  .today-goal { order: 3; flex-basis: 100%; margin-top: -0.25rem; font-size: var(--text-sm); }
+  .goals-layout { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 1fr); grid-template-areas: "change" "main" "topics"; align-items: start; }
+  @media (min-width: 64rem) {
+    .goals-layout { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-areas: "main change" "main topics"; grid-template-rows: auto 1fr; column-gap: 2rem; }
+  }
+  .goals-change { grid-area: change; }
+  .goals-main { grid-area: main; display: grid; gap: 1.5rem; min-width: 0; }
+  .goals-topics { grid-area: topics; min-width: 0; }
+  .goals-rail__title { font-family: var(--font-display); font-weight: 650; font-size: var(--text-base); margin-bottom: 0.375rem; }
+  .goals-change__what { line-height: 1.4; }
+  .goals-change__why { color: var(--muted); font-size: var(--text-sm); margin-top: 0.25rem; }
+  .goal { padding: 1.25rem 1.25rem 1rem; display: grid; gap: 1.25rem; }
+  .goal__head .section-title { margin-bottom: 0.25rem; }
+  .goal__aim { font-size: var(--text-base); line-height: 1.45; max-width: 60ch; }
+  .goal__why { color: var(--muted); font-size: var(--text-sm); margin-top: 0.125rem; max-width: 60ch; }
+  .goal__stale { display: flex; gap: 0.375rem; align-items: flex-start; margin-top: 0.5rem; font-size: var(--text-sm); color: var(--ink); }
+  .goal__stale .icon { color: var(--at-risk); flex: none; margin-top: 0.15rem; }
+  .goal__label { font-size: var(--text-sm); font-weight: 700; color: var(--ink); margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
+  .goal__focus { font-weight: 400; color: var(--muted); }
+  .goal__plan { margin-top: 0.75rem; font-size: var(--text-sm); color: var(--muted); }
+  .goal-problem__title { display: flex; align-items: center; gap: 0.375rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .goal-problem__title .icon { color: var(--at-risk); }
+
+  .goal-track { display: flex; flex-direction: column; gap: 0.375rem; }
+  @media (min-width: 48rem) { .goal-track { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; } }
+  .goal-track__step { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.9375rem; color: var(--muted); }
+  .goal-track__step[data-state="done"] .icon { color: var(--ok); }
+  .goal-track__step[data-state="current"] { color: var(--brand); font-weight: 700; }
+  .goal-track__sep { display: none; color: var(--muted); }
+  @media (min-width: 48rem) { .goal-track__sep { display: inline-block; } }
+  .goal-track__ring { width: 0.8rem; height: 0.8rem; margin: 0 0.075rem; border-radius: 50%; border: 1.5px solid var(--muted); flex: none; }
+  .goal-track__now { margin-top: 0.5rem; font-size: var(--text-sm); color: var(--muted); }
+  .goal-track__now strong { color: var(--ink); }
+
+  .goal-next { display: grid; gap: 0.5rem; }
+  .goal-next__what { font-weight: 650; line-height: 1.35; }
+  .goal-next__done { font-size: var(--text-sm); color: var(--muted); }
+
+  .goal-week { display: grid; gap: 0.5rem; }
+  .goal-week__summary { font-size: var(--text-sm); }
+  .goal-meter { position: relative; height: 0.75rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); display: flex; overflow: visible; }
+  .goal-meter__done { background: var(--ok); border-radius: 999px 0 0 999px; }
+  .goal-meter__scheduled { box-shadow: inset 0 0 0 1.5px var(--muted); border-radius: 0 999px 999px 0; }
+  .goal-meter__target { position: absolute; top: -0.25rem; bottom: -0.25rem; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+  .goal-meter__legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: var(--text-xs); color: var(--muted); }
+  .goal-meter__legend span { display: inline-flex; align-items: center; gap: 0.375rem; }
+  .goal-key { display: inline-block; width: 0.875rem; height: 0.5rem; border-radius: 2px; }
+  .goal-key--done { background: var(--ok); }
+  .goal-key--bar { background: var(--muted); }
+  .goal-key--scheduled { box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .goal-key--target { width: 2px; height: 0.75rem; background: var(--ink); }
+
+  .goal-status { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8125rem; font-weight: 700; white-space: nowrap; color: var(--ink); }
+  .goal-status[data-state="done"] { color: var(--ok); }
+  .goal-status[data-state="next"] { color: var(--brand); }
+  .goal-status[data-state="not_done"], .goal-status[data-state="reteach"] { color: var(--watch); }
+  .goal-status[data-state="dropped"], .goal-status[data-state="moved"] { color: var(--muted); }
+  .goal-status[data-state="overdue"] { color: var(--at-risk); }
+  .goal-session[data-state="dropped"] .item-row__title, .goal-session[data-state="moved"] .item-row__title { color: var(--muted); font-weight: 600; }
+  .goal-session[data-state="done"] .item-row__title { font-weight: 600; }
+
+  .goals-inactive > summary { cursor: pointer; font-weight: 700; min-height: 1.5rem; }
+  .goals-inactive__list { display: grid; gap: 0.375rem; margin-top: 0.75rem; font-size: var(--text-sm); }
+
+  .goal-topics { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+  .goal-topics .data-table th, .goal-topics .data-table td { white-space: nowrap; }
+  .goal-topics .data-table tbody th { white-space: normal; min-width: 10rem; }
+  .goal-topics__goal { display: block; font-size: var(--text-xs); color: var(--muted); font-weight: 650; }
+  .goals-topics__new { margin-top: 1rem; }
+  .goals-topics__list { display: grid; gap: 0.5rem; font-size: var(--text-sm); }
+  .goal-topics .data-table td:last-child { white-space: normal; min-width: 9rem; }
+  .goal-topics .goal-status { white-space: normal; align-items: flex-start; }
+  .goal-topics .goal-status .icon { margin-top: 0.15rem; flex: none; }
+  /* Narrow columns keep the topic and what's next; the scores are in each week's file. */
+  @media (max-width: 47.99rem), (min-width: 64rem) and (max-width: 89.99rem) { .goal-topics__week { display: none; } }
+  @media (max-width: 39.99rem) {
+    .goal-session { grid-template-columns: minmax(0, 1fr); }
+    .goal-session .item-row__side { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: baseline; text-align: left; }
+  }
+
+  .goals-trends { margin-top: 2rem; }
+  .goal-trend { display: grid; gap: 0.75rem; }
+  .goal-trend__row { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 0.75rem; align-items: end; }
+  .goal-trend__tag { font-weight: 700; font-size: var(--text-sm); padding-bottom: 1.25rem; overflow-wrap: anywhere; }
+  .goal-trend__bars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+  .goal-trend__col { display: grid; gap: 0.25rem; justify-items: center; }
+  .goal-trend__plot { position: relative; width: 100%; max-width: 4rem; height: 3.5rem; border-bottom: 1px solid var(--line); }
+  .goal-trend__bar { position: absolute; left: 20%; right: 20%; bottom: 0; background: var(--muted); border-radius: 2px 2px 0 0; }
+  .goal-trend__col[data-partial="true"] .goal-trend__bar { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .goal-trend__target { position: absolute; left: 8%; right: 8%; height: 2px; margin-bottom: -1px; background: var(--ink); }
+  .goal-trend__num { font-size: var(--text-xs); color: var(--muted); }
+  .goal-trend__col[data-empty="true"] .goal-trend__plot { border-bottom-style: dashed; }
+  .goal-trend__axis { display: grid; grid-template-columns: 6rem repeat(4, minmax(0, 1fr)); gap: 0.75rem; font-size: var(--text-xs); color: var(--muted); text-align: center; }
+  @media (forced-colors: active) {
+    .goal-meter__done, .goal-key--done { background: CanvasText; }
+    .goal-meter__target, .goal-trend__target, .goal-key--target { background: Highlight; }
+    .goal-trend__bar { background: GrayText; }
+  }
+
   /* ------------------------------------------------------------ readiness meter */
   .readiness { display: grid; gap: 0.375rem; }
   .readiness__bar { display: flex; height: 0.625rem; border-radius: 999px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }

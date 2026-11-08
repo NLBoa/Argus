@@ -26,6 +26,7 @@ from argus.domain.status import awaiting_confirmation
 from argus.domain.titles import normalize_title
 from argus.estimates import effective_estimates
 from argus.exams import PracticeRow, concept_readiness, practice_items
+from argus.goals import weekly_goal_lines
 from argus.logging import get_logger
 from argus.planning import Planning, busy_windows, compute
 from argus.reminders.text import hours_short
@@ -33,6 +34,7 @@ from argus.store import repo
 from argus.store.db import iso, parse_iso, transaction
 from argus.vault import layout, render
 from argus.vault.gitsync import GitSync, SyncResult
+from argus.vault.goals_scan import scan_goals
 from argus.vault.writer import VaultWriter, _atomic_write
 
 log = get_logger(__name__)
@@ -465,7 +467,8 @@ class Builder:
                 (iso(start), iso(end)),
             )
         ]
-        self.writer.write(layout.weekly(day), render.weekly_note(day, due, changes))
+        goals = weekly_goal_lines(self.conn, self.caps, day, now)
+        self.writer.write(layout.weekly(day), render.weekly_note(day, due, changes, goals))
 
     def _proposals(self) -> None:
         rows = [(p.id, p.path, p.reason, p.diff) for p in self.writer.proposals()]
@@ -533,10 +536,13 @@ def run_cycle(
     apply an approved proposal to the latest version of the note)."""
     started = clock.now()
     root = config.paths.vault_dir
-    writer = VaultWriter(root, conn, clock)
+    goals = config.goals
+    writer = VaultWriter(root, conn, clock, read_only=(goals.folder,) if goals else ())
 
     def write() -> str:
         scan_inbox(conn, root, clock.now())
+        if goals is not None:
+            scan_goals(conn, root, goals.folder, clock.now())
         if before is not None:
             before(writer)
         return Builder(conn, config, clock, writer, caps).build()

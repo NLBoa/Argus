@@ -24,6 +24,15 @@ from argus.planner.risk import RiskLevel
 from argus.planner.workload import CurveDay
 from argus.web.deps import STATIC_DIR
 from argus.web.format import due_text
+from argus.web.goals_data import (
+    MeterView,
+    MilestoneView,
+    SessionView,
+    TopicRowView,
+    TrendBar,
+    TrendRow,
+    TrendView,
+)
 from argus.web.viewmodels import (
     Alert,
     CourseView,
@@ -265,6 +274,7 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
         ),
     ]
     return {
+        "goals": goal_samples(now),
         "courses": [
             *courses.values(),
             CourseView("HIST289", "rose"),
@@ -292,4 +302,135 @@ def styleguide_samples(now: datetime) -> dict[str, Any]:
                 )
             ],
         ),
+    }
+
+
+def goal_samples(now: datetime) -> dict[str, Any]:
+    """Every goals-page state for /styleguide (D079)."""
+    m = MilestoneView
+    tracks = {
+        "Nothing done yet": [
+            m("Hand tools", "current", "Three clean cuts"),
+            m("Joints", "next", None),
+        ],
+        "One done": [
+            m("Hand tools", "done", None),
+            m("Joints", "current", "Three clean dovetails"),
+            m("Finishing", "next", None),
+        ],
+        "All done": [m("Hand tools", "done", None), m("Joints", "done", None)],
+    }
+
+    def s(
+        what: str, state: str, label: str, hours: int, *, minutes: int = 60, nxt: bool = False
+    ) -> SessionView:
+        at = now + timedelta(hours=hours)
+        return SessionView(
+            what,
+            f"{to_local(at):%a %b} {to_local(at).day}",
+            "7 pm",
+            f"{minutes} min",
+            state,
+            label,
+            nxt,
+            "Two joints with no gaps" if nxt else None,
+            at,
+        )
+
+    sessions = [
+        s("Practice dovetails", "done", "Done", -48),
+        s("Glue up the carcass", "scheduled", "Next", 2, nxt=True),
+        s("Weekend build", "scheduled", "Scheduled", 40, minutes=120),
+        s("Sand the shelves", "not_done", "Not done", -20),
+        s("Sharpen chisels", "dropped", "Dropped", -30, minutes=45),
+        s("Finish oil test", "moved", "Moved", -10, minutes=45),
+    ]
+    meters = {
+        "Week 1, nothing done": MeterView(0, 75, 100, "0 of 240 minutes done, 180 more scheduled"),
+        "Mid-week": MeterView(40, 35, 100, "120 of 300 minutes done, 105 more scheduled"),
+        "Missed the target": MeterView(50, 0, 100, "120 of 240 minutes done, 0 more scheduled"),
+        "Past the target": MeterView(100, 0, 83.33, "360 of 300 minutes done, 0 more scheduled"),
+    }
+
+    def bars(*vals: tuple[int, int, bool]) -> list[TrendBar]:
+        weeks = ["W46", "W47", "W48", "W49"][-len(vals) :]
+        return [
+            TrendBar(w, d, tg, p, round(100 * d / 300, 2), round(100 * tg / 300, 2))
+            for w, (d, tg, p) in zip(weeks, vals, strict=True)
+        ]
+
+    trend = TrendView(
+        ["W46", "W47", "W48", "W49"],
+        [
+            TrendRow(
+                "Woodwork",
+                "olive",
+                bars((240, 300, False), (300, 300, False), (150, 300, False), (120, 300, True)),
+            ),
+            TrendRow(
+                "Spanish",
+                "plum",
+                bars((105, 105, False), (60, 105, False), (90, 120, False), (0, 120, True)),
+            ),
+        ],
+        300,
+    )
+    dash = "\N{EN DASH}"
+    topics = [
+        TopicRowView(
+            "Woodwork",
+            "olive",
+            "Shop safety",
+            ["72", "85", dash, dash],
+            "review_due",
+            "Review overdue: due Nov 28",
+            True,
+        ),
+        TopicRowView(
+            "Woodwork",
+            "olive",
+            "Dovetails",
+            [dash, "55", "78", dash],
+            "practice",
+            "Practice more",
+            False,
+        ),
+        TopicRowView(
+            "Spanish",
+            "plum",
+            "Ser and estar",
+            ["84", dash, "88", dash],
+            "review_later",
+            "Review Dec 12",
+            False,
+        ),
+        TopicRowView(
+            "Spanish",
+            "plum",
+            "Past tense",
+            ["55", dash, dash, dash],
+            "reteach",
+            "Re-teach with something other than \u201cvideo\u201d",
+            False,
+        ),
+        TopicRowView(
+            "Woodwork", "olive", "Sharpening", ["82", "85", "90", "91"], "kept", "Kept", False
+        ),
+        TopicRowView(
+            "Woodwork",
+            "olive",
+            "Finishing oils",
+            ["90", dash, dash, dash],
+            "review_due",
+            "Review due Dec 5",
+            False,
+        ),
+    ]
+    return {
+        "tracks": tracks,
+        "sessions": sessions,
+        "meters": meters,
+        "trend": trend,
+        "topics": topics,
+        "topic_weeks": ["W46", "W47", "W48", "W49"],
     }

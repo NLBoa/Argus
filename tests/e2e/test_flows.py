@@ -352,7 +352,9 @@ def test_more_menu_keyboard_path(page: Page, base_url: str) -> None:
     expect(nav.get_by_role("link", name=re.compile("^Proposals"))).to_be_hidden()
 
 
-@pytest.mark.parametrize("path", ["/today", "/upcoming", "/workload", "/settings", "/exams/5"])
+@pytest.mark.parametrize(
+    "path", ["/today", "/upcoming", "/workload", "/goals", "/settings", "/exams/5"]
+)
 def test_tab_bar_never_covers_the_last_control(page: Page, base_url: str, path: str) -> None:
     """viewport-fit=cover: padding of tab bar + safe area + 1rem keeps the last control clear."""
     page.set_viewport_size({"width": 390, "height": 844})

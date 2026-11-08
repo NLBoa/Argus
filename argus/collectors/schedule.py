@@ -64,6 +64,7 @@ POLICIES: Mapping[Source, Policy] = {
     Source.PIAZZA: Every(HALF_HOUR, timedelta(minutes=12)),
     Source.RUNNA_ICAL: Every(HALF_HOUR, timedelta(minutes=15)),
     Source.PIAZZA_EMAIL: Every(HALF_HOUR, timedelta(minutes=18)),
+    Source.FLOWSAVVY: Every(HALF_HOUR, timedelta(minutes=21)),
     Source.CANVAS_API: Every(HALF_HOUR, timedelta(minutes=24)),
     Source.CANVAS_MODULES: DailyLocal(time(3, 0)),
     Source.UMDIO: WeeklyLocal(Weekday.SUN, time(4, 0)),

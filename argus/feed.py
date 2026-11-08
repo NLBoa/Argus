@@ -14,11 +14,27 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from argus.clock import ensure_utc, to_local
-from argus.config import RUN_CODE
+from argus.config import RUN_CODE, AppConfig
 from argus.domain.changes import summarize_changes
+from argus.domain.goals import WeekDoc, week_monday, week_problems
 from argus.domain.models import Item, ItemKind, ItemStatus, MeetingRecord, Source
 from argus.domain.titles import is_project
 from argus.estimates import effective_estimates
+from argus.goals import goal_set, on_plan_history, order_goals
+from argus.planner.goals import (
+    GoalRules,
+    Session,
+    TopicState,
+    WeekProgress,
+    next_new,
+    on_plan,
+    topic_states,
+    trend,
+    week_bounds,
+    week_key,
+    week_of,
+    week_progress,
+)
 from argus.store import repo
 
 ItemType = Literal["assignment", "quiz", "exam", "project", "event", "run", "slides", "file"]
@@ -300,3 +316,281 @@ def changes(conn: sqlite3.Connection, now: datetime, since: datetime) -> Changes
         for item, base in zip(changed, _items_out(conn, changed, now), strict=True)
     ]
     return Changes(as_of=local_iso(now) or "", since=local_iso(since) or "", changes=out)
+
+
+# --- goals (D079) -----------------------------------------------------------------------------
+
+
+class RulesOut(_Out):
+    reteach_below: int
+    practice_below: int
+    review_ladder_days: list[int]
+    on_plan_share: float
+    on_plan_weeks: int
+
+
+class ChangeOut(_Out):
+    kind: Literal["none", "pace", "method", "length"]
+    what: str
+    why: str
+
+
+class MilestoneOut(_Out):
+    id: str
+    title: str
+    status: Literal["done", "current", "next"]
+    done_when: str | None
+
+
+class NextOut(_Out):
+    what: str
+    done_when: str | None
+
+
+class SessionOut(_Out):
+    what: str
+    start: str = Field(description="ISO 8601, America/New_York offset")
+    minutes: int
+    state: Literal["scheduled", "done", "not_done", "dropped", "moved"]
+    done_when: str | None
+
+
+class WeekOut(_Out):
+    focus: str | None
+    target_minutes: int
+    target_source: Literal["plan", "scheduled"]
+    sessions_tracked: bool = Field(description="False when FlowSavvy isn't connected to Argus")
+    done_minutes: int | None
+    scheduled_minutes: int | None
+    sessions_planned: int | None
+    sessions_done: int | None
+    sessions: list[SessionOut]
+    dropped: list[SessionOut]
+    moved: list[SessionOut]
+
+
+class OnPlanOut(_Out):
+    streak_weeks: int
+    may_grow: bool
+    last_share: float | None
+
+
+class TopicOut(_Out):
+    id: str
+    title: str
+    last_score: int | None
+    last_method: str | None
+    due: str | None = Field(description="Next review date (local, YYYY-MM-DD)")
+    overdue: bool
+
+
+class TopicsOut(_Out):
+    reteach: list[TopicOut]
+    practice: list[TopicOut]
+    review_due: list[TopicOut]
+    review_later: list[TopicOut]
+    kept: list[TopicOut]
+    next_new: list[TopicOut]
+
+
+class TrendOut(_Out):
+    week: str
+    done_minutes: int
+    target_minutes: int
+    partial: bool
+
+
+class GoalOut(_Out):
+    tag: str
+    status: Literal["active", "paused", "done"]
+    aim: str
+    why: str | None
+    track: list[MilestoneOut]
+    current: str | None
+    next_milestone: str | None
+    next: list[NextOut]
+    week: WeekOut | None
+    on_plan: OnPlanOut | None
+    topics: TopicsOut
+    trend: list[TrendOut]
+
+
+class ProblemOut(_Out):
+    path: str
+    line: int | None
+    field: str
+    message: str
+
+
+class GoalsFeed(_Out):
+    as_of: str
+    week: str
+    week_start: str
+    rules: RulesOut
+    change: ChangeOut | None
+    week_plan_missing: bool
+    goals: list[GoalOut]
+    problems: list[ProblemOut]
+
+
+def _session_out(s: Session, state: str) -> SessionOut:
+    return SessionOut(
+        what=s.what,
+        start=local_iso(s.start_at) or "",
+        minutes=s.minutes,
+        state=state,
+        done_when=s.done_when,
+    )
+
+
+def _topic_out(s: TopicState) -> TopicOut:
+    return TopicOut(
+        id=s.topic.id,
+        title=s.topic.title,
+        last_score=s.last_score,
+        last_method=s.last_method,
+        due=s.due.isoformat() if s.due else None,
+        overdue=s.overdue,
+    )
+
+
+def _week_out(p: WeekProgress | None, plan: WeekDoc | None, tag: str) -> WeekOut | None:
+    if p is not None:
+        return WeekOut(
+            focus=p.focus,
+            target_minutes=p.target_minutes,
+            target_source=p.target_source,
+            sessions_tracked=True,
+            done_minutes=p.done_minutes,
+            scheduled_minutes=p.scheduled_minutes,
+            sessions_planned=p.sessions_planned,
+            sessions_done=p.sessions_done,
+            sessions=[
+                _session_out(r.session, r.state)
+                for r in p.rows
+                if r.state in ("done", "scheduled", "not_done")
+            ],
+            dropped=[_session_out(s, "dropped") for s in p.dropped],
+            moved=[_session_out(s, "moved") for s in p.moved],
+        )
+    planned = plan.goals.get(tag) if plan else None
+    if planned is None:
+        return None
+    return WeekOut(
+        focus=planned.focus,
+        target_minutes=planned.target_minutes,
+        target_source="plan",
+        sessions_tracked=False,
+        done_minutes=None,
+        scheduled_minutes=None,
+        sessions_planned=planned.sessions,
+        sessions_done=None,
+        sessions=[],
+        dropped=[],
+        moved=[],
+    )
+
+
+def goals(
+    conn: sqlite3.Connection, config: AppConfig, *, sessions_on: bool, now: datetime, weeks: int = 4
+) -> GoalsFeed:
+    """Goals, this week's plan and progress, and what to study next, by the student's own rules.
+    The facts the morning planner schedules from (D079)."""
+    rules = config.goals.rules.as_rules() if config.goals else GoalRules()
+    folder = config.goals.folder if config.goals else "Goals"
+    gs = goal_set(conn)
+    goal_map, week_docs = gs.goals, gs.weeks
+    this_week = week_of(now)
+    monday = week_monday(this_week)
+    keys = [week_key(monday - timedelta(weeks=i)) for i in reversed(range(weeks))]
+    plan = week_docs.get(this_week)
+    problems = [
+        ProblemOut(path=d.path, line=d.error.line, field=d.error.path, message=d.error.message)
+        for d in gs.stored
+        if d.error is not None
+    ]
+    problems += [
+        ProblemOut(path=path, line=e.line, field=e.path, message=e.message)
+        for path, e in gs.dupes.items()
+        if all(d.error is None for d in gs.stored if d.path == path)
+    ]
+    if plan is not None:
+        valid = {tag: g for tag, (_, g) in goal_map.items()}
+        problems += [
+            ProblemOut(
+                path=f"{folder}/Weeks/{this_week}.md", line=e.line, field=e.path, message=e.message
+            )
+            for e in week_problems(plan, valid)
+        ]
+    sessions = (
+        repo.goal_sessions_between(conn, week_bounds(keys[0])[0], week_bounds(this_week)[1])
+        if sessions_on
+        else []
+    )
+    today = to_local(now).date()
+    tests = [t for w in week_docs.values() for t in w.tests if t.date <= today]
+    out: list[GoalOut] = []
+    for tag in order_goals(goal_map, plan):
+        _, g = goal_map[tag]
+        progress = (
+            [week_progress(tag, k, week_docs.get(k), sessions, now) for k in keys]
+            if sessions_on
+            else []
+        )
+        states = topic_states(g, tests, today, rules)
+        by_status = {
+            s: [_topic_out(t) for t in states if t.status == s]
+            for s in ("reteach", "practice", "review_due", "review_later", "kept")
+        }
+        op = None
+        if sessions_on:
+            history = on_plan_history(progress, week_docs)
+            o = on_plan(history, rules)
+            op = OnPlanOut(streak_weeks=o.streak, may_grow=o.may_grow, last_share=o.last_share)
+        out.append(
+            GoalOut(
+                tag=tag,
+                status=g.status,
+                aim=g.aim,
+                why=g.why,
+                track=[
+                    MilestoneOut(id=m.id, title=m.title, status=m.status, done_when=m.done_when)
+                    for m in g.track
+                ],
+                current=g.current.id if g.current else None,
+                next_milestone=g.next_milestone.id if g.next_milestone else None,
+                next=[NextOut(what=n.what, done_when=n.done_when) for n in g.next],
+                week=_week_out(progress[-1] if progress else None, plan, tag),
+                on_plan=op,
+                topics=TopicsOut(**by_status, next_new=[_topic_out(t) for t in next_new(states)]),
+                trend=[
+                    TrendOut(
+                        week=p.week,
+                        done_minutes=p.done_minutes,
+                        target_minutes=p.target_minutes,
+                        partial=p.partial,
+                    )
+                    for p in (trend(tag, sessions, week_docs, now, weeks) if sessions_on else ())
+                ],
+            )
+        )
+    return GoalsFeed(
+        as_of=local_iso(now) or "",
+        week=this_week,
+        week_start=monday.isoformat(),
+        rules=RulesOut(
+            reteach_below=rules.reteach_below,
+            practice_below=rules.practice_below,
+            review_ladder_days=list(rules.review_ladder_days),
+            on_plan_share=rules.on_plan_share,
+            on_plan_weeks=rules.on_plan_weeks,
+        ),
+        change=(
+            ChangeOut(kind=plan.change.kind, what=plan.change.what, why=plan.change.why)
+            if plan is not None and plan.change is not None
+            else None
+        ),
+        week_plan_missing=plan is None,
+        goals=out,
+        problems=problems,
+    )

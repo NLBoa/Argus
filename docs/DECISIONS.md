@@ -863,3 +863,57 @@ changed `runna.preferred_time` reaches runs already stored.
 - gitleaks rule `runna-ical-feed` (`cal\.runna\.com/[A-Za-z0-9_-]{20,}`) makes a leaked feed URL detectable, and the
   log redactor has a `cal.runna.com/<token>` pattern as a backstop. Test URLs use short tokens (`FAKEFEED`).
 - Runbook: don't also subscribe FlowSavvy's calendar to the feed, or a timed run is both busy time and a task.
+
+## D079 — Goals page, goal files, and FlowSavvy sessions (2026-11-07)
+**Decision.** A read-only **Goals** page (More → Goals, `/goals`) for the student's "get good at X" goals: each goal's
+aim, track (done, current, next), next steps, this week's sessions planned vs done and what got dropped, 4-week
+trends, weekend test scores by topic with what's due for review, and the week's one change. Goals come from files in
+the vault; sessions come from FlowSavvy's API; the morning planner reads the merged view through a new read-only
+connector tool, `get_goals`. A line on Today names goal sessions still to come today, and Argus's weekly note gets a
+Goals section. No AI anywhere.
+**Why.** The goals lived in FlowSavvy and the student's head, so they were recorded but nothing guided the week.
+
+**Where goals live: vault files.** `Goals/<Tag>.md` (one `argus-goal` YAML block: aim, why, status, track, next,
+topics) and `Goals/Weeks/YYYY-Www.md` (one `argus-week` block: the change, each goal's focus/target/sessions, the
+weekend tests). The student edits them in Obsidian or through the Saturday review in Claude Code on the Mac. Argus
+only reads them: the vault cycle reads `Goals/` right after its pull (like `Argus/Inbox/`, D038), and `VaultWriter`
+refuses that folder. Rejected: Argus tables with a form (a second editing surface, and nothing outside the Pi could
+write them; the connector is read-only, D073).
+- **Validation** (`domain/goals.py`): strict pydantic models plus checks (one current milestone, done → current →
+  next order, ≤3 next steps, prerequisites exist and don't cycle, week = file name, test dates inside the week, a tag
+  used once). Errors name the vault line and field in plain English. `argus check-goals` runs the same reading on the
+  Mac, with no config or secrets.
+- **Last good version.** `goal_docs` (migration 0015) keeps each file's last valid parse beside its current error,
+  so one bad write never blanks the page; the status line says "Projects.md has an error on line 14". A deleted file
+  leaves the page; its sessions stay. Week files naming unknown goals or topics are flagged when the page builds.
+
+**How progress gets in: Argus reads FlowSavvy.** FlowSavvy has a public REST API on the Pro plan (Bearer key,
+`flowsavvy_api_key`). Every 30 minutes (:21/:51) the collector reads `/api/schedule` for last, this, and next week
+(plus three earlier weeks once, for trends) and `/api/items` incrementally for each tagged task's "Done when:" line.
+Tasks titled `[Tag] what` for a known tag become `goal_sessions`; a task's split parts are summed; a repeating
+occurrence is keyed `itemId@occurrenceDate`. It sends **GET only** (the key has no read-only scope; a test enforces
+it), never retries a 429 (limits are shared with the student's app), and stores only the "Done when:" line of notes.
+- **Moved vs dropped.** A session missing from the schedule is never dropped on absence alone. `GET /api/items/{id}`
+  decides: 404 or a cancelled occurrence → dropped; still there and not done → moved (including pushed past the
+  window); completed → done; a failed lookup decides nothing until the next sync. At most 10 lookups per sync.
+- "Done minutes" are the scheduled length of done sessions: the API has no completion time.
+
+**The rules** (`planner/goals.py`, numbers in `goals.rules`, tunable): a topic's latest score below `reteach_below`
+(60) → re-teach with a method other than the last; below `practice_below` (80) → practice; otherwise the review
+ladder: due `review_ladder_days` (7, 14, 28) after the latest passing test, by how many passes in a row, and kept
+after the last step; any score below `practice_below` resets it. New topics need every prerequisite passed. A finished
+week is on plan at `on_plan_share` (0.8) of its target; time may grow after `on_plan_weeks` (2) such weeks in a row.
+Weeks are ISO Monday–Sunday in New York time. A test dated after today doesn't count yet.
+
+**Hidden, not empty (D055).** `Feature.GOALS` needs the `goals:` block; the page, nav link, palette entry, `g o`, the
+Today line, and the weekly section also need a goal file (otherwise `/goals` is a 404). `Feature.GOAL_SESSIONS` also
+needs the key; without it the page shows goals, tracks, targets, and tests, but no sessions or trends. `get_goals` is
+registered whenever the `goals:` block is set and returns `goals: []` until files exist: the server is built once at
+startup, and an empty list reads as "not set up yet" where a missing tool reads as a failure.
+
+**Week 1.** With no history the page still shows each goal, its track and next steps, this week's sessions, and the
+first new topics; trends say "Trends start when week N ends", and on-plan says it starts after Sunday.
+
+**Not verified yet** (the plan's Task 0): the real key shape (so no gitleaks rule yet; the redactor masks the value),
+whether completed blocks stay in `/api/schedule`, how a completed or skipped repeating occurrence appears, and
+`modifiedAfter` semantics. The fixtures follow the published OpenAPI spec.

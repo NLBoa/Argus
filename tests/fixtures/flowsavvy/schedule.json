@@ -1,0 +1,13 @@
+{
+  "scheduleItems": [
+    {"itemId": "t-mon", "itemType": "task", "title": "[Woodwork] Practice dovetails", "startTime": "2026-11-09T19:00:00", "endTime": "2026-11-09T20:00:00", "allDay": false, "completed": true, "thisPartCompleted": true, "isAutoScheduled": true, "occurrenceDate": null, "url": "https://my.flowsavvy.app/i/t-mon"},
+    {"itemId": "t-split", "itemType": "task", "title": "[Woodwork] Long build", "startTime": "2026-11-14T10:00:00", "endTime": "2026-11-14T11:00:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": true, "occurrenceDate": null, "url": null},
+    {"itemId": "t-split", "itemType": "task", "title": "[Woodwork] Long build", "startTime": "2026-11-14T13:00:00", "endTime": "2026-11-14T13:30:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": true, "occurrenceDate": null, "url": null},
+    {"itemId": "r-weekend", "itemType": "task", "title": "[Spanish]   Weekend session ", "startTime": "2026-11-14T15:00:00", "endTime": "2026-11-14T16:00:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": false, "occurrenceDate": "2026-11-14", "url": null},
+    {"itemId": "t-late", "itemType": "task", "title": "[Woodwork] Late sanding", "startTime": "2026-11-01T23:30:00", "endTime": "2026-11-02T00:15:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": true, "occurrenceDate": null, "url": null},
+    {"itemId": "c-hw", "itemType": "task", "title": "[CMSC351] HW3", "startTime": "2026-11-13T19:00:00", "endTime": "2026-11-13T20:00:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": true, "occurrenceDate": null, "url": null},
+    {"itemId": "plain", "itemType": "task", "title": "Groceries", "startTime": "2026-11-13T17:00:00", "endTime": "2026-11-13T17:30:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": true, "occurrenceDate": null, "url": null},
+    {"itemId": "e-class", "itemType": "event", "title": "[Woodwork] Evening class", "startTime": "2026-11-11T18:00:00", "endTime": "2026-11-11T20:00:00", "allDay": false, "completed": false, "thisPartCompleted": false, "isAutoScheduled": false, "occurrenceDate": null, "url": null},
+    {"itemId": "t-allday", "itemType": "task", "title": "[Woodwork] Wood shopping", "startTime": "2026-11-15T00:00:00", "endTime": "2026-11-16T00:00:00", "allDay": true, "completed": false, "thisPartCompleted": false, "isAutoScheduled": false, "occurrenceDate": null, "url": null}
+  ]
+}

@@ -249,3 +249,23 @@ def test_today_weekly_and_proposals() -> None:
     assert "```diff\n-a\n+b\n```" in one
     two = render.proposals_note([(1, "a.md", "r", "d"), (2, "b.md", "r", "d")], None).regions[0][1]
     assert "2 notes" in two and "dashboard's Proposals page" in two
+
+
+def test_weekly_note_goals_section() -> None:  # D079
+    day = date(2026, 11, 12)
+    lines = [
+        "Projects: React. 120 of 300 min, 2 of 4 sessions.",
+        "Change this week: none (Baseline week).",
+    ]
+    summary = dict(render.weekly_note(day, [], [], goals=lines).regions)["summary"]
+    assert summary.endswith(
+        "\n\n## Goals\n\n- Projects: React. 120 of 300 min, 2 of 4 sessions.\n"
+        "- Change this week: none (Baseline week)."
+    )
+
+
+def test_weekly_note_without_goals_is_unchanged() -> None:
+    day = date(2026, 11, 12)
+    assert render.weekly_note(day, [], [], goals=()) == render.weekly_note(day, [], [])
+    summary = dict(render.weekly_note(day, [], []).regions)["summary"]
+    assert "## Goals" not in summary

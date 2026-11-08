@@ -8,6 +8,7 @@
 <div class="page-head">
   <h1 class="page-title page-title--quiet">{{ data.date_text }}</h1>
   <p class="page-sub">{{ data.summary }}</p>
+  {% if data.goal_line %}<p class="page-sub today-goal" data-requires="goal_sessions">{{ data.goal_line }} <a href="/goals">Goals</a></p>{% endif %}
   <a class="btn page-head__action" href="/tasks/new">{{ icon("plus", "icon-sm") }}Add a task</a>
 </div>
 {#- D072: what's due, in order, filed by the day it's worked on. Argus doesn't rank it. -#}

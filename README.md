@@ -27,6 +27,7 @@ contents. Design notes: [D073](docs/DECISIONS.md).
 | `list_courses()` | `courses`: `code`, `name`, and `meetings` (`kind`, `days` like `["Tue","Thu"]`, `start`/`end` local `HH:MM`, `location`) |
 | `get_upcoming_work(days=14)` | `items` due in the next `days` (1–60), soonest first, **plus** work up to 7 days past due that isn't done (`overdue: true`). A run is listed only until its day ends. Also `as_of`. |
 | `get_changes(since)` | `changes`: items that are new, had their due date moved, or were removed after `since` (ISO 8601 with an offset). Also `as_of`: pass it as the next `since`. |
+| `get_goals()` | Only with a `goals:` block (D079). `goals`: each goal's `aim`, `track` (done/current/next), `next` steps, this `week` (focus, target, and FlowSavvy sessions done, scheduled, dropped, moved when the key is set), `on_plan.may_grow`, and `topics` sorted by the rules in `rules` (re-teach, practice, review due, next new). Also `change` (the week's one change) and `problems` (goal files with errors). Empty `goals` until goal files exist. |
 
 Each item has these fields:
 
