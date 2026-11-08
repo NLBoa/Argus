@@ -15,10 +15,13 @@ from datetime import datetime, time, timedelta
 from argus.config import RUN_CODE, RUN_TITLE, AppConfig
 from argus.domain.changes import ChangeEvent, ChangeKind
 from argus.domain.findings import ItemRef
+from argus.domain.goals import DocError, GoalDoc, WeekDoc
 from argus.domain.merge import merge_sources, resolve_item
 from argus.domain.models import (
     AuthorRole,
     CourseInfo,
+    GoalSessionGone,
+    GoalSessionRecord,
     GradeRecord,
     Item,
     ItemKind,
@@ -39,6 +42,7 @@ from argus.domain.models import (
 )
 from argus.domain.status import StatusFacts, derive_status
 from argus.logging import get_logger
+from argus.planner.goals import Session
 from argus.planner.queue import Pref
 from argus.planner.windows import WorkWindow
 from argus.store.db import iso, iso_or_none, parse_iso, parse_iso_or_none, transaction
@@ -2310,3 +2314,219 @@ def convert_legacy_blocks(conn: sqlite3.Connection, now: datetime) -> int | None
         (iso(now), iso(now)),
     )
     return added
+
+
+# ---------------------------------------------------------------- goals (D079)
+
+
+@dataclass(frozen=True, slots=True)
+class StoredGoalDoc:
+    path: str
+    kind: str  # "goal" | "week"
+    good: GoalDoc | WeekDoc | None  # the last valid parse
+    good_at: datetime | None
+    error: DocError | None  # the file's current problem
+    read_at: datetime
+
+
+def upsert_goal_doc(
+    conn: sqlite3.Connection,
+    *,
+    path: str,
+    kind: str,
+    text_hash: str,
+    parsed: GoalDoc | WeekDoc | None,
+    error: DocError | None,
+    now: datetime,
+) -> None:
+    """Record a read of a goal or week file. A valid parse replaces the stored version; an error
+    keeps the last valid one beside it, so one bad write never blanks the page."""
+    if parsed is not None:
+        key = parsed.tag if isinstance(parsed, GoalDoc) else parsed.week
+        conn.execute(
+            """INSERT INTO goal_docs (path, kind, doc_key, text_hash, good_json, good_at, error,
+                                      error_line, error_path, read_at, missing_since)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL)
+               ON CONFLICT (path) DO UPDATE SET kind = excluded.kind, doc_key = excluded.doc_key,
+                 text_hash = excluded.text_hash, good_json = excluded.good_json,
+                 good_at = excluded.good_at, error = NULL, error_line = NULL, error_path = NULL,
+                 read_at = excluded.read_at, missing_since = NULL""",
+            (path, kind, key, text_hash, parsed.model_dump_json(), iso(now), iso(now)),
+        )
+        return
+    assert error is not None
+    conn.execute(
+        """INSERT INTO goal_docs (path, kind, text_hash, error, error_line, error_path, read_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (path) DO UPDATE SET text_hash = excluded.text_hash,
+             error = excluded.error, error_line = excluded.error_line,
+             error_path = excluded.error_path, read_at = excluded.read_at, missing_since = NULL""",
+        (path, kind, text_hash, error.message, error.line, error.path, iso(now)),
+    )
+
+
+def touch_goal_doc(conn: sqlite3.Connection, path: str, now: datetime) -> None:
+    """The file is unchanged since the last read."""
+    conn.execute(
+        "UPDATE goal_docs SET read_at = ?, missing_since = NULL WHERE path = ?", (iso(now), path)
+    )
+
+
+def goal_doc_hashes(conn: sqlite3.Connection) -> dict[str, str]:
+    return {
+        r["path"]: r["text_hash"]
+        for r in conn.execute("SELECT path, text_hash FROM goal_docs WHERE missing_since IS NULL")
+    }
+
+
+def mark_goal_docs_missing(conn: sqlite3.Connection, present: set[str], now: datetime) -> None:
+    stored = [
+        r["path"] for r in conn.execute("SELECT path FROM goal_docs WHERE missing_since IS NULL")
+    ]
+    gone = [p for p in stored if p not in present]
+    conn.executemany(
+        "UPDATE goal_docs SET missing_since = ? WHERE path = ?", [(iso(now), p) for p in gone]
+    )
+
+
+def _goal_doc(row: sqlite3.Row) -> StoredGoalDoc:
+    good: GoalDoc | WeekDoc | None = None
+    if row["good_json"] is not None:
+        model: type[GoalDoc] | type[WeekDoc] = GoalDoc if row["kind"] == "goal" else WeekDoc
+        try:
+            good = model.model_validate_json(row["good_json"])
+        except ValueError:
+            log.warning("stored goal doc no longer parses", extra={"path": row["path"]})
+    error = (
+        DocError(row["error_line"], row["error_path"] or "", row["error"])
+        if row["error"] is not None
+        else None
+    )
+    return StoredGoalDoc(
+        path=row["path"],
+        kind=row["kind"],
+        good=good,
+        good_at=parse_iso_or_none(row["good_at"]),
+        error=error,
+        read_at=parse_iso(row["read_at"]),
+    )
+
+
+def goal_docs(conn: sqlite3.Connection) -> list[StoredGoalDoc]:
+    """Goal and week files currently in the vault, by path."""
+    rows = conn.execute("SELECT * FROM goal_docs WHERE missing_since IS NULL ORDER BY path")
+    return [_goal_doc(r) for r in rows]
+
+
+def has_goal_docs(conn: sqlite3.Connection) -> bool:
+    """Any goal file in the vault, valid or not: the goals page exists (D055, D079)."""
+    row = conn.execute(
+        "SELECT 1 FROM goal_docs WHERE kind = 'goal' AND missing_since IS NULL LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
+def goal_tags(conn: sqlite3.Connection) -> set[str]:
+    """Tags of goal files with a valid version: FlowSavvy sessions are kept only for these."""
+    rows = conn.execute(
+        """SELECT doc_key FROM goal_docs
+           WHERE kind = 'goal' AND missing_since IS NULL AND good_json IS NOT NULL"""
+    )
+    return {r["doc_key"] for r in rows}
+
+
+def apply_goal_sessions(
+    conn: sqlite3.Connection,
+    records: Iterable[GoalSessionRecord],
+    gone: Iterable[GoalSessionGone],
+    *,
+    known_tags: set[str],
+    now: datetime,
+) -> int:
+    """Store FlowSavvy sessions for known goal tags, and what lookups said about missing ones.
+    Absence alone never drops a session (D079): only a `GoalSessionGone` does."""
+    kept = [r for r in records if r.tag in known_tags]
+    conn.executemany(
+        """INSERT INTO goal_sessions (external_id, tag, what, start_at, end_at, minutes, completed,
+                                      done_when, first_seen, last_seen, raw_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (external_id) DO UPDATE SET tag = excluded.tag, what = excluded.what,
+             start_at = excluded.start_at, end_at = excluded.end_at, minutes = excluded.minutes,
+             completed = excluded.completed,
+             done_when = COALESCE(excluded.done_when, goal_sessions.done_when),
+             last_seen = excluded.last_seen, gone_at = NULL, moved_at = NULL,
+             raw_hash = excluded.raw_hash""",
+        [
+            (
+                r.external_id,
+                r.tag,
+                r.what,
+                iso(r.start_at),
+                iso(r.end_at),
+                r.minutes,
+                int(r.completed),
+                r.done_when,
+                iso(now),
+                iso(now),
+                r.raw_hash,
+            )
+            for r in kept
+        ],
+    )
+    for g in gone:
+        if g.reason == "completed":
+            conn.execute(
+                "UPDATE goal_sessions SET completed = 1 WHERE external_id = ?", (g.external_id,)
+            )
+        elif g.reason == "moved":
+            conn.execute(
+                """UPDATE goal_sessions SET moved_at = COALESCE(moved_at, ?)
+                   WHERE external_id = ? AND completed = 0 AND gone_at IS NULL""",
+                (iso(now), g.external_id),
+            )
+        else:
+            conn.execute(
+                """UPDATE goal_sessions SET gone_at = COALESCE(gone_at, ?), moved_at = NULL
+                   WHERE external_id = ? AND completed = 0""",
+                (iso(now), g.external_id),
+            )
+    return len(kept)
+
+
+def open_goal_session_ids(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> dict[str, datetime]:
+    """Open sessions starting in [start, end): the ones to look up if a fetch no longer lists
+    them."""
+    rows = conn.execute(
+        """SELECT external_id, start_at FROM goal_sessions
+           WHERE completed = 0 AND gone_at IS NULL AND moved_at IS NULL
+             AND start_at >= ? AND start_at < ? ORDER BY start_at""",
+        (iso(start), iso(end)),
+    )
+    return {r["external_id"]: parse_iso(r["start_at"]) for r in rows}
+
+
+def goal_sessions_between(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> list[Session]:
+    rows = conn.execute(
+        """SELECT * FROM goal_sessions WHERE start_at >= ? AND start_at < ?
+           ORDER BY start_at, external_id""",
+        (iso(start), iso(end)),
+    )
+    return [
+        Session(
+            external_id=r["external_id"],
+            tag=r["tag"],
+            what=r["what"],
+            start_at=parse_iso(r["start_at"]),
+            end_at=parse_iso(r["end_at"]),
+            minutes=r["minutes"],
+            completed=bool(r["completed"]),
+            done_when=r["done_when"],
+            gone_at=parse_iso_or_none(r["gone_at"]),
+            moved_at=parse_iso_or_none(r["moved_at"]),
+        )
+        for r in rows
+    ]
