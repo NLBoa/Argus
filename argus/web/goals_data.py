@@ -166,6 +166,7 @@ class TrendBar:
     partial: bool
     done_pct: float  # of the row's scale
     target_pct: float
+    empty: bool = False  # before the goal had any data: a dash, not a zero
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,6 +413,7 @@ def _trend_view(
                     partial,
                     round(100 * done / scale, 2),
                     round(100 * target / scale, 2),
+                    empty=p is None,
                 )
             )
         view_rows.append(TrendRow(tag, accent, bars))

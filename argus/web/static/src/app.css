@@ -568,7 +568,15 @@
   .goal-topics__goal { display: block; font-size: var(--text-xs); color: var(--muted); font-weight: 650; }
   .goals-topics__new { margin-top: 1rem; }
   .goals-topics__list { display: grid; gap: 0.5rem; font-size: var(--text-sm); }
-  @media (min-width: 64rem) and (max-width: 89.99rem) { .goal-topics__week { display: none; } }
+  .goal-topics .data-table td:last-child { white-space: normal; min-width: 9rem; }
+  .goal-topics .goal-status { white-space: normal; align-items: flex-start; }
+  .goal-topics .goal-status .icon { margin-top: 0.15rem; flex: none; }
+  /* Narrow columns keep the topic and what's next; the scores are in each week's file. */
+  @media (max-width: 47.99rem), (min-width: 64rem) and (max-width: 89.99rem) { .goal-topics__week { display: none; } }
+  @media (max-width: 39.99rem) {
+    .goal-session { grid-template-columns: minmax(0, 1fr); }
+    .goal-session .item-row__side { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: baseline; text-align: left; }
+  }
 
   .goals-trends { margin-top: 2rem; }
   .goal-trend { display: grid; gap: 0.75rem; }
@@ -581,6 +589,7 @@
   .goal-trend__col[data-partial="true"] .goal-trend__bar { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
   .goal-trend__target { position: absolute; left: 8%; right: 8%; height: 2px; margin-bottom: -1px; background: var(--ink); }
   .goal-trend__num { font-size: var(--text-xs); color: var(--muted); }
+  .goal-trend__col[data-empty="true"] .goal-trend__plot { border-bottom-style: dashed; }
   .goal-trend__axis { display: grid; grid-template-columns: 6rem repeat(4, minmax(0, 1fr)); gap: 0.75rem; font-size: var(--text-xs); color: var(--muted); text-align: center; }
   @media (forced-colors: active) {
     .goal-meter__done, .goal-key--done { background: CanvasText; }

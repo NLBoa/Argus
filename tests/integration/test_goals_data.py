@@ -366,3 +366,28 @@ def test_weekly_goal_lines(seeded: sqlite3.Connection, tmp_path: object) -> None
 def test_utc_now_is_fine(seeded: sqlite3.Connection, tmp_path: object) -> None:
     cfg = config(tmp_path)
     assert load_goals(seeded, cfg, caps(cfg), NOW.astimezone(UTC)).week_label.startswith("Week 46")
+
+
+def test_weeks_before_a_goal_had_data_are_empty_not_zero(
+    db: sqlite3.Connection, tmp_path: object
+) -> None:
+    put(db, "Goals/Woodwork.md", doc("Woodwork.md"))
+    start = local_datetime(date(2026, 11, 24), 19)  # W48
+    sessions(
+        db,
+        [
+            GoalSessionRecord(
+                "w48", "Woodwork", "x", start, start + timedelta(hours=1), 60, True, None, "h"
+            )
+        ],
+    )
+    cfg = config(tmp_path)
+    page = load_goals(db, cfg, caps(cfg), local_datetime(date(2026, 12, 3), 12))
+    assert page.trend is not None
+    bars = page.trend.rows[0].bars
+    assert [(b.week_label, b.empty) for b in bars] == [
+        ("W46", True),
+        ("W47", True),
+        ("W48", False),
+        ("W49", False),
+    ]

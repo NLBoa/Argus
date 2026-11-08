@@ -28,12 +28,15 @@ from tests.e2e.pages import PAGES
 NO_POSTS = demo_secrets(DemoProfile.NO_CANVAS_TOKEN).model_copy(
     update={"piazza_email": None, "piazza_password": None}
 )
+NO_FLOWSAVVY = demo_secrets(DemoProfile.FULL).model_copy(update={"flowsavvy_api_key": None})
 SETUPS: dict[str, tuple[DemoProfile, Secrets]] = {
     "full": (DemoProfile.FULL, demo_secrets(DemoProfile.FULL)),
     "full-ai": (DemoProfile.FULL, demo_secrets(DemoProfile.FULL)),  # with the demo's AI
     "no-token": (DemoProfile.NO_CANVAS_TOKEN, demo_secrets(DemoProfile.NO_CANVAS_TOKEN)),
     "token-removed": (DemoProfile.FULL, demo_secrets(DemoProfile.NO_CANVAS_TOKEN)),
     "no-posts": (DemoProfile.NO_CANVAS_TOKEN, NO_POSTS),
+    # Goal files without FlowSavvy (D079): the page shows, its session parts don't.
+    "no-flowsavvy": (DemoProfile.FULL, NO_FLOWSAVVY),
 }
 PATHS = sorted({path for _, path, viewports in PAGES if "kiosk" not in viewports} | {"/kiosk"})
 

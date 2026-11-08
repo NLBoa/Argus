@@ -48,14 +48,14 @@
   {% for row in t.rows %}
   <div class="goal-trend__row">
     <p class="goal-trend__tag">{{ row.tag }}</p>
-    <div class="goal-trend__bars" role="img" aria-label="{{ row.tag }}, minutes done by week: {% for b in row.bars %}{{ b.week_label }} {{ b.done }} of {{ b.target }}{{ ' so far' if b.partial }}{{ '; ' if not loop.last }}{% endfor %}">
+    <div class="goal-trend__bars" role="img" aria-label="{{ row.tag }}, minutes done by week: {% for b in row.bars %}{{ b.week_label }} {% if b.empty %}no data{% else %}{{ b.done }} of {{ b.target }}{{ ' so far' if b.partial }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}">
       {% for b in row.bars %}
-      <div class="goal-trend__col" data-partial="{{ 'true' if b.partial else 'false' }}">
+      <div class="goal-trend__col" data-partial="{{ 'true' if b.partial else 'false' }}" data-empty="{{ 'true' if b.empty else 'false' }}">
         <div class="goal-trend__plot">
           <span class="goal-trend__bar" style="height: {{ b.done_pct }}%"></span>
           {% if b.target %}<span class="goal-trend__target" style="bottom: {{ b.target_pct }}%"></span>{% endif %}
         </div>
-        <span class="goal-trend__num tnum">{{ b.done }}</span>
+        <span class="goal-trend__num tnum">{{ "–" if b.empty else b.done }}</span>
       </div>
       {% endfor %}
     </div>
@@ -68,7 +68,7 @@
     <table class="data-table">
       <caption class="visually-hidden">Minutes done and target by week</caption>
       <thead><tr><th scope="col">Goal</th>{% for w in t.week_labels %}<th scope="col">{{ w }}</th>{% endfor %}</tr></thead>
-      <tbody>{% for row in t.rows %}<tr><th scope="row">{{ row.tag }}</th>{% for b in row.bars %}<td class="tnum">{{ b.done }} of {{ b.target }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      <tbody>{% for row in t.rows %}<tr><th scope="row">{{ row.tag }}</th>{% for b in row.bars %}<td class="tnum">{% if b.empty %}–{% else %}{{ b.done }} of {{ b.target }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
     </table>
   </details>
 </div>
