@@ -2493,6 +2493,10 @@ def apply_goal_sessions(
     return len(kept)
 
 
+def has_goal_sessions(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM goal_sessions LIMIT 1").fetchone() is not None
+
+
 def open_goal_session_ids(
     conn: sqlite3.Connection, start: datetime, end: datetime
 ) -> dict[str, datetime]:

@@ -416,6 +416,7 @@ SOURCE_NAMES = {
     "piazza_email": "Piazza email",
     "umdio": "Class schedule",
     "runna_ical": "Runna",
+    "flowsavvy": "FlowSavvy",
 }
 SOURCE_HINTS = {
     "canvas_ical": "Set ARGUS_CANVAS_ICAL_URL (ELMS > Calendar > Calendar Feed).",
@@ -427,6 +428,8 @@ SOURCE_HINTS = {
     "umdio": "Add your courses with section numbers to config.yaml.",
     "runna_ical": "Set ARGUS_RUNNA_ICAL_URL and add a runna: block (Runna > Profile > Connected "
     "Apps & Devices > Calendars > Other Calendar).",
+    "flowsavvy": "Set ARGUS_FLOWSAVVY_API_KEY (FlowSavvy > Settings > Integrations > API, Pro) "
+    "and add a goals: block.",
 }
 STALE_AFTER = {
     "canvas_ical": timedelta(minutes=90),
@@ -437,6 +440,7 @@ STALE_AFTER = {
     "piazza_email": timedelta(minutes=90),
     "umdio": timedelta(days=8),
     "runna_ical": timedelta(minutes=90),
+    "flowsavvy": timedelta(minutes=90),
 }
 
 

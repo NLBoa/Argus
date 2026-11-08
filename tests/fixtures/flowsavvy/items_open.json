@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"itemType": "task", "id": "t-split", "title": "[Woodwork] Long build", "notes": "<p>Goal: Build a bookshelf</p><p>Practice the carcass joints.</p><p><strong>Done when:</strong> carcass glued up square</p>", "completed": false, "dateCreated": "2026-11-01T12:00:00Z", "lastModified": "2026-11-08T12:00:00Z"},
+    {"itemType": "task", "id": "r-weekend", "title": "[Spanish] Weekend session", "notes": "Goal: Talk for 10 minutes<br>Done when: 20 new verbs in sentences", "completed": false, "recurrenceRule": "FREQ=WEEKLY;BYDAY=SA", "cancelledOccurrenceDates": null, "dateCreated": "2026-10-01T12:00:00Z", "lastModified": "2026-10-01T12:00:00Z"},
+    {"itemType": "task", "id": "plain", "title": "Groceries", "notes": "<p>Done when: milk</p>", "completed": false, "dateCreated": "2026-11-01T12:00:00Z", "lastModified": "2026-11-08T12:00:00Z"}
+  ],
+  "nextPageToken": "page2"
+}

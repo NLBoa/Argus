@@ -19,6 +19,8 @@ from argus.config import AppConfig, Secrets
 from argus.domain.models import (
     CompletedRun,
     CourseInfo,
+    GoalSessionGone,
+    GoalSessionRecord,
     GradeRecord,
     MaterialRecord,
     MeetingRecord,
@@ -70,6 +72,9 @@ class CollectResult:
     error: str | None = None
     # Runna (D078): completed workouts whose planned event is gone; the runner matches them.
     completed_runs: tuple[CompletedRun, ...] = ()
+    # FlowSavvy (D079): goal sessions, and what lookups said about sessions the schedule dropped.
+    goal_sessions: tuple[GoalSessionRecord, ...] = ()
+    goal_gone: tuple[GoalSessionGone, ...] = ()
 
     @property
     def record_count(self) -> int:
@@ -80,6 +85,7 @@ class CollectResult:
             + sum(len(m) for m in self.modules.values())
             + len(self.grades)
             + len(self.materials)
+            + len(self.goal_sessions)
         )
 
 
